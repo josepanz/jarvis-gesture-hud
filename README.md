@@ -2,6 +2,8 @@
 
 Control de PC por gestos de mano (cámara web) con feedback de voz tipo "Jarvis", en Python, multiplataforma (Windows/macOS/Linux), sin dependencias pesadas y empaquetable como ejecutable portable.
 
+**Descarga el ejecutable**: cada release en [Releases](https://github.com/josepanz/jarvis-gesture-hud/releases) trae un binario listo para Windows/macOS/Linux — no hace falta instalar Python. Se generan automáticamente (`.github/workflows/release.yml`, ver [ARCHITECTURE.md § Releases](ARCHITECTURE.md#releases)); macOS/Linux quedan sin firmar (ver esa sección para el detalle).
+
 ## Qué hace
 
 - Mueve el mouse con el dedo índice, click/drag con pinch, scroll, zoom.

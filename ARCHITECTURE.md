@@ -300,6 +300,41 @@ budgets, so the answer is no.
   work lands, and where the source doc gave no acceptance criteria, add a short,
   clearly-labeled implementer-added list rather than leaving it unverifiable.
 
+### Releases
+
+Versioning and releases are automated with
+[python-semantic-release](https://python-semantic-release.readthedocs.io/), driven
+by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
+(`.github/workflows/release.yml`):
+
+1. Every commit merged to `main` MUST use a Conventional Commits prefix —
+   `feat:` (minor bump), `fix:`/`perf:` (patch bump), or
+   `docs:`/`refactor:`/`test:`/`chore:`/`build:`/`ci:`/`style:` (no bump, but still
+   included in the changelog). This is a **process change starting on this
+   branch** — commits before it don't follow this convention and semantic-release
+   only looks forward from the last tag, so that's fine.
+2. On push to `main`, the `release` job computes the next version from those
+   commit prefixes, updates `src/jarvis/__init__.py:__version__` and
+   `pyproject.toml:project.version`, appends `CHANGELOG.md`, and creates a git tag
+   + GitHub Release — only if there's something releasable (a `feat`/`fix`/`perf`
+   commit since the last tag).
+3. If a release was created, `build-binaries` builds `Jarvis.exe`/`Jarvis`
+   natively on `windows-latest`/`macos-latest`/`ubuntu-latest` (PyInstaller can't
+   cross-compile — see `build/build_*.sh`/`.ps1`) and attaches each as a downloadable
+   asset on that GitHub Release.
+4. **Known gap, stated plainly rather than overclaimed**: the macOS and Linux
+   binaries are unsigned. macOS Gatekeeper will refuse to run an unsigned binary
+   downloaded from the internet without the user right-clicking → Open (or
+   `xattr -d com.apple.quarantine`) the first time — there's no Apple Developer
+   certificate available to sign/notarize it properly. Linux binaries typically
+   need `chmod +x` after download. Windows is the only platform this project has
+   actually run the packaged `.exe` on and verified (see Status) — the CI build for
+   the other two platforms has not yet been triggered for real (this workflow is
+   new, on an unmerged branch, as of this writing) and should be treated as
+   unverified until a release actually runs it.
+5. `pip install pyinstaller` happens fresh inside each CI job — no local machine
+   dependency, unlike the manual `build/build_*.ps1`/`.sh` scripts.
+
 ## Decisions & rationale
 
 - **Modular refactor over the monolithic prototype.** The original single-file script
