@@ -48,3 +48,42 @@ class CrossPlatformOS:
     @staticmethod
     def volume_mute():
         pyautogui.press("volumemute")
+
+    @staticmethod
+    def foreground_window_title():
+        """TASK-027: best-effort foreground-window title, or None if it can't be
+        determined (unsupported platform, no window focused, missing OS tooling,
+        permission denied, etc.) - never raises."""
+        sys_name = platform.system()
+        try:
+            if sys_name == "Windows":
+                import ctypes
+
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length == 0:
+                    return None
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                return buf.value or None
+            elif sys_name == "Darwin":
+                import subprocess
+
+                script = (
+                    'tell application "System Events" to get name of first '
+                    "application process whose frontmost is true"
+                )
+                result = subprocess.run(
+                    ["osascript", "-e", script], capture_output=True, text=True, timeout=1
+                )
+                return result.stdout.strip() or None
+            elif sys_name == "Linux":
+                import subprocess
+
+                result = subprocess.run(
+                    ["xdotool", "getactivewindow", "getwindowname"], capture_output=True, text=True, timeout=1
+                )
+                return result.stdout.strip() or None
+        except Exception:
+            return None
+        return None

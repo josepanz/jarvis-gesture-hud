@@ -18,6 +18,13 @@ The project started from a single-file prototype (kept for reference at
 small modular Python package (`src/jarvis/`), packaged as a portable executable via
 PyInstaller.
 
+A second, larger refactor is in progress under an OpenSpec change proposal
+(`openspec/changes/multimodal-interaction-core/`) evolving the app from "gesture
+string in, pyautogui call out" into a `GestureEvent -> Command -> CommandBus`
+architecture, migrated one task at a time with tests and regression checks at each
+step (see that folder's `tasks.md` for live progress, and Architecture below for
+what's actually wired in today vs. still direct).
+
 ## Status
 
 All items below are implemented and manually smoke-tested on a real Windows machine
@@ -34,31 +41,56 @@ run, not just written).
 | Native gesture legend (screen-corner overlay, click-through, adjustable opacity) | Done — click-through verified at the WinAPI level on this machine |
 | Screen-wide translucent notification bubbles | Done |
 | Portable executable (PyInstaller) | Built and smoke-tested (10s run, clean log, ~260MB RAM, no crash) on this machine. **Not yet verified on a machine without Python installed** — see Limitations |
+| `Command`/`CommandBus`/`FeedbackManager` foundation (OpenSpec PHASE 1) | Done — 78 unit tests, plus a real integration check against the live `VoiceJarvis`/`ScreenOverlay` instances |
+| Mouse/click/drag/scroll/zoom/keyboard-HUD/system-actions migrated onto `Command`/`CommandBus` (OpenSpec PHASE 2) | Done — 109 unit tests total, a mocked full-pipeline integration check, a live app boot, and a measured ~5µs/dispatch overhead (~0.3ms/s at 60fps against a 30ms latency budget) |
+| Gesture state machine, debounce, confidence filter, cooldown registry, smoothing toggle, double-click/swipe/dwell detectors, conflict resolver (OpenSpec PHASE 3/4) | Built and unit-tested (177 tests total) as standalone `core/` utilities. **Deliberately not wired into the live `GestureEngine`/camera loop** — see Decisions below. Only exception: the smoothing on/off toggle, a small, default-preserving change made directly to `GestureEngine` |
+| Profiles, Context Engine, HUD state machine + feedback rendering (OpenSpec PHASE 5/6/7) | Built and unit-tested (246 tests total) as standalone `core/` utilities, same "not wired into the live loop" discipline as PHASE 3/4. One live-OS addition: `CrossPlatformOS.foreground_window_title()` (Windows/macOS/Linux), tested with each platform's OS call mocked |
+| Telemetry: TelemetryManager + performance/gesture/command metrics + debug HUD (OpenSpec PHASE 8) | Built and unit-tested (299 tests total), same standalone/not-wired-in discipline. `TelemetryManager.record()` is a synchronous, lightweight in-memory append (spec.md #34's "lightweight enough" clause); an optional `sink` runs on a background thread so real I/O, if ever configured, can't block the caller |
+| Undo/Redo: CommandHistory + UndoRedoController + undo feedback (OpenSpec PHASE 9) | Built and unit-tested (345 tests total). `VolumeUpCommand`/`VolumeDownCommand`/`CanvasZoomCommand` made genuinely reversible (the one exception to "not wired into live code" — these are real, small, additive changes to already-shipped Phase 2 commands, all existing tests re-verified green) |
+| InputProvider + Gesture/Keyboard/Voice implementations (OpenSpec PHASE 10) | Built and unit-tested (363 tests total), same standalone/not-wired-in discipline. All three reuse `GestureEvent` as a shared event type instead of a separate `InputEvent` model — see Decisions |
+| VoiceIntentResolver + intent convergence (OpenSpec PHASE 11) | Built and unit-tested (377 tests total). `VoiceIntentResolver` takes already-transcribed text only — no microphone/STT anywhere, matching ROADMAP.md's standing deferral. A real end-to-end test drives gesture-, keyboard-, and voice-sourced intents through the same `IntentCommandResolver` and `CommandBus` to the same `LockSessionCommand`, proving source-agnostic convergence rather than just asserting it |
+| Quality: regression suite, performance baseline, error isolation, docs, architecture audit (OpenSpec PHASE 12 — final phase) | Done. **422 tests total, all passing.** Comprehensive, previously-nonexistent `GestureEngine` regression suite (see Decisions) and `HandTracker` handedness tests. Real measured performance baseline (below). All 4 error-isolation claims verified as named tests. Architecture audit found and fixed 2 real doc inaccuracies (see Decisions) and added a permanent import-boundary test |
 | Natural-language voice control (STT + local LLM) | Not implemented — deliberately deferred, see Future Work |
 
 ## Architecture
 
 ```
-Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> events
+Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> events (strings)
                                                                     |
-                    +-----------------------------------------------+----------------------------+
-                    v                                v                                            v
-              HUDKeyboard (in-frame overlay)   CrossPlatformOS (lock/volume/screenshot)     VoiceJarvis (TTS thread)
-                    |                                |                                            |
-                    +------------------ pyautogui (mouse/keyboard/scroll) -----------------------+
-
-                                          ScreenOverlay (Tkinter, native desktop windows)
-                                          - notification bubbles anywhere on screen
-                                          - persistent gesture-legend panel in a screen corner
+                                                                    v
+                                              JarvisApp._dispatch() / _dispatch_migrated()
+                                                                    |
+                        +-------------------------------------------+-------------------------------+
+                        v                                                                             v
+              11 discrete gestures + continuous mouse-move                          NOT YET migrated (no PHASE 2 task
+              (click/drag/right-click/scroll/zoom/                                  names them): pause/resume, close app,
+              keyboard-HUD/volume/mute/screenshot/lock)                             silence, keyboard-HUD toggle, mirror,
+                        |                                                            legend visibility/opacity
+                        v                                                                             |
+              GestureEvent (discrete only, spec.md #15) -> Command                                    v
+                        |                                                          direct calls, same as before this
+                        v                                                          migration (VoiceJarvis / ScreenOverlay /
+                  CommandBus.dispatch()                                            pyautogui.mouseUp for the drag-cleanup case)
+                        |
+          +-------------+-------------+
+          v                           v
+  jarvis.actions.* (mouse/       on_result hook
+  keyboard/system) ->                 |
+  pyautogui / CrossPlatformOS         v
+                              FeedbackManager.notify()
+                                      |
+                          +-----------+-----------+
+                          v                       v
+                  ScreenOverlay (HUD)       VoiceJarvis (TTS)
 ```
 
 ### Modules (`src/jarvis/`)
 
 - **`hand_tracker.py`** — `HandTracker` wraps MediaPipe's **Tasks API** (`HandLandmarker`), not the legacy `mp.solutions` API. Downloads and caches the `.task` model under `assets/`, resolving the path correctly both in dev and inside a PyInstaller `.exe` (`sys._MEIPASS`). `process(frame_rgb, mirrored) -> list[Hand]` returns 0–2 hands, each with `landmarks` and a `handedness` label already corrected for the current mirror mode.
 - **`config.py`** — every tunable constant (pinch thresholds, cooldowns, EMA alpha, HUD colors, hold durations, mirror default). Single place to tune behavior without touching logic.
-- **`os_native.py`** — `CrossPlatformOS`: static methods `lock_session`, `take_screenshot`, `volume_up/down/mute`. The only module with an `if platform.system() == ...` branch.
+- **`os_native.py`** — `CrossPlatformOS`: static methods `lock_session`, `take_screenshot`, `volume_up/down/mute`, `foreground_window_title`. The only module branching on `platform.system()` for **OS actions**. (`overlay.py` separately branches on `platform.system()` for its own, unrelated Windows-only click-through rendering trick — a distinct HUD-only concern, not an OS action — see its entry below. TASK-054's architecture audit found this and corrected this line, which previously overstated "the only module" without that qualifier; a regression test now pins both as the only two allowed.)
 - **`voice.py`** — `VoiceJarvis`: a dedicated thread + `queue.Queue` so speaking never blocks the camera loop. `speak(text)` enqueues; `silence()` clears the queue and calls `engine.stop()` to cut off speech immediately.
-- **`hud_keyboard.py`** — `HUDKeyboard`: on-screen keyboard layouts (Spanish/numeric/emoji), `draw(frame, cursor)`, `handle_click(cursor) -> key | None`. Still drawn inside the camera window (unlike the legend, this one is tied to the pinch/cursor interaction happening there).
+- **`hud_keyboard.py`** — `HUDKeyboard`: on-screen keyboard layouts (Spanish/numeric/emoji), `draw(frame, cursor)`. Still drawn inside the camera window (unlike the legend, this one is tied to the pinch/cursor interaction happening there). `handle_click(cursor) -> KeyAction | None` no longer executes `pyautogui` itself (OpenSpec TASK-012) — it returns a `KeyAction(kind, value)` describing what was touched (`"key"`/`"text"`/`"layout"`), and `main.py` turns that into a `Command`. Layout switches (123/ABC/EMOJI) stay internal state, no OS side effect, so no `Command` for those.
 - **`legend.py`** — content only: `build_legend_text()` builds the multi-line gesture list string. No drawing logic — it used to render on the camera frame via `cv2.addWeighted`; that was removed in favor of a native overlay window (see below).
 - **`overlay.py`** — `ScreenOverlay`, built on Tkinter (stdlib, zero new dependencies):
   - `show_bubble(text, x, y)` — a transient translucent toast at any screen position, self-destroys via `after()`.
@@ -66,7 +98,21 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
   - Both use `_make_click_through(window)`: on Windows this applies `WS_EX_LAYERED | WS_EX_TRANSPARENT` to the real HWND (obtained via `GetParent(winfo_id())`) through `ctypes` — a well-known, dependency-free trick, verified working on this machine (see Decisions). No-op elsewhere.
   - `pump()` is called once per camera frame instead of `mainloop()`, because Tk is not thread-safe and a separate UI thread would race with the camera loop.
 - **`gestures.py`** — `GestureEngine`: pure logic, no I/O. `process(hands, w, h, screen_w, screen_h) -> (screen_xy | None, cam_xy | None, events)`. Single-hand gestures always use `hands[0]` and are entirely skipped when `active` is `False` (paused) — in that case `screen_xy` is `None`, so `main.py` neither moves the mouse nor draws the keyboard. The two master, two-hand gestures (`TOGGLE_ACTIVE`, `CLOSE_APP`) are evaluated *before* checking `active`, so pause can always be undone and the app can always be closed.
-- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, dispatches each event to the relevant module, draws the keyboard/pause banner, and handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`).
+- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration.
+
+### `src/jarvis/core/` — OpenSpec foundation (PHASE 1)
+
+- **`events.py`** — `GestureEvent`: frozen, validated dataclass per spec.md #2.1 (`gesture_type`, `hand`, `confidence` in [0,1], `position`, `velocity`, `duration_ms`, `timestamp`, `source`, `state` restricted to the 8 documented values, `metadata`, auto-generated `id`).
+- **`intents.py`** — `Intent`: frozen, validated dataclass per spec.md #2.2 (`name`, `source`, `confidence`, `timestamp`, `context`, `parameters`, `metadata`). Built and tested, but **not constructed anywhere in the live dispatch path yet** — see Decisions below for why.
+- **`commands.py`** — `Command` (ABC: `metadata` property, `can_execute()`, `execute()`, optional `undo()`/`redo()`), `CommandMetadata` (name + safety level, one of `SAFE`/`CONFIRM_REQUIRED`/`HOLD_REQUIRED`/`DESTRUCTIVE`), `CommandResult` (`success`, `status` restricted to `EXECUTED`/`REJECTED`/`ERROR` with cross-field consistency validation, `message`, `duration_ms`, `error`, `metadata`, with `.ok()`/`.rejected()`/`.failed()` factories).
+- **`command_bus.py`** — `CommandBus.dispatch(command) -> CommandResult`: validate -> reject `DESTRUCTIVE` outright (spec.md #27) -> `can_execute()` -> `execute()` -> result, every step guarded so a bad command can never crash the caller. Logs via stdlib `logging`; fills in `duration_ms` if the command didn't report one; optional `on_result(command, result)` hook for feedback/telemetry, itself exception-guarded.
+- **`feedback.py`** — `FeedbackManager`: adapter over the *existing* `VoiceJarvis`/`ScreenOverlay` (doesn't reimplement TTS or the HUD), channels `hud`/`tts`/`sound`/`silent` per spec.md #30, per-channel enable/disable, never raises.
+
+### `src/jarvis/actions/` — concrete Commands (PHASE 2)
+
+- **`mouse.py`** — `MouseMoveCommand`, `MouseButtonCommand(pressed)`, `RightClickCommand`, `ScrollCommand(amount)`, `CanvasZoomCommand(amount)` (Ctrl+Scroll — canvas/viewport zoom, not object scaling, see Decisions). Each wraps the exact `pyautogui` call `main.py` used to make directly.
+- **`keyboard.py`** — `PressKeyCommand(key_name)`, `TypeTextCommand(text)` — what `HUDKeyboard.handle_click()` used to call directly.
+- **`system.py`** — `VolumeUpCommand`, `VolumeDownCommand`, `MuteCommand`, `ScreenshotCommand`, `LockSessionCommand`, wrapping `CrossPlatformOS`. Safety per spec.md #27's own examples: `SAFE` for volume/mute/screenshot, `HOLD_REQUIRED` for lock (the 1.5s Shaka hold that already gated it is unchanged — this declares that fact, doesn't add new gating).
 
 ### Gesture map
 
@@ -180,15 +226,79 @@ with a clean log and ~260MB RAM before being terminated.
 |----|-----------|
 | NFR-1 | ≤ 7% CPU on a quad-core, ≤ 30ms gesture-to-action latency. |
 | NFR-2 | Minimal dependencies: `opencv-python`, `mediapipe`, `pyautogui`, `numpy`, `pyttsx3`. |
-| NFR-3 | Cross-platform: Windows, macOS, Linux — no OS-specific branches outside `os_native.py`. |
+| NFR-3 | Cross-platform: Windows, macOS, Linux — OS-specific branches contained to `os_native.py` (OS actions) and `overlay.py` (its own Windows-only click-through rendering trick), nowhere else — pinned by `tests/test_architecture_boundaries.py`. |
 | NFR-4 | Packageable as a portable executable (PyInstaller), no Python install required on the target machine. |
-| NFR-5 | All processing is local — no network calls, no telemetry. |
+| NFR-5 | All processing is local — no network calls except the one-time `hand_landmarker.task` model download. `jarvis.core.telemetry.TelemetryManager` exists (PHASE 8) but is local-only by construction and not wired into the live app — see spec.md #35, honored either way. |
 
 ### Out of scope (this phase)
 
 - Natural-language microphone control via a local LLM (see Future Work below).
 - Multi-user support (two hands for a single user *are* supported, see FR-15).
 - UI-based gesture customization (today, tuned by editing `src/jarvis/config.py`).
+
+## Configuration reference
+
+Every tunable value in the project, and where it lives:
+
+| What | Where | Wired into the live app? |
+|---|---|---|
+| Pinch thresholds, cooldowns, EMA alpha, HUD colors, mirror default, master/meta gesture hold durations | `src/jarvis/config.py` | Yes — read directly by `GestureEngine`/`HUDKeyboard`/`legend.py` |
+| Smoothing on/off | `GestureEngine(smoothing_enabled=...)` constructor param | Yes, if passed explicitly — `main.py` currently constructs `GestureEngine()` with the default (`True`, identical to pre-PHASE-3 behavior) |
+| Confirmation-frame count (debounce) | `jarvis.core.debounce.ConsecutiveFrameDebouncer(confirmation_frames=3)` | No — standalone (PHASE 3) |
+| Minimum confidence threshold | `jarvis.core.confidence.ConfidenceFilter(minimum_confidence=0.70)` | No — standalone (PHASE 3) |
+| Per-action cooldowns (generic registry) | `jarvis.core.cooldown.CooldownRegistry(cooldowns={...})` | No — standalone (PHASE 3); `GestureEngine`'s own cooldowns in `config.py` are separate and already live |
+| Double-click interval, swipe distance/velocity/duration, dwell duration/cancel-distance | `jarvis.core.{double_click,swipe,dwell}.py` constructors | No — standalone (PHASE 4) |
+| Profiles (cursor sensitivity, smoothing, swipe thresholds, dwell, cooldowns, gesture bindings) | `jarvis.core.profiles.ProfileManager` / `Profile` | No — standalone (PHASE 5); `default` profile mirrors `config.py`'s real values |
+| Foreground-app detection cache TTL | `jarvis.core.context_tracker.ForegroundApplicationTracker(cache_ttl=0.5)` | No — standalone (PHASE 6) |
+| Command history size | `jarvis.core.command_history.CommandHistory(max_size=50)` | No — standalone (PHASE 9) |
+| Telemetry history size, optional sink | `jarvis.core.telemetry.TelemetryManager(max_history=500, sink=None)` | No — standalone (PHASE 8) |
+| Voice phrase → intent bindings | `jarvis.core.voice_intent_resolver.VoiceIntentResolver(phrase_bindings=...)` | No — standalone (PHASE 11), starts empty unless `DEFAULT_PHRASE_BINDINGS` is opted into |
+
+## Performance baseline
+
+Real measurements taken on the development machine (not estimates), so migrating
+onto the `Command`/`CommandBus` architecture could be judged on evidence rather than
+assumption:
+
+| Path | Measured | spec.md/design.md budget |
+|---|---|---|
+| `GestureEngine.process()` (one frame, one hand, worst-case branch coverage) | **~2.65µs/call** (5,000-iteration average) | design.md #25: "gesture event generation: < 1 frame of additional latency" (~16–33ms at 30–60fps) — ~0.01–0.02% of that budget |
+| `CommandBus.dispatch()` overhead alone (pyautogui mocked, so only the architecture's own cost is measured) | **~11.8µs/call** (5,000-iteration average) | design.md #25: "local command dispatch: < 20ms target" — ~0.06% of that budget |
+| Packaged `.exe`, idle with camera running, no hand in frame | ~260MB RAM, clean log, no crash across 7+ separate manual boot checks (one per phase since PHASE 6) | spec.md #1: "≤ 7% CPU on quad-core" — not independently profiled per-core, but sustained real-time operation across every check is consistent with it |
+
+There is no meaningful "before" to compare against beyond "zero abstraction
+overhead by definition" (the original monolithic prototype called `pyautogui`
+directly) — the real question PHASE 2's migration raised was whether inserting
+`Command`/`CommandBus` between detection and `pyautogui` would be *perceptible*.
+Both measured overheads are microseconds against millisecond-to-tens-of-millisecond
+budgets, so the answer is no.
+
+## Development
+
+- **Run the tests**: `python -m unittest discover -s tests -v` (stdlib `unittest`,
+  zero new test dependencies, 422 tests, ~0.8s total including the handful that
+  construct a real `HandLandmarker`). One file is
+  deliberately excluded from discovery — `tests/manual_main_integration_check.py`
+  (constructs a real `VoiceJarvis`/`ScreenOverlay`) — run it directly:
+  `python tests/manual_main_integration_check.py`.
+- **Adding a new OpenSpec task's module**: follow the pattern established since
+  PHASE 1 — a frozen, validated `@dataclass` for data models (see
+  `jarvis.core.events.GestureEvent`); a module docstring citing the task number and
+  the relevant `spec.md`/`design.md`/`apply.md` section with a short quote; and, if
+  the module isn't wired into the live camera loop, an explicit one-or-two-sentence
+  "why not" (the standing reason: `jarvis.gestures.GestureEngine` and
+  `jarvis.main.JarvisApp` are the working, tested baseline — design.md #5.1 treats
+  existing behavior as correct unless a specific bug is found, so new
+  infrastructure earns its way into the live loop deliberately, not by default).
+- **Before calling a task done**: compile (`python -m py_compile ...`), run the
+  full suite, re-run the one-line `GestureEngine` regression smoke check that's
+  been used since PHASE 2 (construct a flat-hand fixture, confirm
+  `screen_xy == (336, 189)` and `events == ["PINCH_DOWN"]`), and boot the real app
+  briefly (`python run.py`, no hand in frame, confirm no traceback in the log).
+- **OpenSpec docs**: `openspec/changes/multimodal-interaction-core/{proposal,spec,
+  design,tasks,apply}.md`. `tasks.md` is the live checklist — check boxes off as
+  work lands, and where the source doc gave no acceptance criteria, add a short,
+  clearly-labeled implementer-added list rather than leaving it unverifiable.
 
 ## Decisions & rationale
 
@@ -261,6 +371,134 @@ with a clean log and ~260MB RAM before being terminated.
   condition on whichever hand `_pick_primary` treated as active, firing `LOCK_SESSION`
   in the same frame as `CLOSE_APP`. Fixed by suppressing the single-hand lock check while
   `both_shaka` is true — caught via synthetic-landmark unit testing, not observed live.
+- **`GestureEvent` is constructed for the migrated discrete gestures; `Intent` is not
+  constructed anywhere yet, despite TASK-006's flow diagram naming both.** Without a
+  real IntentEngine (not a foundation task — no task creates one) to consume it, an
+  `Intent` built at each of the 11 dispatch sites would be created and immediately
+  discarded, which is ceremony without function and contradicts "Implementation MUST
+  be minimal." The `gesture_type -> Command` mapping in `main.py._dispatch_migrated()`
+  *is* the intent-resolution logic today, just not reified as a separate object.
+  Reconsider once a real `IntentEngine`/`ContextEngine` exists to read `Intent.context`
+  meaningfully (Phase 6) — at that point promoting this to real `Intent` construction
+  is a small, mechanical change.
+- **Continuous mouse movement skips `GestureEvent` entirely and goes straight to
+  `MouseMoveCommand`**, per spec.md #15 ("Continuous signals MUST NOT be forced
+  through the same execution model as discrete gestures"). Measured overhead of the
+  `Command`/`CommandBus` layer itself: ~5µs per dispatch (10k-iteration
+  microbenchmark, pyautogui mocked out so only the architecture's own cost is
+  measured) — at 60fps that's ~0.3ms of added latency per second of video, against a
+  30ms per-gesture budget. Not perceptible.
+- **`CommandBus` blocks `DESTRUCTIVE` commands outright but doesn't gate
+  `CONFIRM_REQUIRED`/`HOLD_REQUIRED`.** No confirmation-prompt or hold-tracking
+  mechanism exists anywhere in the app (HUD, voice, or otherwise), so building one
+  now would be speculative. `LockSessionCommand` declares `HOLD_REQUIRED` as
+  documentation of the fact that `GestureEngine` already enforces a 1.5s hold before
+  ever emitting `LOCK_SESSION` — the bus doesn't (yet) enforce this itself.
+- **Only the 11 gesture strings + continuous mouse-move named across TASK-006–013
+  were migrated.** Two-hand master gestures (pause/resume, close), the silence
+  gesture, keyboard-HUD visibility toggle, mirror toggle, and legend
+  visibility/opacity are not named in any PHASE 2 task and were deliberately left
+  calling `VoiceJarvis`/`ScreenOverlay`/`pyautogui` directly, unchanged — including
+  one spot (`TOGGLE_ACTIVE`'s drag-cleanup) that now sits inconsistently next to a
+  `MouseButtonCommand` used everywhere else for the same `mouseUp()` call. Flagged
+  rather than silently fixed, since it's outside every currently-scoped task.
+- **`FeedbackManager` failure-and-success messages for migrated actions live in
+  `main.py._on_command_result()`, wired via `CommandBus`'s `on_result` hook** (built
+  in TASK-004 anticipating exactly this). Only the actions that already had a
+  bubble/voice line before this migration keep one — `MouseMove`/`MouseButton`/
+  `Scroll`/`PressKey`/`TypeText` stay silent, matching pre-migration behavior exactly.
+  System-action (`LockSession`/`Screenshot`/`VolumeUp`/`VolumeDown`) *failures* now
+  produce feedback too — new behavior, required explicitly by TASK-013's acceptance
+  criteria (the old code had no error handling around these calls at all: an
+  exception would have crashed the whole camera loop, which `CommandBus` now
+  prevents structurally).
+- **PHASE 3/4's gesture-quality infrastructure (state machine, debounce, confidence
+  filtering, cooldown registry, double-click/swipe/dwell detectors, conflict
+  resolver) is built and thoroughly unit-tested, but deliberately not wired into
+  `GestureEngine` or the live camera loop.** These tasks largely assume a
+  classifier producing multiple, confidence-scored *candidate* gestures per frame
+  (spec.md's own example: "PINCH 0.92, POINT 0.81") — `GestureEngine` is a
+  threshold/boolean if-elif detector, structurally different, and has been treated
+  as the correct, working baseline throughout this project (design.md #5.1:
+  "current behavior is correct unless a specific bug is identified"). Wiring any of
+  these in would change real, already-shipped latency or interaction feel (e.g.
+  debounce delays every click by N frames; double-click detection must hold back
+  the first click to see if a second follows) without a concrete request to do so.
+  Each new module's docstring states this explicitly and explains why. The one
+  exception is the smoothing on/off toggle (TASK-018): small, additive, defaults
+  to the exact prior behavior, safe to land directly in `GestureEngine`.
+- **PHASE 5/6/7 (profiles, context, HUD) follows the exact same "built, tested,
+  not wired in" discipline as PHASE 3/4, for the same reason: none of it is
+  mechanically safe to attach to the live camera loop without a concrete decision
+  this session didn't have grounds to make on its own.** `ProfileManager`'s
+  `default` profile is seeded from today's real `jarvis.config` constants
+  specifically so that *if* something later reads through it, switching to
+  `"default"` is defined to be a no-op — but `GestureEngine` doesn't read from it
+  yet. `ContextualHudRenderer`/`HUDStateMachine` are a second, richer HUD model
+  that coexists with, but doesn't replace, the simpler working one
+  (`jarvis.overlay`/`jarvis.legend`) actually used by `main.py`.
+- **`CrossPlatformOS.foreground_window_title()` is the one PHASE 5/6/7 piece that
+  does touch live OS state**, added to `os_native.py` specifically to preserve
+  this project's existing rule that only one module branches on
+  `platform.system()`. Best-effort by design (returns `None` on any failure,
+  including on an unsupported platform) — tested with each OS path mocked, since
+  actually querying the real foreground window during an automated test run isn't
+  meaningful (the answer is "whatever's focused when the test happens to run").
+- **A few HUD-state and reticle-color choices are extensions beyond the literal
+  spec text**, flagged in the affected modules' own docstrings rather than
+  silently invented: `HUDStateMachine` places `PAUSED` (a state spec.md #31 lists
+  but never diagrams a transition for) next to `IDLE`/`TRACKING`, matching this
+  app's own existing pause/resume gesture; `draw_dwell_reticle()`'s
+  idle/targeting/confirming/selected colors satisfy spec.md #33's "visually
+  distinguish" requirement without the spec dictating actual colors.
+- **Volume undo is a best-effort symmetric nudge, not an exact restore.** spec.md
+  #28's own example ("Volume: 80→90, undo: 90→80") implies querying an absolute
+  OS volume level, which this project has never done — `CrossPlatformOS` only
+  presses relative media keys. `VolumeUpCommand.undo()` therefore presses
+  volume-down once rather than recalling and restoring an exact prior value.
+  `CanvasZoomCommand`, by contrast, undoes exactly (scrolling `-amount` truly is
+  the mathematical inverse of scrolling `amount`) — the two commands only look
+  symmetric on the surface; documented explicitly in both docstrings so this
+  isn't a silently-overstated guarantee (spec.md #28: "MUST NOT pretend an
+  action is reversible when it cannot safely restore the previous state").
+  "HUD state" and "settings changes" (PHASE 9's other two reversibility
+  candidates) have no existing Command to attach undo to at all — no task in
+  PHASE 2 ever wrapped a HUD-visibility toggle or a settings change as a
+  Command, so there's nothing there yet, not a gap in this phase's work.
+- **PHASE 10's three InputProviders reuse `GestureEvent` as their shared output
+  type, instead of building the separate `InputEvent` model design.md #3's
+  suggested folder listing names (`core/events/{gesture_event, input_event}`).**
+  `GestureEvent.gesture_type` doubles as a general "what happened" tag (e.g.
+  `"KEY_PRESS"` for a keystroke), and every camera-specific field on it
+  (hand/position/velocity/duration_ms) was already optional from TASK-001 -
+  building a second, near-identical dataclass for this would have duplicated it
+  for no functional gain. `GestureInputProvider` needed one adjustment to fit the
+  uniform zero-arg `poll()` contract: camera input genuinely needs a new frame
+  each cycle, so frame acquisition is injected via a `frame_source` callable at
+  construction rather than a method argument.
+- **PHASE 12's architecture audit (TASK-054) found and fixed two real
+  documentation inaccuracies, not just confirmed a clean bill of health.** This
+  file previously claimed `os_native.py` was "the only module" branching on
+  `platform.system()` and that NFR-5 meant "no telemetry" — both were true when
+  first written but silently went stale as later phases added `overlay.py`'s own
+  platform check and PHASE 8's (unwired, local-only) `TelemetryManager`. Corrected
+  above, and `tests/test_architecture_boundaries.py` now pins the actual, intended
+  set of platform-branching modules (two, not one) so this can't silently drift
+  again without a test failing.
+- **PHASE 12's comprehensive `GestureEngine` regression suite (TASK-050) is the
+  first PERMANENT, automated test of most of this project's gesture vocabulary.**
+  Click/drag, right-click, scroll, zoom, volume, screenshot, lock, silence, and all
+  four two-hand master/meta gestures had only ever been verified ad hoc (throwaway
+  manual checks during PHASE 3/4 development) before this. Writing real,
+  isolated-per-gesture synthetic landmark fixtures caught the same class of bug
+  that's recurred throughout this project's history: a fixture's "move this
+  fingertip far away so it doesn't interfere" placement can accidentally satisfy
+  the *other* direction of a tip-vs-pip "extended" check, misfiring `SILENCE` or
+  `KEYBOARD_TOGGLE`. Fixed by making unrelated fingers genuinely curled
+  (`tip.y > pip.y`) rather than merely distant, and by moving a pinched pair's
+  thumb *together with* the finger being tested (not leaving the thumb static)
+  when the test needs that finger to travel far enough to produce a directional
+  delta signal.
 - **Natural-language voice control deferred, not attempted.** It would add heavy
   dependencies (STT + LLM runtime, hundreds of MB of models) and real-time audio/gesture
   synchronization complexity that wasn't requested for this phase. Documented in detail

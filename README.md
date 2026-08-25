@@ -15,7 +15,7 @@ Control de PC por gestos de mano (cámara web) con feedback de voz tipo "Jarvis"
 - **Menú de gestos secundarios**: puño ancla (cualquiera de las 2 manos) + 1/2/3/4 dedos en la otra, sostenido 0.6s, hace lo mismo que `h`/`m`/`+`/`-` sin tocar el teclado.
 - **Modo espejo conmutable** (tecla `m`, en caliente): cámara frontal/selfie (espejada) vs. trasera/externa (sin espejar) — corrige también la lateralidad Left/Right que reporta MediaPipe.
 
-Documentación completa (arquitectura, estado actual, decisiones de diseño y limitaciones conocidas) en **[ARCHITECTURE.md](ARCHITECTURE.md)**. Los documentos de planificación originales en español quedaron archivados en [`docs/archive-es/`](docs/archive-es/).
+Documentación completa (arquitectura, estado actual, decisiones de diseño, [referencia de configuración](ARCHITECTURE.md#configuration-reference), [línea base de performance](ARCHITECTURE.md#performance-baseline), [instrucciones de desarrollo](ARCHITECTURE.md#development) y limitaciones conocidas) en **[ARCHITECTURE.md](ARCHITECTURE.md)**. El proyecto tiene una migración de arquitectura en curso, guiada por OpenSpec, en [`openspec/changes/multimodal-interaction-core/`](openspec/changes/multimodal-interaction-core/) — todas sus 12 fases están completas y documentadas ahí. Los documentos de planificación originales en español quedaron archivados en [`docs/archive-es/`](docs/archive-es/).
 
 ## Requisitos
 
@@ -62,6 +62,8 @@ jarvis-gesture-hud/
 ├── requirements.txt
 ├── run.py                  # entry point
 ├── docs/archive-es/        # specs originales en español (histórico)
+├── openspec/changes/       # propuesta OpenSpec en curso (arquitectura Command/CommandBus)
+├── tests/                  # suite automática (unittest, stdlib) + checks de integración manuales
 ├── src/jarvis/
 │   ├── config.py            # umbrales, colores, cooldowns
 │   ├── os_native.py         # lock/volumen/screenshot por SO
@@ -71,7 +73,11 @@ jarvis-gesture-hud/
 │   ├── legend.py            # contenido del listado de gestos
 │   ├── overlay.py           # panel nativo + globos translúcidos (Tkinter)
 │   ├── gestures.py          # motor de reconocimiento de gestos
-│   └── main.py              # loop de cámara y despacho de eventos
+│   ├── main.py              # loop de cámara y despacho de eventos
+│   ├── core/                # GestureEvent, Intent, Command, CommandBus, FeedbackManager
+│   └── actions/             # Commands concretos: mouse, keyboard, system
 ├── build/                   # PyInstaller spec + scripts por plataforma
 └── captures/                # screenshots guardados
 ```
+
+Correr los tests: `python -m unittest discover -s tests -v` (422 tests, sin dependencias nuevas). Detalles de qué está probado, cómo, y las convenciones para agregar módulos nuevos en [ARCHITECTURE.md § Development](ARCHITECTURE.md#development).

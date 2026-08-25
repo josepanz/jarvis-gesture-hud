@@ -49,8 +49,9 @@ def _extended_finger_count(pts):
 
 
 class GestureEngine:
-    def __init__(self):
+    def __init__(self, smoothing_enabled=True):
         self.active = True
+        self.smoothing_enabled = smoothing_enabled  # TASK-018: spec.md #7 "smoothing.enabled"
 
         self.prev_x, self.prev_y = 0, 0
         self.was_pinching = False
@@ -78,6 +79,9 @@ class GestureEngine:
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
 
     def _smooth(self, target_x, target_y):
+        if not self.smoothing_enabled:
+            self.prev_x, self.prev_y = target_x, target_y
+            return int(target_x), int(target_y)
         x = config.EMA_ALPHA * target_x + (1 - config.EMA_ALPHA) * self.prev_x
         y = config.EMA_ALPHA * target_y + (1 - config.EMA_ALPHA) * self.prev_y
         self.prev_x, self.prev_y = x, y

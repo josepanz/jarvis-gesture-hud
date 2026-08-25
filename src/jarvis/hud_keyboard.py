@@ -1,11 +1,21 @@
-"""Teclado virtual flotante (HUD) sobre el frame de camara: español, numeros/simbolos, emojis."""
+"""Teclado virtual flotante (HUD) sobre el frame de camara: español, numeros/simbolos, emojis.
+
+TASK-012: handle_click() ya no ejecuta pyautogui directamente - devuelve un KeyAction
+describiendo que se toco, y quien llama (main.py) decide que Command despachar por
+CommandBus. El cambio de layout (123/ABC/EMOJI) sigue siendo estado interno puro, sin
+efecto de SO, asi que no se convierte en Command (ver ARCHITECTURE.md/task report)."""
+
+from collections import namedtuple
 
 import cv2
-import pyautogui
 
 from jarvis import config
 
 _WIDE_KEYS = {"SPACE", "BACKSPACE", "ABC", "123", "EMOJI"}
+
+# kind: "key" (named pyautogui key), "text" (literal character/emoji to type),
+# o "layout" (cambio de layout, ya aplicado internamente - no requiere Command).
+KeyAction = namedtuple("KeyAction", "kind value")
 
 LAYOUTS = {
     "es": [
@@ -60,23 +70,27 @@ class HUDKeyboard:
             )
 
     def handle_click(self, cursor_pt):
-        """Ejecuta la tecla bajo el cursor, si hay. Devuelve True si consumio el click."""
+        """Devuelve el KeyAction bajo el cursor, o None si no hay tecla ahi (o el
+        teclado esta oculto). No ejecuta ningun efecto de SO - eso es responsabilidad
+        de quien reciba el KeyAction (main.py, via Command/CommandBus)."""
         if not self.visible:
-            return False
+            return None
         for key, (x1, y1, x2, y2) in self._key_rects():
             if not (x1 < cursor_pt[0] < x2 and y1 < cursor_pt[1] < y2):
                 continue
             if key == "SPACE":
-                pyautogui.press("space")
+                return KeyAction("key", "space")
             elif key == "BACKSPACE":
-                pyautogui.press("backspace")
+                return KeyAction("key", "backspace")
             elif key == "123":
                 self.current_layout = "num"
+                return KeyAction("layout", "num")
             elif key == "ABC":
                 self.current_layout = "es"
+                return KeyAction("layout", "es")
             elif key == "EMOJI":
                 self.current_layout = "emoji"
+                return KeyAction("layout", "emoji")
             else:
-                pyautogui.write(key)
-            return True
-        return False
+                return KeyAction("text", key)
+        return None
