@@ -29,7 +29,7 @@ run, not just written).
 | Core gesture engine (pointer, click/drag, right-click, scroll, zoom, volume, screenshot, lock) | Done |
 | Voice feedback (offline TTS, Spanish) + silence gesture | Done — tested: engine finds an installed `es-*` voice and speaks/interrupts correctly |
 | Floating virtual keyboard (ES layout, numbers/symbols, emoji) | Done |
-| Two-hand tracking + master gestures (pause/resume, close app) | Done — unit-tested with synthetic landmarks |
+| Two-hand tracking + master gestures (pause/resume, close app, pinch-zoom, secondary-action menu) | Done — unit-tested with synthetic landmarks; testing this way is what caught the Shaka double-fire bug described in Decisions |
 | Mirror-mode toggle (front vs. rear camera) with handedness correction | Done |
 | Native gesture legend (screen-corner overlay, click-through, adjustable opacity) | Done — click-through verified at the WinAPI level on this machine |
 | Screen-wide translucent notification bubbles | Done |
@@ -84,6 +84,8 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Open palm with thumb tucked toward the pinky base | **Voice silence** (interrupts TTS instantly) |
 | Both hands closed fists, held 1.2s | **Pause/resume gesture reading** (works even while paused) |
 | Both hands in Shaka, held 1.5s | **Close Jarvis** (works even while paused) |
+| Both hands pinching (thumb+index), spread apart / brought together | **Canvas zoom** (Ctrl+Scroll) — same action as the single-hand zoom, just a more natural two-hand trigger. Does **not** scale the selected object in a design app; that already works today via a normal single-hand drag on the app's own resize handle. |
+| One hand closed fist (anchor, either hand) + the other showing 1/2/3/4 fingers, held 0.6s | Secondary menu: 1 = toggle gesture legend, 2 = toggle mirror mode, 3 = legend more opaque, 4 = legend more transparent — the same four actions already bound to `h`/`m`/`+`/`-`, now also reachable without touching the keyboard. Debounced: won't repeat while the pose is held, needs to be released and re-formed. |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity.
@@ -169,6 +171,8 @@ with a clean log and ~260MB RAM before being terminated.
 | FR-16 | Two-hand master gesture: both fists held 1.2s toggles gesture reading on/off (also pauses the pointer; the toggle and close gestures still work while paused). |
 | FR-17 | Two-hand master gesture: both hands in Shaka held 1.5s closes the application. |
 | FR-18 | Runtime-togglable mirror mode (`m`) — front (mirrored) vs. rear/external (not mirrored) camera, no restart. |
+| FR-19 | Two-hand pinch gesture (both hands thumb+index pinched, distance between them changing) triggers canvas zoom (Ctrl+Scroll) — not object scaling. |
+| FR-20 | Secondary-action gesture menu: one hand as a closed-fist anchor (either hand) + the other hand showing 1–4 fingers, held 0.6s, mirrors the `h`/`m`/`+`/`-` keyboard shortcuts (legend visibility, mirror mode, legend opacity) as gestures. |
 
 ### Non-functional
 
@@ -230,6 +234,33 @@ with a clean log and ~260MB RAM before being terminated.
   second during normal use; a bubble per event would spam the screen and hurt
   performance (each bubble is a real Tk window). Only discrete, rare events get a
   bubble.
+- **Two-hand pinch reinterpreted as canvas zoom, not object scaling.** A generic "resize
+  the selected object" gesture isn't achievable across arbitrary apps (Photoshop,
+  Illustrator, AutoCAD, Canva) without knowing where that app's resize handle is on
+  screen — and dragging that handle is exactly what the existing single-hand
+  pinch+drag already does, no new gesture needed. What a two-hand pinch *can* honestly
+  and universally do is trigger the same Ctrl+Scroll canvas zoom the single-hand zoom
+  gesture already sends, just with a more natural "spread your hands apart" motion. Kept
+  the same `ZOOM_IN`/`ZOOM_OUT` events and dispatch code — no new action, just a second
+  way to trigger it.
+- **The secondary-action menu is handedness-agnostic on purpose.** It would have been
+  possible to assign "left hand = anchor, right hand = selector," using the handedness
+  correction already built for mirror mode. Instead, either hand can be the fist anchor —
+  simpler, avoids depending on handedness classification confidence at all, and keeps
+  the property (documented earlier) that no *currently implemented* gesture actually
+  needs to know left from right.
+- **Added a "primary hand" continuity heuristic when picking `hands[0]`.** Building the
+  two-hand features surfaced a latent issue: with two hands in frame, MediaPipe doesn't
+  guarantee `hand_landmarks` stays in the same order across frames, so blindly using
+  `hands[0]` for single-hand gestures could make the pointer jump between hands.
+  `GestureEngine._pick_primary()` now picks whichever detected hand is closest to last
+  frame's index-fingertip position, so a resting second hand doesn't steal or jitter the
+  pointer.
+- **Found and fixed a real double-fire bug while testing the close-app gesture.** Holding
+  both hands in Shaka to close the app also happened to satisfy the single-hand Shaka
+  condition on whichever hand `_pick_primary` treated as active, firing `LOCK_SESSION`
+  in the same frame as `CLOSE_APP`. Fixed by suppressing the single-hand lock check while
+  `both_shaka` is true — caught via synthetic-landmark unit testing, not observed live.
 - **Natural-language voice control deferred, not attempted.** It would add heavy
   dependencies (STT + LLM runtime, hundreds of MB of models) and real-time audio/gesture
   synchronization complexity that wasn't requested for this phase. Documented in detail

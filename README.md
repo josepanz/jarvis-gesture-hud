@@ -11,7 +11,8 @@ Control de PC por gestos de mano (cámara web) con feedback de voz tipo "Jarvis"
 - **Gesto de silencio**: mano abierta con el pulgar recogido hacia el meñique interrumpe la voz al instante.
 - **Panel nativo de gestos**: ventana de Windows real anclada a una esquina de la pantalla (no dentro de la ventana de cámara), translúcida, no-clickeable, con transparencia ajustable (`+`/`-`) y toggle de visibilidad (`h`).
 - **Globos translúcidos en toda la pantalla**: al bloquear sesión, sacar captura, silenciar, tocar volumen/zoom, pausar/reanudar o cerrar, aparece un aviso translúcido junto al cursor — no solo dentro de la ventana de cámara.
-- **Hasta 2 manos**, con gestos maestros: 2 puños juntos (1.2s) pausa/reanuda toda la lectura de gestos; 2 manos en Shaka (1.5s) cierra la app.
+- **Hasta 2 manos**, con gestos maestros: 2 puños juntos (1.2s) pausa/reanuda toda la lectura de gestos; 2 manos en Shaka (1.5s) cierra la app; 2 manos pellizcando y separándolas/juntándolas hace zoom de lienzo (no escala el objeto seleccionado — eso ya funciona arrastrando el handle de la app con una mano).
+- **Menú de gestos secundarios**: puño ancla (cualquiera de las 2 manos) + 1/2/3/4 dedos en la otra, sostenido 0.6s, hace lo mismo que `h`/`m`/`+`/`-` sin tocar el teclado.
 - **Modo espejo conmutable** (tecla `m`, en caliente): cámara frontal/selfie (espejada) vs. trasera/externa (sin espejar) — corrige también la lateralidad Left/Right que reporta MediaPipe.
 
 Documentación completa (arquitectura, estado actual, decisiones de diseño y limitaciones conocidas) en **[ARCHITECTURE.md](ARCHITECTURE.md)**. Los documentos de planificación originales en español quedaron archivados en [`docs/archive-es/`](docs/archive-es/).
@@ -35,6 +36,8 @@ Con la ventana de cámara enfocada:
 | `h` | Mostrar/ocultar el panel de gestos |
 | `m` | Alternar modo espejo (frontal/trasera) |
 | `+` / `-` | Más / menos transparencia del panel de gestos |
+
+Todas las teclas tienen gesto equivalente (`q` = 2 manos en Shaka, ver arriba) — ver [ARCHITECTURE.md](ARCHITECTURE.md#gesture-map).
 
 > Primer arranque: descarga una sola vez el modelo `hand_landmarker.task` (~10MB) a `assets/` — mediapipe quitó la API legacy `mp.solutions` de los wheels de Windows desde la 0.10.30, así que `hand_tracker.py` usa la API "Tasks" nueva. Corridas siguientes usan el modelo ya cacheado, sin red.
 

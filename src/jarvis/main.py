@@ -27,6 +27,9 @@ BUBBLE_LABELS = {
     "ZOOM_IN": "🔍 Zoom +",
     "ZOOM_OUT": "🔍 Zoom -",
     "RIGHT_CLICK": "🖱 Click derecho",
+    "TOGGLE_LEGEND": "📋 Panel de gestos",
+    "LEGEND_ALPHA_UP": "🔆 Panel más opaco",
+    "LEGEND_ALPHA_DOWN": "🔅 Panel más transparente",
 }
 
 
@@ -106,6 +109,18 @@ class JarvisApp:
             self.overlay.show_bubble("👋 Cerrando Jarvis", *bubble_at)
             self.voice.speak("Cerrando Jarvis.")
             self.should_quit = True
+        elif event == "TOGGLE_MIRROR":
+            self._toggle_mirror()
+        elif event == "TOGGLE_LEGEND":
+            self.overlay.toggle_legend_visible()
+        elif event == "LEGEND_ALPHA_UP":
+            self.overlay.adjust_legend_alpha(+0.1)
+        elif event == "LEGEND_ALPHA_DOWN":
+            self.overlay.adjust_legend_alpha(-0.1)
+
+    def _toggle_mirror(self):
+        self.mirrored = not self.mirrored
+        self.voice.speak("Modo espejo activado." if self.mirrored else "Modo espejo desactivado.")
 
     def _handle_key(self, key):
         if key == ord("q"):
@@ -113,8 +128,7 @@ class JarvisApp:
         elif key == ord("h"):
             self.overlay.toggle_legend_visible()
         elif key == ord("m"):
-            self.mirrored = not self.mirrored
-            self.voice.speak("Modo espejo activado." if self.mirrored else "Modo espejo desactivado.")
+            self._toggle_mirror()
         elif key in (ord("+"), ord("=")):
             self.overlay.adjust_legend_alpha(+0.1)
         elif key == ord("-"):

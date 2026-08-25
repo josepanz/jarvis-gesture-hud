@@ -3,9 +3,17 @@
 `process()` recibe la lista de manos detectadas en un frame (0-2, ver `hand_tracker.py`)
 y devuelve los eventos detectados. Quien llama (`main.py`) decide que hacer con cada evento.
 
-Gestos maestros (a 2 manos, funcionan incluso si `active` esta en False):
+Gestos a 2 manos (funcionan aunque `active` este en False, salvo el pinch-zoom que
+requiere estar activo para no interferir con la pausa/cierre):
 - 2 puños juntos sostenidos -> "TOGGLE_ACTIVE" (pausa/reanuda TODO lo demas, incluido el puntero).
 - 2 manos en Shaka sostenidas -> "CLOSE_APP".
+- 2 manos pellizcando (pinch), separandolas/juntandolas -> "ZOOM_IN"/"ZOOM_OUT" (Ctrl+Scroll,
+  igual que el zoom de una mano; NO escala el objeto seleccionado, hace zoom del lienzo/vista).
+- Una mano en puño (ancla) + la otra mostrando 1-4 dedos, sostenido -> menu de acciones
+  secundarias (mismas que hoy son solo teclas): 1=toggle leyenda, 2=toggle espejo,
+  3=+transparencia, 4=-transparencia. No depende de lateralidad (no importa cual mano
+  hace de ancla), asi que sigue sin usarse `Hand.handedness` en ningun gesto actual.
+
 Todo el resto de los gestos (una sola mano) se ignora mientras `active` es False.
 """
 
@@ -13,6 +21,13 @@ import math
 import time
 
 from jarvis import config
+
+META_ACTIONS = {
+    1: "TOGGLE_LEGEND",
+    2: "TOGGLE_MIRROR",
+    3: "LEGEND_ALPHA_UP",
+    4: "LEGEND_ALPHA_DOWN",
+}
 
 
 def _interp(value, in_min, in_max, out_min, out_max):
@@ -27,6 +42,10 @@ def _is_fist(pts):
 
 def _is_shaka(pts):
     return pts[20].y < pts[18].y and pts[4].y < pts[2].y and pts[8].y > pts[6].y and pts[12].y > pts[10].y
+
+
+def _extended_finger_count(pts):
+    return sum(1 for i in (8, 12, 16, 20) if pts[i].y < pts[i - 2].y)
 
 
 class GestureEngine:
@@ -47,6 +66,12 @@ class GestureEngine:
 
         self.pause_hold_start = None
         self.close_hold_start = None
+        self.prev_two_hand_pinch_dist = None
+        self.meta_pose = None
+        self.meta_hold_start = None
+        self.meta_consumed = False
+
+        self._primary_pos = None  # (x, y) normalizado del indice de la ultima mano "activa"
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -58,13 +83,27 @@ class GestureEngine:
         self.prev_x, self.prev_y = x, y
         return int(x), int(y)
 
-    def _process_two_hand_gestures(self, hands, now):
-        """Gestos maestros a 2 manos. Devuelve la lista de eventos que disparan."""
+    def _pick_primary(self, hands):
+        """Con 2 manos en cuadro, elige la mas cercana a donde estaba la mano activa
+        el frame anterior, para que el puntero no salte de una mano a otra sin querer
+        (MediaPipe no garantiza que `hands[0]` sea siempre la misma mano fisica)."""
+        if len(hands) == 1 or self._primary_pos is None:
+            return hands[0].landmarks
+        px, py = self._primary_pos
+        best = min(hands, key=lambda hnd: math.hypot(hnd.landmarks[8].x - px, hnd.landmarks[8].y - py))
+        return best.landmarks
+
+    def _process_two_hand_gestures(self, hands, w, h, now):
+        """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka)."""
         events = []
         if len(hands) != 2:
             self.pause_hold_start = None
             self.close_hold_start = None
-            return events
+            self.prev_two_hand_pinch_dist = None
+            self.meta_pose = None
+            self.meta_hold_start = None
+            self.meta_consumed = False
+            return events, False, False
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
         both_shaka = _is_shaka(p1) and _is_shaka(p2)
@@ -89,24 +128,68 @@ class GestureEngine:
         else:
             self.pause_hold_start = None
 
-        return events
+        # Pinch-zoom a 2 manos: ambas pellizcando (thumb+index), la distancia entre los
+        # 2 puntos de pellizco escala el lienzo (Ctrl+Scroll) - no el objeto seleccionado.
+        d1 = self._dist(p1[4], p1[8], w, h)
+        d2 = self._dist(p2[4], p2[8], w, h)
+        both_pinching = d1 < config.PINCH_CLICK and d2 < config.PINCH_CLICK
+        if both_pinching:
+            c1x, c1y = (p1[4].x + p1[8].x) / 2 * w, (p1[4].y + p1[8].y) / 2 * h
+            c2x, c2y = (p2[4].x + p2[8].x) / 2 * w, (p2[4].y + p2[8].y) / 2 * h
+            dist = math.hypot(c2x - c1x, c2y - c1y)
+            if self.prev_two_hand_pinch_dist is not None:
+                delta = dist - self.prev_two_hand_pinch_dist
+                if delta > config.TWO_HAND_ZOOM_DELTA_PX:
+                    events.append("ZOOM_IN")
+                elif delta < -config.TWO_HAND_ZOOM_DELTA_PX:
+                    events.append("ZOOM_OUT")
+            self.prev_two_hand_pinch_dist = dist
+        else:
+            self.prev_two_hand_pinch_dist = None
+
+        # Menu de acciones secundarias: una mano en puño (ancla), la otra muestra 1-4
+        # dedos sostenidos config.META_HOLD_SECONDS para confirmar. No importa cual
+        # mano hace de ancla - no depende de lateralidad.
+        fists = (_is_fist(p1), _is_fist(p2))
+        if fists[0] != fists[1] and not both_pinching:
+            selector_pts = p2 if fists[0] else p1
+            count = _extended_finger_count(selector_pts)
+            if count in META_ACTIONS:
+                if count != self.meta_pose:
+                    self.meta_pose = count
+                    self.meta_hold_start = now
+                    self.meta_consumed = False
+                elif not self.meta_consumed and now - self.meta_hold_start > config.META_HOLD_SECONDS:
+                    events.append(META_ACTIONS[count])
+                    self.meta_consumed = True
+            else:
+                self.meta_pose = None
+                self.meta_hold_start = None
+                self.meta_consumed = False
+        else:
+            self.meta_pose = None
+            self.meta_hold_start = None
+            self.meta_consumed = False
+
+        return events, both_pinching, both_shaka
 
     def process(self, hands, w, h, screen_w, screen_h):
         """Devuelve (screen_xy, cam_xy, events). screen_xy/cam_xy son None si no hay
         puntero que mover (sin manos, o lectura de gestos en pausa)."""
         now = time.time()
-        events = self._process_two_hand_gestures(hands, now)
+        events, suppress_pinch, both_shaka = self._process_two_hand_gestures(hands, w, h, now)
 
         if not self.active or not hands:
             return None, None, events
 
-        pts = hands[0].landmarks
+        pts = self._pick_primary(hands)
         thumb, index, middle, ring, pinky = pts[4], pts[8], pts[12], pts[16], pts[20]
 
         raw_x = _interp(index.x, config.POINTER_MARGIN, 1 - config.POINTER_MARGIN, 0, screen_w)
         raw_y = _interp(index.y, config.POINTER_MARGIN, 1 - config.POINTER_MARGIN, 0, screen_h)
         screen_xy = self._smooth(raw_x, raw_y)
         cam_xy = (int(index.x * w), int(index.y * h))
+        self._primary_pos = (index.x, index.y)
 
         d_thumb_index = self._dist(thumb, index, w, h)
         d_thumb_middle = self._dist(thumb, middle, w, h)
@@ -116,8 +199,9 @@ class GestureEngine:
 
         fingers_extended = all(pts[i].y < pts[i - 2].y for i in (8, 12, 16, 20))
 
-        # Lock session: Shaka (pulgar+meñique extendidos, índice/medio recogidos) sostenido
-        if _is_shaka(pts):
+        # Lock session: Shaka (pulgar+meñique extendidos, índice/medio recogidos) sostenido.
+        # Suprimido si las 2 manos ya estan haciendo Shaka (eso es el gesto de cerrar, no de bloquear).
+        if _is_shaka(pts) and not both_shaka:
             if self.lock_start_time is None:
                 self.lock_start_time = now
             elif now - self.lock_start_time > config.LOCK_HOLD_SECONDS:
@@ -179,8 +263,10 @@ class GestureEngine:
         else:
             self.prev_scroll_y = None
 
-        # Click izquierdo / drag / selección de tecla HUD (edge-triggered)
-        is_pinching = d_thumb_index < config.PINCH_CLICK
+        # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
+        # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click
+        # de paso con la mano que termina siendo "primaria".
+        is_pinching = d_thumb_index < config.PINCH_CLICK and not suppress_pinch
         if is_pinching and not self.was_pinching and now - self.last_click_time > config.CLICK_COOLDOWN:
             events.append("PINCH_DOWN")
             self.last_click_time = now
