@@ -80,6 +80,12 @@ class ProfileManager:
     def register(self, profile):
         self._profiles[profile.name] = profile
 
+    @property
+    def profile_names(self):
+        """Registered profile names, in registration order (insertion-ordered
+        dict) - "default" is always first since it's seeded in __init__."""
+        return list(self._profiles.keys())
+
     def load(self, name):
         if name not in self._profiles:
             raise KeyError(f"no such profile: {name!r}")

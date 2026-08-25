@@ -32,6 +32,15 @@ class ProfileManagerLoadSwitchTests(unittest.TestCase):
     def test_starts_on_default_profile(self):
         self.assertEqual(ProfileManager().active.name, "default")
 
+    def test_profile_names_starts_with_just_default(self):
+        self.assertEqual(ProfileManager().profile_names, ["default"])
+
+    def test_profile_names_includes_registered_profiles_in_order(self):
+        pm = ProfileManager()
+        pm.register(Profile(name="gaming"))
+        pm.register(Profile(name="coding"))
+        self.assertEqual(pm.profile_names, ["default", "gaming", "coding"])
+
     def test_default_profile_matches_existing_config_constants(self):
         pm = ProfileManager()
         self.assertEqual(pm.get_setting("smoothing_alpha"), config.EMA_ALPHA)
