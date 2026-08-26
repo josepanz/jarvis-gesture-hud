@@ -17,6 +17,68 @@ es, en esencia, la resolucion de intent - simplemente no esta reificada como un
 objeto Intent aparte todavia. El movimiento continuo del mouse (spec.md #15:
 "Continuous signals MUST NOT be forced through the same execution model as discrete
 gestures") va directo a Command, sin GestureEvent tampoco.
+
+LIVE INTEGRATION (rama feature/full-integration-voice-llm): a partir de aca se
+conectan de verdad, en la app real, las piezas de PHASE 3-11 que hasta ahora
+estaban construidas y testeadas pero dormidas. El criterio para decidir que SI se
+cablea y que NO fue: bajo riesgo de cambiar comportamiento default + valor real
+demostrable. Lo que se cablea:
+
+- Telemetry (siempre activa, en memoria, sin sink -> sin I/O real, overhead
+  medido en PHASE 12 ~microsegundos): FPS/frame_time por frame, confianza/
+  exito de cada gesto, exito/duracion de cada comando.
+- ProfileManager: la app ahora LEE `smoothing_enabled` del perfil activo en vez
+  de hardcodearlo - el perfil "default" tiene el mismo valor que antes (True),
+  asi que el comportamiento no cambia hasta que exista un perfil distinto.
+  Tecla 'p' cicla entre los perfiles registrados (hoy solo "default" - el
+  mecanismo esta vivo, no invento valores para coding/gaming/presentation/media
+  porque son decisiones de producto que no me pidieron).
+- CommandHistory + UndoRedoController: cada comando dispatcheado (salvo
+  MouseMove, continuo) se registra en el historial. Teclas 'z'/'y' deshacen/
+  rehacen de verdad (hoy solo Volume/CanvasZoom son reversibles - PHASE 9).
+- Debug HUD (tecla 'd'): ContextualHudRenderer + debug_telemetry overlay con
+  FPS/gesto/comando/perfil - apagado por default, no cambia nada hasta que se
+  activa.
+- Context Engine: ForegroundApplicationTracker corre cacheado (0.5s) y se
+  registra en telemetry - detecta la app en primer plano de verdad, aunque
+  todavia no hay ningun binding contextual de gestos usandolo (ver mas abajo).
+- Voz STT + LLM (tecla 'v', push-to-talk por toggle - no hay key-up real en
+  el polling por frame de cv2.waitKey, asi que se activa/desactiva con la
+  misma tecla en vez de mantenerla apretada): jarvis.voice_capture.VoiceListener
+  graba con sounddevice y transcribe con faster-whisper (modelo "base",
+  offline, igual de local que MediaPipe/pyttsx3). El texto pasa primero por
+  VoiceIntentResolver (match de frases, PHASE 10, gratis) y si no matchea cae
+  a jarvis.llm_intent.LLMIntentResolver (Qwen2.5-1.5B-Instruct GGUF via
+  llama-cpp-python, vocabulario de acciones fijo y validado - nunca se confia
+  en texto libre del LLM). ConfidenceFilter (PHASE 5, antes sin uso real
+  porque GestureEngine no produce confianza genuina) SI se cablea de verdad
+  aca: faster-whisper si da una confianza real (1 - no_speech_prob) y se
+  descarta la transcripcion antes de gastar el LLM si esta por debajo del
+  umbral. Dependencias pesadas (faster-whisper/llama-cpp-python/sounddevice)
+  son opcionales (requirements-voice.txt, import perezoso) - la app y el
+  resto de sus tests corren igual sin ellas instaladas.
+
+Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
+
+- GestureStateMachine: no hay un punto de enganche de bajo riesgo sin
+  reestructurar el loop de deteccion de GestureEngine (que sigue siendo
+  boolean/umbral, no productor de estados formales).
+- Debounce (ConsecutiveFrameDebouncer) / CooldownRegistry genericos:
+  GestureEngine ya tiene su propio mecanismo de cooldown funcionando y testeado
+  (config.py + `self.last_*_time`) - reemplazarlo es un refactor con riesgo de
+  regresion real sin ningun cambio de comportamiento a cambio.
+- ConfidenceFilter: GestureEngine detecta por umbral booleano, no produce un
+  score de confianza real - forzar el filtro sobre un valor siempre-1.0 seria
+  decorativo. Se cablea de verdad en el pipeline de voz (PHASE 14 en esta misma
+  rama), donde STT/LLM si producen confianza genuina.
+- SwipeDetector/DoubleClickDetector/DwellDetector + bindings contextuales de
+  gestos: activarlos por default significaria inventar mapeos gesto->accion
+  nuevos (que swipe hace que cosa) que nadie pidio, con riesgo real de falsos
+  positivos durante uso normal (un swipe rapido de la mano ya pasa moviendo el
+  mouse). Quedan construidos y testeados, sin activar.
+- Reescribir el loop de camara para pasar por GestureInputProvider/
+  KeyboardInputProvider: el loop actual funciona y esta bien testeado: cambiar
+  su estructura interna es riesgo real por cero cambio de comportamiento.
 """
 
 import time
@@ -35,19 +97,37 @@ from jarvis.actions.mouse import (
 )
 from jarvis.actions.system import (
     LockSessionCommand,
+    MuteCommand,
     ScreenshotCommand,
     VolumeDownCommand,
     VolumeUpCommand,
 )
 from jarvis.core.command_bus import CommandBus
+from jarvis.core.command_history import CommandHistory
+from jarvis.core.command_metrics import CommandMetricsRecorder
+from jarvis.core.confidence import ConfidenceFilter, format_confidence
+from jarvis.core.context_tracker import ForegroundApplicationTracker
+from jarvis.core.contextual_hud import ContextualHudRenderer
 from jarvis.core.events import GestureEvent
 from jarvis.core.feedback import FeedbackManager
+from jarvis.core.gesture_metrics import GestureMetricsRecorder
+from jarvis.core.performance_metrics import PerformanceMetricsRecorder
+from jarvis.core.profiles import ProfileManager
+from jarvis.core.telemetry import TelemetryManager
+from jarvis.core.undo_redo import UndoRedoController
+from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
 from jarvis.hud_keyboard import HUDKeyboard
 from jarvis.legend import build_legend_text
+from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
 from jarvis.voice import VoiceJarvis
+from jarvis.voice_capture import VoiceListener
+
+# Umbral de confianza real de faster-whisper (1 - no_speech_prob) por debajo
+# del cual se descarta la transcripcion antes de gastar el LLM.
+_VOICE_MIN_CONFIDENCE = 0.5
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.0
@@ -80,6 +160,10 @@ _MIGRATED_GESTURES = frozenset(
     }
 )
 
+# Comandos continuos - no van al historial de undo/redo (serian ruido puro:
+# MouseMove dispara ~30-60 veces por segundo).
+_CONTINUOUS_COMMANDS = frozenset({"MouseMove"})
+
 
 class JarvisApp:
     def __init__(self):
@@ -87,24 +171,45 @@ class JarvisApp:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
+        self.profiles = ProfileManager()
+
         self.tracker = HandTracker(
             max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
         )
         self.screen_w, self.screen_h = pyautogui.size()
 
-        self.gestures = GestureEngine()
+        self.gestures = GestureEngine(smoothing_enabled=self.profiles.get_setting("smoothing_enabled"))
         self.keyboard = HUDKeyboard()
         self.voice = VoiceJarvis()
         self.overlay = ScreenOverlay()
         self.overlay.init_legend(build_legend_text())
 
         self.feedback = FeedbackManager(voice=self.voice, hud=self.overlay)
+
+        self.telemetry = TelemetryManager()
+        self.perf_metrics = PerformanceMetricsRecorder(self.telemetry)
+        self.gesture_metrics = GestureMetricsRecorder(self.telemetry)
+        self.command_metrics = CommandMetricsRecorder(self.telemetry)
+
+        self.history = CommandHistory()
+        self.undo_redo = UndoRedoController(self.history)
+
+        self.context_tracker = ForegroundApplicationTracker()
+        self.hud_renderer = ContextualHudRenderer(debug=False)
+
         self.command_bus = CommandBus(on_result=self._on_command_result)
+
+        self.voice_listener = VoiceListener()
+        self.voice_intent_resolver = VoiceIntentResolver(phrase_bindings=DEFAULT_PHRASE_BINDINGS)
+        self.llm_intent_resolver = LLMIntentResolver()
+        self.voice_confidence_filter = ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)
 
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
         self.is_dragging = False
         self.should_quit = False
         self._last_screen_xy = None
+        self._last_command_name = None
+        self._last_fps = 0.0
 
     # --- PHASE 2: acciones migradas (GestureEvent -> Command -> CommandBus) ------
 
@@ -128,6 +233,10 @@ class JarvisApp:
 
     def _dispatch_migrated(self, gesture_type, cam_xy):
         self._build_gesture_event(gesture_type, position=cam_xy)  # registro tipado y validado
+        # Telemetria (PHASE 8, cableada en vivo): GestureEngine detecta por umbral
+        # booleano, no produce confianza real - se registra 1.0/exito por
+        # construccion (ver docstring del modulo, seccion "que NO se cablea").
+        self.gesture_metrics.record_gesture(gesture_type, confidence=1.0, success=True)
 
         if gesture_type == "PINCH_DOWN":
             key_action = self.keyboard.handle_click(cam_xy)
@@ -169,9 +278,17 @@ class JarvisApp:
         """Feedback para las acciones migradas que antes tenian su bubble/voz
         directo adentro de _dispatch(). MouseMove/MouseButton/Scroll/PressKey/
         TypeText se quedan mudos aca tambien, igual que antes de la migracion
-        (nunca tuvieron feedback)."""
+        (nunca tuvieron feedback).
+
+        Live integration: ademas del feedback, cada resultado ahora alimenta
+        telemetry (siempre) y el historial de comandos (salvo los continuos)."""
         name = command.metadata.name
         position = self._feedback_position()
+
+        self._last_command_name = name
+        self.command_metrics.record_from_command_result(command, result)
+        if name not in _CONTINUOUS_COMMANDS:
+            self.history.record(command, result)
 
         if name == "LockSession":
             if result.success:
@@ -194,6 +311,10 @@ class JarvisApp:
         elif name == "VolumeDown":
             channels = ("hud",) if result.success else ("hud", "tts")
             label = "🔉 Volumen -" if result.success else f"⚠ Volumen falló: {result.error}"
+            self.feedback.notify(label, channels=channels, position=position)
+        elif name == "Mute":
+            channels = ("hud",) if result.success else ("hud", "tts")
+            label = "🔇 Silenciado" if result.success else f"⚠ Silenciar falló: {result.error}"
             self.feedback.notify(label, channels=channels, position=position)
         elif name == "RightClick" and result.success:
             self.feedback.notify("🖱 Click derecho", channels=("hud",), position=position)
@@ -242,6 +363,86 @@ class JarvisApp:
         self.mirrored = not self.mirrored
         self.voice.speak("Modo espejo activado." if self.mirrored else "Modo espejo desactivado.")
 
+    # --- Live integration: undo/redo, perfiles, debug HUD ------------------------
+
+    def _trigger_undo(self):
+        result = self.undo_redo.undo()
+        if result.success:
+            label = "↶ Deshecho"
+        elif result.status == "REJECTED":
+            label = "↶ Nada para deshacer"
+        else:
+            label = f"↶ Error al deshacer: {result.error}"
+        self.feedback.notify(label, channels=("hud",), position=self._feedback_position())
+
+    def _trigger_redo(self):
+        result = self.undo_redo.redo()
+        if result.success:
+            label = "↷ Rehecho"
+        elif result.status == "REJECTED":
+            label = "↷ Nada para rehacer"
+        else:
+            label = f"↷ Error al rehacer: {result.error}"
+        self.feedback.notify(label, channels=("hud",), position=self._feedback_position())
+
+    def _cycle_profile(self):
+        names = self.profiles.profile_names
+        current_index = names.index(self.profiles.active.name)
+        next_name = names[(current_index + 1) % len(names)]
+        self.profiles.switch_to(next_name)
+        self.feedback.notify(f"👤 Perfil: {next_name}", channels=("hud",), position=self._feedback_position())
+
+    def _toggle_debug_hud(self):
+        self.hud_renderer.debug = not self.hud_renderer.debug
+
+    # --- PHASE 14: voz STT + LLM (cableado en vivo) -------------------------------
+
+    def _toggle_voice_listening(self):
+        position = self._feedback_position()
+        if self.voice_listener.recording:
+            self.voice_listener.stop()
+            self.overlay.show_bubble("🎙 Procesando…", *position)
+        else:
+            self.voice_listener.start()
+            self.overlay.show_bubble("🎙 Escuchando…", *position)
+            self.voice.speak("Escuchando.")
+
+    def _handle_voice_result(self, result):
+        kind, text, confidence = result
+        position = self._feedback_position()
+
+        if kind == "error" or not text:
+            self.feedback.notify("⚠ No entendí", channels=("hud",), position=position)
+            return
+        if not self.voice_confidence_filter.accepts(confidence):
+            self.feedback.notify(
+                f"⚠ Audio poco claro ({format_confidence(confidence)})", channels=("hud",), position=position
+            )
+            return
+
+        intent = self.voice_intent_resolver.resolve(text) or self.llm_intent_resolver.resolve(text)
+        if intent is None:
+            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+            return
+        self._dispatch_voice_action(intent.name)
+
+    def _dispatch_voice_action(self, action_name):
+        """action_name: validado por VoiceIntentResolver/LLMIntentResolver
+        (jarvis.llm_intent.VALID_ACTIONS). Reusa exactamente el mismo camino de
+        Command que el gesto equivalente cuando existe, asi que voz y gesto
+        disparando la misma accion se comportan identico (mismo feedback,
+        misma entrada en el historial de undo/redo)."""
+        if action_name == "UNDO":
+            self._trigger_undo()
+        elif action_name == "REDO":
+            self._trigger_redo()
+        elif action_name == "MUTE":
+            self.command_bus.dispatch(MuteCommand())
+        elif action_name in ("KEYBOARD_TOGGLE", "CLOSE_APP"):
+            self._dispatch(action_name, None, self._last_screen_xy)
+        elif action_name in _MIGRATED_GESTURES:
+            self._dispatch_migrated(action_name, None)
+
     def _handle_key(self, key):
         if key == ord("q"):
             self.should_quit = True
@@ -253,10 +454,22 @@ class JarvisApp:
             self.overlay.adjust_legend_alpha(+0.1)
         elif key == ord("-"):
             self.overlay.adjust_legend_alpha(-0.1)
+        elif key == ord("z"):
+            self._trigger_undo()
+        elif key == ord("y"):
+            self._trigger_redo()
+        elif key == ord("p"):
+            self._cycle_profile()
+        elif key == ord("d"):
+            self._toggle_debug_hud()
+        elif key == ord("v"):
+            self._toggle_voice_listening()
 
     def run(self):
         self.voice.speak("Jarvis en línea.")
         while self.cap.isOpened() and not self.should_quit:
+            frame_start = time.perf_counter()
+
             ret, frame = self.cap.read()
             if not ret:
                 break
@@ -277,13 +490,35 @@ class JarvisApp:
                 self._dispatch_mouse_move(screen_xy)
                 self.keyboard.draw(frame, cam_xy)
 
+            voice_result = self.voice_listener.poll_result()
+            if voice_result is not None:
+                self._handle_voice_result(voice_result)
+
             if not self.gestures.active:
                 cv2.putText(frame, "PAUSADO", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            if self.hud_renderer.debug:
+                self.hud_renderer.render(
+                    frame,
+                    "TRACKING" if hands else "IDLE",
+                    telemetry={
+                        "fps": self._last_fps,
+                        "gesture": events[-1] if events else None,
+                        "command": self._last_command_name,
+                        "profile": self.profiles.active.name,
+                    },
+                )
 
             self.overlay.pump()
 
             cv2.imshow("Jarvis Gesture HUD", frame)
             self._handle_key(cv2.waitKey(1) & 0xFF)
+
+            frame_time_ms = (time.perf_counter() - frame_start) * 1000
+            self._last_fps = round(1000 / frame_time_ms, 1) if frame_time_ms > 0 else 0.0
+            self.perf_metrics.record_frame_time(frame_time_ms)
+            self.perf_metrics.record_fps(self._last_fps)
+            self.context_tracker.get()  # cached (0.5s TTL) - cheap, keeps context "live"
 
         self.overlay.close()
         self.cap.release()
