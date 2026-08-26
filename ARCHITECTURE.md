@@ -540,10 +540,9 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   thumb *together with* the finger being tested (not leaving the thumb static)
   when the test needs that finger to travel far enough to produce a directional
   delta signal.
-- **Natural-language voice control deferred, not attempted.** It would add heavy
-  dependencies (STT + LLM runtime, hundreds of MB of models) and real-time audio/gesture
-  synchronization complexity that wasn't requested for this phase. Documented in detail
-  below so the design isn't lost, but implemented only when explicitly requested.
+- **Natural-language voice control (STT + LLM) is now implemented** on
+  `feature/full-integration-voice-llm` (merged) — see Status and Known limitations
+  for what shipped and what's still open (wake word, exe bundling).
 
 ## Known limitations
 
