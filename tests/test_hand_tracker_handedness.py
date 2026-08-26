@@ -8,6 +8,7 @@ assets/ from earlier manual runs, so this doesn't hit the network) with its
 needed - only the swap logic in `process()` itself is under test.
 """
 
+import platform
 import sys
 import unittest
 from pathlib import Path
@@ -29,6 +30,14 @@ def _fake_result(labels):
     )
 
 
+@unittest.skipUnless(
+    platform.system() == "Windows",
+    "HandLandmarker.create_from_options() needs a working native GPU/graphics "
+    "service even before any inference call - confirmed working on Windows (CI "
+    "and this dev machine), but it hard-aborts the process (SIGABRT) on headless "
+    "macOS CI and fails to load libEGL on headless Linux CI. Not a Python "
+    "exception, so it can't be caught - skipping is the only option on those two.",
+)
 class HandTrackerHandednessTests(unittest.TestCase):
     def setUp(self):
         self.tracker = HandTracker(max_hands=2)

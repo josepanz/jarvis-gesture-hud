@@ -26,8 +26,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # pyautogui's mouseinfo submodule opens a real X11 Display() at import
+      # time on Linux (unlike Windows/macOS, which use native APIs) - headless
+      # runners have no DISPLAY at all, so every test that imports
+      # jarvis.actions/jarvis.main fails before it even runs. xvfb-run gives it
+      # a real (virtual) X server to connect to.
+      - name: Install a virtual display (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Run test suite
+        if: runner.os != 'Linux'
         run: python -m unittest discover -s tests -v
+
+      - name: Run test suite (under a virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m unittest discover -s tests -v
 
       - name: Compile every source file (syntax check)
         shell: bash
