@@ -28,11 +28,27 @@ jobs:
         with:
           python-version: "3.12"
 
+      # GitPython 3.1.60 (2026-08-25) removed Actor.name_email_regex, which
+      # python-semantic-release's config loader calls directly - breaks every
+      # invocation, including inside the official Docker action (it installs
+      # gitpython~=3.0 unpinned at image-build time, so it now resolves 3.1.60
+      # too). Upstream bug, unfixed as of v9.21.2:
+      # https://github.com/python-semantic-release/python-semantic-release/issues/1475
+      # Run the CLI directly instead of the Docker action so this pin actually
+      # takes effect; remove the pin once that issue is closed.
+      - name: Install python-semantic-release
+        run: pip install "python-semantic-release==9.21.2" "gitpython<3.1.60"
+
+      - name: Configure git identity for the release commit
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Python Semantic Release
         id: release
-        uses: python-semantic-release/python-semantic-release@v9.15.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release -v version --commit --tag --push --changelog --vcs-release
 
   build-binaries:
     name: Build portable ${{ matrix.asset_name }}
