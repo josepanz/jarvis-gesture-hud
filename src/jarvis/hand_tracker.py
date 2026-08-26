@@ -5,14 +5,14 @@ de mediapipe 0.10.30 — solo queda la API Tasks, que requiere descargar un mode
 `.task` la primera vez (se cachea en `assets/`).
 """
 
-import sys
 import time
 import urllib.request
 from collections import namedtuple
-from pathlib import Path
 
 import mediapipe as mp
 from mediapipe.tasks.python import vision
+
+from jarvis.paths import assets_dir
 
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -26,16 +26,8 @@ Hand = namedtuple("Hand", "landmarks handedness")
 _HANDEDNESS_SWAP = {"Left": "Right", "Right": "Left"}
 
 
-def _assets_dir():
-    # Dentro de un .exe de PyInstaller los datos empaquetados viven bajo sys._MEIPASS,
-    # no junto a este archivo fuente.
-    if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "assets"
-    return Path(__file__).resolve().parents[2] / "assets"
-
-
 def _ensure_model():
-    model_path = _assets_dir() / "hand_landmarker.task"
+    model_path = assets_dir() / "hand_landmarker.task"
     model_path.parent.mkdir(parents=True, exist_ok=True)
     if not model_path.exists():
         urllib.request.urlretrieve(MODEL_URL, model_path)

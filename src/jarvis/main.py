@@ -42,6 +42,21 @@ demostrable. Lo que se cablea:
 - Context Engine: ForegroundApplicationTracker corre cacheado (0.5s) y se
   registra en telemetry - detecta la app en primer plano de verdad, aunque
   todavia no hay ningun binding contextual de gestos usandolo (ver mas abajo).
+- Voz STT + LLM (tecla 'v', push-to-talk por toggle - no hay key-up real en
+  el polling por frame de cv2.waitKey, asi que se activa/desactiva con la
+  misma tecla en vez de mantenerla apretada): jarvis.voice_capture.VoiceListener
+  graba con sounddevice y transcribe con faster-whisper (modelo "base",
+  offline, igual de local que MediaPipe/pyttsx3). El texto pasa primero por
+  VoiceIntentResolver (match de frases, PHASE 10, gratis) y si no matchea cae
+  a jarvis.llm_intent.LLMIntentResolver (Qwen2.5-1.5B-Instruct GGUF via
+  llama-cpp-python, vocabulario de acciones fijo y validado - nunca se confia
+  en texto libre del LLM). ConfidenceFilter (PHASE 5, antes sin uso real
+  porque GestureEngine no produce confianza genuina) SI se cablea de verdad
+  aca: faster-whisper si da una confianza real (1 - no_speech_prob) y se
+  descarta la transcripcion antes de gastar el LLM si esta por debajo del
+  umbral. Dependencias pesadas (faster-whisper/llama-cpp-python/sounddevice)
+  son opcionales (requirements-voice.txt, import perezoso) - la app y el
+  resto de sus tests corren igual sin ellas instaladas.
 
 Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
 
@@ -82,6 +97,7 @@ from jarvis.actions.mouse import (
 )
 from jarvis.actions.system import (
     LockSessionCommand,
+    MuteCommand,
     ScreenshotCommand,
     VolumeDownCommand,
     VolumeUpCommand,
@@ -89,6 +105,7 @@ from jarvis.actions.system import (
 from jarvis.core.command_bus import CommandBus
 from jarvis.core.command_history import CommandHistory
 from jarvis.core.command_metrics import CommandMetricsRecorder
+from jarvis.core.confidence import ConfidenceFilter, format_confidence
 from jarvis.core.context_tracker import ForegroundApplicationTracker
 from jarvis.core.contextual_hud import ContextualHudRenderer
 from jarvis.core.events import GestureEvent
@@ -98,12 +115,19 @@ from jarvis.core.performance_metrics import PerformanceMetricsRecorder
 from jarvis.core.profiles import ProfileManager
 from jarvis.core.telemetry import TelemetryManager
 from jarvis.core.undo_redo import UndoRedoController
+from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
 from jarvis.hud_keyboard import HUDKeyboard
 from jarvis.legend import build_legend_text
+from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
 from jarvis.voice import VoiceJarvis
+from jarvis.voice_capture import VoiceListener
+
+# Umbral de confianza real de faster-whisper (1 - no_speech_prob) por debajo
+# del cual se descarta la transcripcion antes de gastar el LLM.
+_VOICE_MIN_CONFIDENCE = 0.5
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.0
@@ -174,6 +198,11 @@ class JarvisApp:
         self.hud_renderer = ContextualHudRenderer(debug=False)
 
         self.command_bus = CommandBus(on_result=self._on_command_result)
+
+        self.voice_listener = VoiceListener()
+        self.voice_intent_resolver = VoiceIntentResolver(phrase_bindings=DEFAULT_PHRASE_BINDINGS)
+        self.llm_intent_resolver = LLMIntentResolver()
+        self.voice_confidence_filter = ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)
 
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
         self.is_dragging = False
@@ -283,6 +312,10 @@ class JarvisApp:
             channels = ("hud",) if result.success else ("hud", "tts")
             label = "🔉 Volumen -" if result.success else f"⚠ Volumen falló: {result.error}"
             self.feedback.notify(label, channels=channels, position=position)
+        elif name == "Mute":
+            channels = ("hud",) if result.success else ("hud", "tts")
+            label = "🔇 Silenciado" if result.success else f"⚠ Silenciar falló: {result.error}"
+            self.feedback.notify(label, channels=channels, position=position)
         elif name == "RightClick" and result.success:
             self.feedback.notify("🖱 Click derecho", channels=("hud",), position=position)
         elif name == "CanvasZoom" and result.success:
@@ -362,6 +395,54 @@ class JarvisApp:
     def _toggle_debug_hud(self):
         self.hud_renderer.debug = not self.hud_renderer.debug
 
+    # --- PHASE 14: voz STT + LLM (cableado en vivo) -------------------------------
+
+    def _toggle_voice_listening(self):
+        position = self._feedback_position()
+        if self.voice_listener.recording:
+            self.voice_listener.stop()
+            self.overlay.show_bubble("🎙 Procesando…", *position)
+        else:
+            self.voice_listener.start()
+            self.overlay.show_bubble("🎙 Escuchando…", *position)
+            self.voice.speak("Escuchando.")
+
+    def _handle_voice_result(self, result):
+        kind, text, confidence = result
+        position = self._feedback_position()
+
+        if kind == "error" or not text:
+            self.feedback.notify("⚠ No entendí", channels=("hud",), position=position)
+            return
+        if not self.voice_confidence_filter.accepts(confidence):
+            self.feedback.notify(
+                f"⚠ Audio poco claro ({format_confidence(confidence)})", channels=("hud",), position=position
+            )
+            return
+
+        intent = self.voice_intent_resolver.resolve(text) or self.llm_intent_resolver.resolve(text)
+        if intent is None:
+            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+            return
+        self._dispatch_voice_action(intent.name)
+
+    def _dispatch_voice_action(self, action_name):
+        """action_name: validado por VoiceIntentResolver/LLMIntentResolver
+        (jarvis.llm_intent.VALID_ACTIONS). Reusa exactamente el mismo camino de
+        Command que el gesto equivalente cuando existe, asi que voz y gesto
+        disparando la misma accion se comportan identico (mismo feedback,
+        misma entrada en el historial de undo/redo)."""
+        if action_name == "UNDO":
+            self._trigger_undo()
+        elif action_name == "REDO":
+            self._trigger_redo()
+        elif action_name == "MUTE":
+            self.command_bus.dispatch(MuteCommand())
+        elif action_name in ("KEYBOARD_TOGGLE", "CLOSE_APP"):
+            self._dispatch(action_name, None, self._last_screen_xy)
+        elif action_name in _MIGRATED_GESTURES:
+            self._dispatch_migrated(action_name, None)
+
     def _handle_key(self, key):
         if key == ord("q"):
             self.should_quit = True
@@ -381,6 +462,8 @@ class JarvisApp:
             self._cycle_profile()
         elif key == ord("d"):
             self._toggle_debug_hud()
+        elif key == ord("v"):
+            self._toggle_voice_listening()
 
     def run(self):
         self.voice.speak("Jarvis en línea.")
@@ -406,6 +489,10 @@ class JarvisApp:
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)
                 self.keyboard.draw(frame, cam_xy)
+
+            voice_result = self.voice_listener.poll_result()
+            if voice_result is not None:
+                self._handle_voice_result(voice_result)
 
             if not self.gestures.active:
                 cv2.putText(frame, "PAUSADO", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)

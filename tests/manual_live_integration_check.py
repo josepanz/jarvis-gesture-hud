@@ -1,6 +1,6 @@
 """End-to-end integration check for the live-wiring added on
 feature/full-integration-voice-llm (Telemetry, ProfileManager, CommandHistory/
-UndoRedoController, debug HUD).
+UndoRedoController, debug HUD, voice STT+LLM dispatch).
 
 Same conventions as manual_main_integration_check.py: deliberately named without
 a `test_` prefix so `unittest discover` does not pick it up (constructs a real
@@ -99,8 +99,38 @@ def main():
             app.perf_metrics.record_fps(60.0)
             assert len(app.telemetry.history(event="performance")) >= 2
 
+            # --- Voice dispatch: phrase match reaches the real Command path ---
+            mock_os.reset_mock()
+            app._handle_voice_result(("text", "subir volumen", 0.95))
+            assert mock_os.volume_up.called, "voice phrase match should dispatch VolumeUp"
+
+            # --- Voice dispatch: low-confidence transcription is discarded, no command runs ---
+            mock_os.reset_mock()
+            app._handle_voice_result(("text", "subir volumen", 0.1))
+            assert not mock_os.volume_up.called, "low-confidence voice result must be discarded"
+
+            # --- Voice dispatch: unmatched phrase falls through to the LLM resolver ---
+            with patch.object(app.llm_intent_resolver, "resolve", return_value=None) as mock_llm_resolve:
+                app._handle_voice_result(("text", "algo que no matchea ninguna frase", 0.95))
+                assert mock_llm_resolve.called, "unmatched phrase should fall back to the LLM resolver"
+
+            # --- Voice dispatch: LLM-resolved action reaches the real Command path too ---
+            from jarvis.core.intents import Intent
+
+            with patch.object(
+                app.llm_intent_resolver,
+                "resolve",
+                return_value=Intent(name="MUTE", source="VOICE_LLM", confidence=1.0, timestamp=time.time()),
+            ):
+                mock_os.reset_mock()
+                app._handle_voice_result(("text", "hazme el favor de silenciar todo", 0.95))
+                assert mock_os.volume_mute.called, "LLM-resolved MUTE should dispatch MuteCommand"
+
             time.sleep(0.2)
-            print("LIVE INTEGRATION OK: telemetry, history, undo/redo, profiles, debug HUD, context all verified")
+            print(
+                "LIVE INTEGRATION OK: telemetry, history, undo/redo, profiles, debug HUD, "
+                "context, voice dispatch all verified"
+            )
         finally:
             app.overlay.close()
 

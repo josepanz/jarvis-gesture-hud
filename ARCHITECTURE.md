@@ -50,8 +50,8 @@ run, not just written).
 | InputProvider + Gesture/Keyboard/Voice implementations (OpenSpec PHASE 10) | Built and unit-tested (363 tests total), same standalone/not-wired-in discipline. All three reuse `GestureEvent` as a shared event type instead of a separate `InputEvent` model — see Decisions |
 | VoiceIntentResolver + intent convergence (OpenSpec PHASE 11) | Built and unit-tested (377 tests total). `VoiceIntentResolver` takes already-transcribed text only — no microphone/STT anywhere, matching ROADMAP.md's standing deferral. A real end-to-end test drives gesture-, keyboard-, and voice-sourced intents through the same `IntentCommandResolver` and `CommandBus` to the same `LockSessionCommand`, proving source-agnostic convergence rather than just asserting it |
 | Quality: regression suite, performance baseline, error isolation, docs, architecture audit (OpenSpec PHASE 12 — final phase) | Done. **422 tests total, all passing.** Comprehensive, previously-nonexistent `GestureEngine` regression suite (see Decisions) and `HandTracker` handedness tests. Real measured performance baseline (below). All 4 error-isolation claims verified as named tests. Architecture audit found and fixed 2 real doc inaccuracies (see Decisions) and added a permanent import-boundary test |
-| **Live integration** of previously-dormant PHASE 3-11 pieces (branch `feature/full-integration-voice-llm`, not yet merged) | Done for what's genuinely low-risk/high-value: Telemetry (always-on, in-memory), `ProfileManager` (sources `smoothing_enabled`, cycle with `p`), `CommandHistory`+`UndoRedoController` (real `z`/`y` undo/redo), a debug HUD overlay (`d`), and `ForegroundApplicationTracker` (cached, feeds telemetry). 424 tests, a new live-integration check script, `GestureEngine` output and a live boot both unchanged. Deliberately still NOT wired: `GestureStateMachine`, generic debounce/cooldown, `ConfidenceFilter` (no real confidence signal to filter — see below), swipe/dwell/double-click gesture bindings, and an `InputProvider`-based loop rewrite — each has a documented reason in `main.py`'s module docstring, not a silent gap |
-| Natural-language voice control (STT + local LLM) | Not implemented — deliberately deferred, see Future Work |
+| **Live integration** of previously-dormant PHASE 3-11 pieces (branch `feature/full-integration-voice-llm`, not yet merged) | Done for what's genuinely low-risk/high-value: Telemetry (always-on, in-memory), `ProfileManager` (sources `smoothing_enabled`, cycle with `p`), `CommandHistory`+`UndoRedoController` (real `z`/`y` undo/redo), a debug HUD overlay (`d`), and `ForegroundApplicationTracker` (cached, feeds telemetry). A new live-integration check script, `GestureEngine` output and a live boot both unchanged. Deliberately still NOT wired: `GestureStateMachine`, generic debounce/cooldown, swipe/dwell/double-click gesture bindings, and an `InputProvider`-based loop rewrite — each has a documented reason in `main.py`'s module docstring, not a silent gap |
+| Natural-language voice control (STT + local LLM), same branch | Done — push-to-talk (`v` toggles recording, no real key-up in the per-frame `cv2.waitKey` polling model). `jarvis.voice_capture.VoiceListener` records via `sounddevice` and transcribes via `faster-whisper` ("base" model, offline). Text is resolved first by the existing `VoiceIntentResolver` (free phrase match), falling back to `jarvis.llm_intent.LLMIntentResolver` — a local Qwen2.5-1.5B-Instruct GGUF model via `llama-cpp-python`, constrained to a fixed, validated action vocabulary (never trusts free-form LLM text). `ConfidenceFilter` (built in PHASE 5, previously unused for lack of a real confidence signal) is now genuinely wired: faster-whisper's own `1 - no_speech_prob` gates low-confidence transcriptions before the LLM is even called. `faster-whisper`/`llama-cpp-python`/`sounddevice` are optional (`requirements-voice.txt`, lazy-imported) — the base app and its test suite run without them installed. 441 tests total, plus a real dispatch check in the live-integration script. **Not bundled into the PyInstaller release `.exe`** — deliberate scope boundary, see Known limitations |
 
 ## Architecture
 
@@ -91,6 +91,9 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 - **`config.py`** — every tunable constant (pinch thresholds, cooldowns, EMA alpha, HUD colors, hold durations, mirror default). Single place to tune behavior without touching logic.
 - **`os_native.py`** — `CrossPlatformOS`: static methods `lock_session`, `take_screenshot`, `volume_up/down/mute`, `foreground_window_title`. The only module branching on `platform.system()` for **OS actions**. (`overlay.py` separately branches on `platform.system()` for its own, unrelated Windows-only click-through rendering trick — a distinct HUD-only concern, not an OS action — see its entry below. TASK-054's architecture audit found this and corrected this line, which previously overstated "the only module" without that qualifier; a regression test now pins both as the only two allowed.)
 - **`voice.py`** — `VoiceJarvis`: a dedicated thread + `queue.Queue` so speaking never blocks the camera loop. `speak(text)` enqueues; `silence()` clears the queue and calls `engine.stop()` to cut off speech immediately.
+- **`paths.py`** — `assets_dir()`: shared path resolution for downloaded model assets (dev path vs. `sys._MEIPASS` inside a PyInstaller `.exe`), extracted from `hand_tracker.py` so `llm_intent.py` reuses the same logic instead of duplicating it.
+- **`voice_capture.py`** — `VoiceListener`: real microphone capture (`sounddevice`, lazy-imported) + STT (`faster-whisper`, lazy-imported, model `"base"`). `start()`/`stop()` toggle recording; transcription runs on a background thread so it never blocks the camera loop; `poll_result()` is non-blocking and delivers `(kind, text, confidence)`, with `confidence` sourced from faster-whisper's own `1 - no_speech_prob`.
+- **`llm_intent.py`** — `LLMIntentResolver`: local LLM (`llama-cpp-python`, lazy-imported) fallback for voice commands `VoiceIntentResolver`'s phrase matching doesn't catch. Downloads/caches a Qwen2.5-1.5B-Instruct GGUF model via `paths.assets_dir()`. `VALID_ACTIONS` is the fixed, validated output vocabulary — the model's raw text is never trusted directly, only strict `{"action": "NAME"}` JSON matching that set.
 - **`hud_keyboard.py`** — `HUDKeyboard`: on-screen keyboard layouts (Spanish/numeric/emoji), `draw(frame, cursor)`. Still drawn inside the camera window (unlike the legend, this one is tied to the pinch/cursor interaction happening there). `handle_click(cursor) -> KeyAction | None` no longer executes `pyautogui` itself (OpenSpec TASK-012) — it returns a `KeyAction(kind, value)` describing what was touched (`"key"`/`"text"`/`"layout"`), and `main.py` turns that into a `Command`. Layout switches (123/ABC/EMOJI) stay internal state, no OS side effect, so no `Command` for those.
 - **`legend.py`** — content only: `build_legend_text()` builds the multi-line gesture list string. No drawing logic — it used to render on the camera frame via `cv2.addWeighted`; that was removed in favor of a native overlay window (see below).
 - **`overlay.py`** — `ScreenOverlay`, built on Tkinter (stdlib, zero new dependencies):
@@ -99,7 +102,7 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
   - Both use `_make_click_through(window)`: on Windows this applies `WS_EX_LAYERED | WS_EX_TRANSPARENT` to the real HWND (obtained via `GetParent(winfo_id())`) through `ctypes` — a well-known, dependency-free trick, verified working on this machine (see Decisions). No-op elsewhere.
   - `pump()` is called once per camera frame instead of `mainloop()`, because Tk is not thread-safe and a separate UI thread would race with the camera loop.
 - **`gestures.py`** — `GestureEngine`: pure logic, no I/O. `process(hands, w, h, screen_w, screen_h) -> (screen_xy | None, cam_xy | None, events)`. Single-hand gestures always use `hands[0]` and are entirely skipped when `active` is `False` (paused) — in that case `screen_xy` is `None`, so `main.py` neither moves the mouse nor draws the keyboard. The two master, two-hand gestures (`TOGGLE_ACTIVE`, `CLOSE_APP`) are evaluated *before* checking `active`, so pause can always be undone and the app can always be closed.
-- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration.
+- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`/`z`/`y`/`p`/`d`/`v`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration. `_handle_voice_result()`/`_dispatch_voice_action()` route push-to-talk transcriptions through `VoiceIntentResolver` then `LLMIntentResolver` into the same `Command`/`CommandBus` path gestures use.
 
 ### `src/jarvis/core/` — OpenSpec foundation (PHASE 1)
 
@@ -249,11 +252,13 @@ Every tunable value in the project, and where it lives:
 | Minimum confidence threshold | `jarvis.core.confidence.ConfidenceFilter(minimum_confidence=0.70)` | No — standalone (PHASE 3) |
 | Per-action cooldowns (generic registry) | `jarvis.core.cooldown.CooldownRegistry(cooldowns={...})` | No — standalone (PHASE 3); `GestureEngine`'s own cooldowns in `config.py` are separate and already live |
 | Double-click interval, swipe distance/velocity/duration, dwell duration/cancel-distance | `jarvis.core.{double_click,swipe,dwell}.py` constructors | No — standalone (PHASE 4) |
-| Profiles (cursor sensitivity, smoothing, swipe thresholds, dwell, cooldowns, gesture bindings) | `jarvis.core.profiles.ProfileManager` / `Profile` | No — standalone (PHASE 5); `default` profile mirrors `config.py`'s real values |
-| Foreground-app detection cache TTL | `jarvis.core.context_tracker.ForegroundApplicationTracker(cache_ttl=0.5)` | No — standalone (PHASE 6) |
-| Command history size | `jarvis.core.command_history.CommandHistory(max_size=50)` | No — standalone (PHASE 9) |
-| Telemetry history size, optional sink | `jarvis.core.telemetry.TelemetryManager(max_history=500, sink=None)` | No — standalone (PHASE 8) |
-| Voice phrase → intent bindings | `jarvis.core.voice_intent_resolver.VoiceIntentResolver(phrase_bindings=...)` | No — standalone (PHASE 11), starts empty unless `DEFAULT_PHRASE_BINDINGS` is opted into |
+| Profiles (cursor sensitivity, smoothing, swipe thresholds, dwell, cooldowns, gesture bindings) | `jarvis.core.profiles.ProfileManager` / `Profile` | Partially — `main.py` reads `smoothing_enabled` from the active profile and cycles profiles with `p` (PHASE 5, wired on `feature/full-integration-voice-llm`); `default` mirrors `config.py`'s real values, no other profile is registered by default |
+| Foreground-app detection cache TTL | `jarvis.core.context_tracker.ForegroundApplicationTracker(cache_ttl=0.5)` | Yes — polled every frame in `main.py`, feeds telemetry (PHASE 6, wired on `feature/full-integration-voice-llm`) |
+| Command history size | `jarvis.core.command_history.CommandHistory(max_size=50)` | Yes — every discrete command dispatch is recorded; `z`/`y` undo/redo (PHASE 9, wired on `feature/full-integration-voice-llm`) |
+| Telemetry history size, optional sink | `jarvis.core.telemetry.TelemetryManager(max_history=500, sink=None)` | Yes — FPS/frame time, gesture and command outcomes recorded every frame (PHASE 8, wired on `feature/full-integration-voice-llm`) |
+| Voice phrase → intent bindings | `jarvis.core.voice_intent_resolver.VoiceIntentResolver(phrase_bindings=...)` | Yes — `main.py` constructs it with `DEFAULT_PHRASE_BINDINGS`, tried before the LLM fallback on every push-to-talk result (PHASE 11, wired on `feature/full-integration-voice-llm`) |
+| LLM action vocabulary, model choice | `jarvis.llm_intent.VALID_ACTIONS` / `LLMIntentResolver(model_path=...)` | Yes — fallback when no phrase matches (`feature/full-integration-voice-llm`) |
+| Voice confidence threshold | `jarvis.main.JarvisApp` constructs `ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)` (`0.5`) | Yes — gates on faster-whisper's own confidence before resolving intent (`feature/full-integration-voice-llm`) |
 
 ## Performance baseline
 
@@ -555,16 +560,20 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
 - **`cv2.putText` (Hershey fonts) cannot render accented characters or `ñ` reliably.**
   This only affects the on-screen virtual keyboard glyphs now (Spanish `ñ`/accents),
   since the legend moved to a Tkinter window that renders Unicode correctly.
-- **No automated test suite.** Verification so far is manual smoke-testing (voice,
-  overlay, packaging) plus ad hoc unit checks of `GestureEngine` with synthetic
-  landmarks, run interactively rather than committed as a test file.
+- **STT+LLM voice control needs its optional dependencies and a ~1GB model
+  download on first use.** `pip install -r requirements-voice.txt`, then
+  `jarvis.llm_intent._ensure_model_path()` downloads the Qwen2.5-1.5B-Instruct
+  GGUF into `assets/` the first time `LLMIntentResolver.resolve()` actually
+  runs (same pattern as the MediaPipe model) — not bundled in the portable
+  `.exe`, so a release build has no voice control out of the box.
+- **No wake word.** Voice listening is push-to-talk (`v` toggles recording) —
+  deliberate, to avoid the extra always-on model/dependency (`openWakeWord`)
+  a wake-word implementation would need.
 
 ## Future work
 
 See [`docs/archive-es/ROADMAP.md`](docs/archive-es/ROADMAP.md) for the full original
-write-up (Spanish). Summary: natural-language voice control via microphone, entirely
-local — `faster-whisper`/`whisper.cpp` for speech-to-text, a small local LLM
-(`Phi-3-mini` or `Llama-3.2-1B/3B` quantized, via `llama.cpp`/`ollama`) restricted to a
-fixed function-calling schema over the actions already implemented in `gestures.py` /
-`os_native.py`, and a lightweight local wake-word model so STT+LLM don't run
-continuously. Not started — deliberately deferred until requested.
+write-up (Spanish) — natural-language voice control is now implemented (see Status,
+`jarvis.voice_capture`/`jarvis.llm_intent`). Still open: a local wake-word model so
+STT doesn't need a manual key press, and bundling the voice dependencies/model into
+the packaged `.exe` release.
