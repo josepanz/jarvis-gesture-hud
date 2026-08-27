@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-08-27)
+
+### Features
+
+- Suprime los 7 gestos de 1 mano restantes durante gestos de 2 manos (TASK-055b)
+  ([`114fb03`](https://github.com/josepanz/jarvis-gesture-hud/commit/114fb036ee59b9a69cb0376c9f66a5f4df5867ad))
+
+Solo LOCK_SESSION y PINCH_DOWN/PINCH_UP estaban protegidos contra un gesto de 2 manos concurrente -
+  SILENCE, KEYBOARD_TOGGLE, SCREENSHOT, ZOOM/VOLUMEN de 1 mano, SCROLL y RIGHT_CLICK corrian igual
+  sobre la mano "primaria" sin importar que estuviera haciendo la otra mano.
+
+_process_two_hand_gestures ahora tambien devuelve two_hand_active - la condicion geometrica cruda de
+  CUALQUIER gesto de 2 manos (shaka/punos/ pinch-zoom/menu meta), no si ya disparo su evento
+  (algunos necesitan sostenerse) - y los 7 chequeos quedan gateados por ese flag. LOCK_SESSION y
+  PINCH_DOWN mantienen su condicion angosta existente sin tocar, ya era correcta para su colision
+  especifica conocida.
+
+Tarea marcada opcional en la spec, se hace ahora porque ademas reduce el trabajo de deteccion de
+  colisiones para cada gesto de 2 manos que se agregue despues (sellos Naruto/JJK/comunes), en vez
+  de repetirlo por gesto mas adelante.
+
+455 tests (8 nuevos), verificado que los 8 fallan sin el cambio y pasan con el. Regresion completa y
+  boot real de la app verificados.
+
+
 ## v0.1.2 (2026-08-27)
 
 ### Bug Fixes
