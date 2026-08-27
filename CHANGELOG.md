@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-08-27)
+
+### Features
+
+- Distancia de pinch en 3D usando el z de los landmarks (TASK-055c)
+  ([`1142e9a`](https://github.com/josepanz/jarvis-gesture-hud/commit/1142e9a91e474577c9b2134e06878ed4a83c1354))
+
+d_thumb_index/_middle/_ring/_pinky (click, click derecho, captura, zoom, volumen) ahora usan
+  _dist3() en vez de _dist() - distancia real 3D en vez de la proyectada en pantalla en 2D.
+  d_thumb_pinky_mcp (usado por SILENCE) queda en 2D, no es pinch-family.
+
+z de MediaPipe ya viene normalizado ~a la misma escala que x, asi que reusar `w` para escalarlo es
+  consistente con como ya se escala x, sin calibracion extra.
+
+Todos los fixtures sinteticos existentes usan z=0, asi que la formula 3D degrada exacto a la 2D para
+  todos ellos - verificado, suite completa sin cambios de comportamiento. Agregado un test nuevo con
+  puntos cerca en (x,y) pero lejos en z, confirmado que sin este fix SI se registraba como pinch
+  (bug real que esto corrige) y con el fix no.
+
+Pendiente, documentado explicitamente en ARCHITECTURE.md: la re-verificacion de los umbrales PINCH_*
+  contra una camara real no se pudo hacer desde este entorno (sin acceso a webcam) - quedan sin
+  cambiar en vez de adivinarlos.
+
+457 tests (2 nuevos), regresion completa, compilacion y boot real de la app verificados.
+
+
 ## v0.2.0 (2026-08-27)
 
 ### Features
