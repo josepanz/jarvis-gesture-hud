@@ -585,6 +585,25 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   because it also reduces the collision-avoidance burden for every future
   two-hand gesture this project adds (Naruto/JJK/common gestures), rather than
   re-litigating it per gesture later.
+- **Pinch-family distances now use the landmark's `z` coordinate (TASK-055c,
+  `openspec/changes/personalization-and-config-ui`) — real 3D distance, not
+  just the 2D screen-projected one.** `d_thumb_index`/`_middle`/`_ring`/`_pinky`
+  (click, right-click, screenshot, zoom, volume) now go through a new
+  `_dist3()` alongside the existing `_dist()` (kept for everything else, e.g.
+  `SILENCE`'s thumb-to-MCP check, which isn't pinch-family). Two points close
+  on screen but far apart in depth are no longer treated as touching. Every
+  existing synthetic fixture uses `z=0`, so the 3D formula degrades exactly to
+  the 2D one for all of them (verified — full suite unchanged). **Real-camera
+  threshold re-verification (`config.py`'s `PINCH_*` constants) was NOT done
+  as part of this task** — this environment has no webcam access, so the
+  thresholds were left numerically unchanged rather than guessed. Do this
+  manually on a real machine before relying on it: MediaPipe's hand landmark
+  `z` is normalized relative to each hand's own wrist and roughly x-scaled,
+  not calibrated real-world depth, so a genuine pinch's 3D distance should be
+  close to but not necessarily identical to its 2D distance — if pinch
+  gestures feel less sensitive after this change, `PINCH_CLICK`/
+  `PINCH_RIGHT_CLICK`/`PINCH_ZOOM`/`PINCH_VOLUME`/`PINCH_SCREENSHOT` may need
+  a small bump.
 
 ## Known limitations
 

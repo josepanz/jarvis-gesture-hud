@@ -79,6 +79,16 @@ class GestureEngine:
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
 
+    @staticmethod
+    def _dist3(p1, p2, w, h):
+        # TASK-055c: distancia real en 3D (no solo proyectada en pantalla) para
+        # los pinch pulgar-dedo. z de MediaPipe ya viene normalizado a ~la misma
+        # escala que x (relativo a la muñeca), asi que reusar `w` para escalarlo
+        # es consistente con como ya se escala x - sin calibracion extra. Dos
+        # puntos cerca en (x, y) pero lejos en z NO estan realmente tocandose;
+        # la distancia 2D no puede distinguir eso.
+        return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h, (p1.z - p2.z) * w)
+
     def _smooth(self, target_x, target_y):
         if not self.smoothing_enabled:
             self.prev_x, self.prev_y = target_x, target_y
@@ -205,11 +215,11 @@ class GestureEngine:
         cam_xy = (int(index.x * w), int(index.y * h))
         self._primary_pos = (index.x, index.y)
 
-        d_thumb_index = self._dist(thumb, index, w, h)
-        d_thumb_middle = self._dist(thumb, middle, w, h)
-        d_thumb_ring = self._dist(thumb, ring, w, h)
-        d_thumb_pinky = self._dist(thumb, pinky, w, h)
-        d_thumb_pinky_mcp = self._dist(thumb, pts[17], w, h)
+        d_thumb_index = self._dist3(thumb, index, w, h)
+        d_thumb_middle = self._dist3(thumb, middle, w, h)
+        d_thumb_ring = self._dist3(thumb, ring, w, h)
+        d_thumb_pinky = self._dist3(thumb, pinky, w, h)
+        d_thumb_pinky_mcp = self._dist(thumb, pts[17], w, h)  # SILENCE - no es pinch-family, queda 2D
 
         # TASK-055: resolucion de prioridad entre gestos de pinch. En un puno con
         # solo pulgar+indice desplegados y pellizcando, las puntas de los demas

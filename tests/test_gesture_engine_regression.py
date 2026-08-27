@@ -487,6 +487,40 @@ class PinchPriorityTests(unittest.TestCase):
         self.assertIn("SCREENSHOT", events)
 
 
+class Pinch3DDistanceTests(unittest.TestCase):
+    """TASK-055c: pinch-family distances use the landmark's z coordinate too,
+    not just the 2D screen-projected (x, y) distance."""
+
+    def test_close_in_xy_but_far_in_z_does_not_register_as_a_pinch(self):
+        engine = GestureEngine()
+        pts = flat(0.5, 0.5)
+        pts[4] = Landmark(0.5, 0.5, 0.0)  # thumb
+        pts[8] = Landmark(0.501, 0.501, 0.1)  # index: ~1px away in (x, y), but far in z
+        # keep the other fingers clearly out of every pinch-family threshold
+        pts[12] = Landmark(0.8, 0.2, 0.0)
+        pts[16] = Landmark(0.8, 0.2, 0.0)
+        pts[20] = Landmark(0.8, 0.2, 0.0)
+        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("PINCH_DOWN", events)
+
+    def test_flat_z_fixtures_behave_identically_to_before_this_task(self):
+        # Every existing fixture in this file uses z=0 throughout - the 3D
+        # formula must degrade exactly to the 2D one in that case. Spot-check
+        # a representative few rather than re-asserting the whole file.
+        engine = GestureEngine()
+        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        self.assertEqual(events, ["PINCH_DOWN"])
+
+        engine = GestureEngine()
+        _, _, events = process(engine, right_click_hand())
+        self.assertEqual(events, ["RIGHT_CLICK"])
+
+        engine = GestureEngine()
+        process(engine, volume_hand(pinky_y=0.5))
+        _, _, events = process(engine, volume_hand(pinky_y=0.35))
+        self.assertIn("VOLUME_UP", events)
+
+
 class ClickCooldownIndependenceTests(unittest.TestCase):
     """PINCH_DOWN and RIGHT_CLICK used to share one cooldown timer
     (last_click_time) - a genuine, unambiguous right-click done shortly after a
