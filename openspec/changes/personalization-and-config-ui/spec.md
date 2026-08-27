@@ -2,247 +2,349 @@
 
 ## 1. Scope
 
-This specification defines the required behavior for the four phases in
+This specification defines the required behavior for the nine phases in
 `proposal.md`. Every requirement SHALL be treated as normative unless marked
 optional/future. Section numbers are stable — code SHOULD reference them as
 `spec.md #N`, matching this project's existing convention.
 
 ---
 
-# PHASE A — Reference icons per gesture
+# PHASE 1 — Detection reliability fixes
 
-## 2.1 Icon generation
+## 1.1 Pinch-priority resolution
 
-Each legend entry SHALL have an associated icon, generated procedurally (no
-hand-authored binary image assets committed to the repository) and cached on
-disk under `jarvis.paths.assets_dir() / "gesture_icons/"`, one PNG per
-gesture key, same lazy-download-and-cache pattern as the MediaPipe model in
-`hand_tracker.py`.
+When more than one pinch-family condition (`PINCH_DOWN`/click,
+`RIGHT_CLICK`, `SCREENSHOT`, zoom, volume — everything in `gestures.py`
+gated by a `d_thumb_*` distance threshold) would independently evaluate to
+true in the same frame, the system SHALL fire at most ONE of them: the one
+whose thumb-to-fingertip distance is smallest (i.e. the tightest, most
+likely intentional pinch). The others SHALL be suppressed for that frame,
+not queued or fired on a later frame from stale state.
 
-Icons SHALL be small: 48×48px or smaller, so the panel stays lightweight
-("livianas" per the original request).
+This SHALL NOT change the currently-correct case: a hand with only ONE
+finger's tip near the thumb (all others clearly extended or clearly curled
+in a way that keeps their tips far from the thumb) continues to behave
+exactly as it does today.
 
-## 2.2 Icon content
+## 1.2 Background / other-person hand filtering
 
-Each icon SHALL visually distinguish itself from every other icon in the set
-(no two gestures may render identical icons). A simple stylized hand
-glyph (palm outline + marked extended/curled fingers) plus a small action
-glyph (e.g. an arrow for scroll, a magnifier for zoom) SHALL satisfy this —
-photorealistic rendering is explicitly not required.
+Before any gesture logic runs, detected hands SHALL be filtered by
+plausibility:
 
-## 2.3 Legend integration
+- A hand whose landmark bounding box occupies less than a configurable
+  minimum fraction of the frame area SHALL be discarded (too small/too far
+  to plausibly be the user's own hand held up to the camera).
+- If more than 2 hands remain after that filter, only the 2 largest (by
+  bounding-box area) SHALL be kept.
+- Two-hand gestures SHALL additionally require the two candidate hands to be
+  within a configurable maximum distance of each other in frame (a rough
+  same-person plausibility check) — if not, two-hand gesture evaluation
+  SHALL be skipped for that frame (single-hand gestures MAY still evaluate
+  against the more plausible/larger of the two).
+
+This is a plausibility heuristic, not person re-identification. It SHALL
+NOT be documented or reported as eliminating all false positives from other
+people in frame — only reducing the common case (a passerby's hand entering
+frame at typical webcam distance, smaller/farther than the user's own hand
+held up close).
+
+## 1.3 Regression requirement
+
+Every existing gesture's currently-passing test SHALL still pass unchanged
+after this phase. This phase adds filtering/priority logic; it SHALL NOT
+change any existing gesture's landmark geometry/thresholds.
+
+---
+
+# PHASE 2 — Landmark / quadrant visualization
+
+## 2.1 Toggle
+
+The overlay SHALL be off by default and toggleable independently from the
+existing debug HUD (`d` key / `ContextualHudRenderer`) — reuse that same
+toggle key/mechanism if practical, or a new one; either is acceptable as
+long as it is documented and does not change the meaning of an existing key.
+
+## 2.2 Content
+
+When enabled, for each hand currently considered (post Phase-1 filtering),
+the overlay SHALL draw, on the camera frame:
+
+- the 21 hand landmarks and the standard connections between them (a
+  skeleton), using plain `cv2` primitives — see `design.md` §3.2 for why
+  `mp.solutions.drawing_utils` is not available here;
+- a bounding quadrant/box around the hand;
+- a visual distinction between the PRIMARY hand (the one driving the
+  pointer/single-hand gestures, per `GestureEngine._pick_primary`) and any
+  other detected hand (e.g. different box color/thickness);
+- the name of the gesture currently being recognized for that hand, if any,
+  positioned near the hand.
+
+## 2.3 Non-interference
+
+Enabling this overlay SHALL NOT change any gesture-detection behavior or
+measurably regress frame rate beyond what's expected of additional drawing
+calls already present for the existing debug HUD.
+
+---
+
+# PHASE 3 — Reference icon infrastructure
+
+(Unchanged from the original version of this proposal.)
+
+## 3.1 Icon generation
+
+Every gesture entry (existing, and every one added by phases 4-7) SHALL have
+an associated icon, generated procedurally (no hand-authored binary image
+assets committed to the repository) and cached on disk under
+`jarvis.paths.assets_dir() / "gesture_icons/"`, one PNG per gesture key,
+same lazy-generate-and-cache pattern as the MediaPipe model download.
+
+Icons SHALL be small: 48×48px or smaller.
+
+## 3.2 Icon content
+
+Each icon SHALL visually distinguish itself from every other icon in the
+set — a stylized hand glyph (palm outline + marked extended/curled fingers,
+one-hand or two-hand as appropriate) plus a small action glyph is
+sufficient; photorealistic rendering is not required.
+
+## 3.3 Legend integration
 
 The legend panel SHALL show, for every entry, its icon next to its existing
-gesture-name/action text, without removing or reformatting the existing text.
+gesture-name/action text. Existing legend behavior (toggle, opacity,
+anchoring, click-through) SHALL be unaffected.
 
-Existing legend behavior SHALL be unaffected:
+## 3.4 Requirement for every new gesture (phases 4-7)
+
+Every task that adds a new recognizable gesture in phases 4-7 SHALL include,
+as part of that same task's acceptance criteria, a working icon for that
+gesture generated via this phase's infrastructure. Icons SHALL NOT be
+deferred to a separate later task once phase 3 exists.
+
+## 3.5 Deferred: animated reference
+
+Unchanged: per-gesture animated (GIF) demonstrations remain explicitly
+deferred, scoped as a future follow-up if requested.
+
+---
+
+# PHASE 4 — One-hand Naruto seals
+
+## 4.1 Roster
+
+At least the following 8 single-hand, static seals SHALL be recognized (see
+`design.md` §4.1 for a starting geometric definition of each, subject to the
+collision-avoidance process, §4.2):
 
 ```text
-Toggle visibility ('h' / TOGGLE_LEGEND gesture)
-Adjust opacity ('+'/'-' / LEGEND_ALPHA_UP/DOWN gesture)
-Corner anchoring
-Click-through on Windows
+Tora   (Tiger)
+Ushi   (Ox)
+U      (Hare)
+Uma    (Horse)
+Hitsuji(Ram)
+Saru   (Monkey)
+Inu    (Dog)
+I      (Boar)
 ```
 
-## 2.4 Deferred: animated reference
+## 4.2 Collision-avoidance process (normative)
 
-Per-gesture animated (GIF) demonstrations are explicitly deferred, not
-implemented in this phase. If pursued later, it SHALL be scoped as its own
-follow-up change, not silently expanded into this one (`apply.md` §12, no
-speculative scope growth).
+Before finalizing thresholds, the implementing agent MUST execute the same
+process specified in the original proposal's design: enumerate every
+existing single-hand pose check (including Phase 1's changes and anything
+already added by an earlier task in this same phase), write a
+synthetic-landmark test per seal proving no collision either direction,
+adjust/rename/drop on conflict. This applies to phases 4, 5, 6, and 7
+individually AND cumulatively — a later phase's new gesture must not
+collide with an earlier phase's new gesture either.
 
----
+## 4.3 Assignability and dispatch
 
-# PHASE B — Naruto hand-seal gestures
+Identical mechanism to the original proposal's Naruto phase: default binding
+dict, overridable via `Profile.gesture_bindings`, dispatched through the
+same fixed-action-vocabulary path already used by voice
+(`_dispatch_voice_action` or equivalent). No new binding mechanism.
 
-## 3.1 Seal roster
+## 4.4 Safety
 
-The system SHALL recognize at least 5 named, single-hand, static seal poses.
-Each seal:
+Unchanged requirement: a seal bound to a `HOLD_REQUIRED`/`DESTRUCTIVE`
+command SHALL NOT bypass that command's existing gating.
 
-- SHALL be detectable from a single frame's 21 hand landmarks (same
-  detection style as existing `gestures.py` pose checks — no temporal
-  sequence/multi-frame chaining required for detection itself, though the
-  existing confirmation-frame/cooldown pattern used by other gestures MAY
-  still apply to avoid single-frame flicker).
-- SHALL NOT collide with any existing gesture's detection condition (see
-  `design.md` §3.2 for the required collision-avoidance process).
-- SHALL be independently assignable to an action (§3.3).
+## 4.5 Icons
 
-## 3.2 Assignability
-
-Each seal SHALL have a default action binding, AND SHALL be overridable via
-the existing `Profile.gesture_bindings` mechanism
-(`jarvis.core.profiles.Profile`, `ProfileManager.get_gesture_binding()`),
-exactly like any other gesture-to-action override already specified for that
-mechanism. No new binding mechanism SHALL be introduced for this phase — see
-`design.md` §4 for why this reuse is correct and sufficient here (Phase C
-later adds a UI on top of the same mechanism).
-
-## 3.3 Action vocabulary
-
-A seal's bound action SHALL come from the same fixed vocabulary already used
-elsewhere in the app: the 11 `Command`-backed gesture actions
-(`jarvis.main._MIGRATED_GESTURES`) plus `MUTE`/`UNDO`/`REDO` plus
-`KEYBOARD_TOGGLE`/`CLOSE_APP` — i.e. exactly
-`jarvis.main._dispatch_voice_action`'s existing input domain. Dispatching a
-resolved seal SHALL reuse that same method (or an equivalent one with
-identical behavior) rather than duplicating the action-execution logic a
-third time (voice already reuses it once).
-
-## 3.4 Safety
-
-A seal bound (by default or by profile override) to a
-`HOLD_REQUIRED`/`DESTRUCTIVE`-safety command (per `commands.py`
-`CommandMetadata.safety`) SHALL NOT bypass that command's existing safety
-gating. No new gesture may silently grant a lower-friction path to a
-sensitive action than gestures already have today.
+Every seal SHALL have an icon per Phase 3 §3.4.
 
 ---
 
-# PHASE C — Settings screen
+# PHASE 5 — Two-hand Naruto seals
 
-## 4.1 Entry point
+## 5.1 Roster
 
-A small always-on-top icon (gear) SHALL be shown on screen (native Tkinter
-window, same construction family as the existing legend/bubble windows in
-`overlay.py`), NOT click-through (it must be clickable, unlike the legend).
-Clicking it SHALL open the settings screen.
+At least the following 5 two-hand, static seals SHALL be recognized (see
+`design.md` §5.1):
 
-## 4.2 Bindings table
+```text
+Ne    (Rat)
+Tatsu (Dragon)
+Mi    (Snake)
+Tori  (Bird)
+Kai   (Release — common non-zodiac seal, included as it's iconic and
+       single-frame-static like the others)
+```
+
+## 5.2 Collision-avoidance
+
+Same process as §4.2, extended to also check against the existing two-hand
+gestures (`both_shaka`, `both_fists`, two-hand pinch-zoom, the anchor+finger-
+count meta-menu) — this is the largest collision surface in this proposal,
+since five NEW two-hand poses join four EXISTING ones.
+
+## 5.3 Assignability, dispatch, safety, icons
+
+Same requirements as §4.3-4.5.
+
+---
+
+# PHASE 6 — Jujutsu Kaisen gestures
+
+## 6.1 Gojo
+
+A two-hand, static "frame" gesture (both hands' thumb+index fingers forming
+roughly perpendicular shapes brought together in front of the upper body/
+face) SHALL be recognized as `JJK_GOJO`. See `design.md` §6.1 for a starting
+geometric definition.
+
+## 6.2 Sukuna (temporal)
+
+A one-hand finger-snap (thumb and middle finger brought together then
+rapidly separated within a short time window) SHALL be recognized as
+`JJK_SUKUNA`. This requires new temporal/motion-impulse detection — see
+`design.md` §6.2 for the required detector design (a reusable component,
+not a one-off).
+
+## 6.3 Megumi
+
+ONE representative one-hand, static pose (not all 10 shikigami-specific
+seals — `proposal.md` §5 non-goals) SHALL be recognized as `JJK_MEGUMI`. See
+`design.md` §6.3.
+
+## 6.4 Collision-avoidance, assignability, dispatch, safety, icons
+
+Same requirements as §4.2-4.5, extended to also check against phases 4-5's
+new seals.
+
+---
+
+# PHASE 7 — Common gestures
+
+## 7.1 Clap
+
+A two-hand, temporal gesture (both hands' centers rapidly closing distance
+to near-contact, then separating, within a short time window) SHALL be
+recognized as `CLAP`. SHALL reuse the temporal-impulse detector built for
+Phase 6's Sukuna snap (`design.md` §6.2) rather than a second, parallel
+implementation.
+
+## 7.2 Korean finger heart
+
+A one-hand, static pose (thumb and index finger crossed near their tips)
+SHALL be recognized as `KOREAN_HEART`. Given its geometric closeness to the
+existing `PINCH_DOWN`/click gesture (`design.md` §7.2 flags this as the
+highest collision risk in this proposal), it SHALL require a brief hold
+duration to confirm (same pattern as `LOCK_SESSION`'s Shaka-hold), NOT
+fire on the same single-frame edge-trigger `PINCH_DOWN` uses. It SHALL NOT
+be reachable through a bare touch-and-release of thumb+index — that
+remains `PINCH_DOWN`'s exclusive behavior.
+
+## 7.3 Collision-avoidance, assignability, dispatch, safety, icons
+
+Same requirements as §4.2-4.5, extended to also check against phases 4-6's
+new gestures. §7.2's hold-confirmation requirement is itself part of this
+collision-avoidance outcome, not a separate mechanism.
+
+---
+
+# PHASE 8 — Settings screen
+
+(Unchanged from the original version of this proposal, except its bindings
+table (§8.2) now lists every trigger added by phases 4-7 too, not just the
+original 5-seal set.)
+
+## 8.1 Entry point
+
+A small always-on-top gear icon (native Tkinter window, NOT click-through)
+SHALL open the settings screen on click.
+
+## 8.2 Bindings table
 
 The settings screen SHALL list every bindable trigger known to the app:
+existing camera gestures, every Phase 4-7 gesture, and registered voice
+phrases — icon, name, current bound action, tooltip, per row.
 
-```text
-Existing camera gestures (jarvis.legend.ENTRIES' gesture column)
-Naruto seals (Phase B)
-Voice phrases (jarvis.core.voice_intent_resolver.DEFAULT_PHRASE_BINDINGS
-  plus any registered via VoiceIntentResolver.register)
-```
+## 8.3 Rebinding
 
-For each row, the screen SHALL show: icon (Phase A, where one exists),
-trigger name, current bound action, and a tooltip (§4.5) describing what the
-trigger does today.
+Any row SHALL be reassignable to any value in the fixed action vocabulary,
+a custom keyboard shortcut, or a previously-defined macro. Persists (§8.6)
+and takes effect immediately.
 
-## 4.3 Rebinding
+## 8.4 Custom shortcuts and macros
 
-The user SHALL be able to change a row's bound action to any value in the
-fixed action vocabulary (spec.md #3.3), OR to one of:
+### 8.4.1 Custom shortcut
 
-- a custom keyboard shortcut (§4.4);
-- a previously-defined macro (§4.4).
-
-A rebind SHALL take effect for the remainder of the session immediately and
-SHALL be persisted (§4.6) so it survives a restart.
-
-## 4.4 Custom shortcuts and macros
-
-### 4.4.1 Custom shortcut
-
-The screen SHALL provide a way to capture a keyboard combination (e.g.
-`ctrl+alt+t`) by listening for key events while a dedicated input has
-keyboard focus. The captured combination SHALL be stored as a normalized
-string (lowercase, `+`-joined, deterministic modifier order — e.g.
-`ctrl+alt+shift+t`) and executed via a new `HotkeyCommand` wrapping
+Captured via focused-widget key events (not a global hook), stored as a
+normalized `+`-joined string, executed via a new `HotkeyCommand` wrapping
 `pyautogui.hotkey(*parts)`.
 
-### 4.4.2 Macro
+### 8.4.2 Macro
 
-The screen SHALL provide a way to compose an ordered list of steps, each
-step being one of:
+An ordered list of `press-key`/`type-text`/`wait-ms` steps, exposed as a
+named `MACRO:<name>` action, executed via a new `MacroCommand` running its
+steps through the same `CommandBus`. A macro's safety level SHALL be at
+least as strict as its strictest step.
 
-```text
-press-key   (reuses PressKeyCommand)
-type-text   (reuses TypeTextCommand)
-wait-ms     (a pause between steps, new, no OS side effect)
-```
+### 8.4.3 Physical macro keys (M1/M2/M3…)
 
-A saved macro SHALL be exposed as a named action addable to the fixed
-vocabulary (namespaced, e.g. `MACRO:<name>`) and executed via a new
-`MacroCommand` that runs its steps in order through the same `CommandBus`
-each step would otherwise go through individually. A macro's declared safety
-level (`commands.py` `CommandMetadata.safety`) SHALL be at least as strict as
-the strictest step it contains — a macro MUST NOT be able to launder a
-`DESTRUCTIVE`/`HOLD_REQUIRED` step into a `SAFE`-looking macro.
+The app SHALL NOT claim native recognition of a vendor macro key as a
+distinct signal. The UI SHALL state this limitation and the workaround
+(remap the key in the keyboard's own vendor software to an unused standard
+combination, then bind that combination here).
 
-### 4.4.3 Physical macro keys (M1/M2/M3…)
+## 8.5 Tooltips
 
-The app SHALL NOT claim to natively recognize a physical "M1" or similar
-vendor macro key as a distinct signal — see `design.md` §6.3. The settings
-screen's help text/tooltip for shortcut capture SHALL state this limitation
-explicitly and SHALL describe the workaround (remap the physical key, in the
-keyboard's own vendor software, to an unused standard key combination; bind
-that combination here).
+Every interactive element SHALL have a hover tooltip explaining what it
+does in plain language.
 
-## 4.5 Tooltips
+## 8.6 Persistence
 
-Every interactive element in the settings screen (rows, buttons, inputs)
-SHALL have a tooltip shown on hover, explaining what it does in plain
-language. No element SHALL rely on an icon or label alone to convey a
-destructive or non-obvious action.
+Bindings (including custom shortcuts and macros) SHALL persist to a
+per-user JSON file outside the repo/install directory. Load automatically on
+next start; fail gracefully (defaults) on a missing/corrupt file; never
+silently clobber a corrupt file (preserve it aside).
 
-## 4.6 Persistence
+## 8.7 Non-blocking
 
-Bindings (including custom shortcuts and macros) SHALL be persisted to a
-per-user JSON file outside the repository/install directory (a user-config
-directory, NOT `jarvis.paths.assets_dir()` — that path is for
-downloaded/generated read-mostly assets, not user-edited state). Persistence
-SHALL:
-
-- load automatically on next app start, restoring the previous session's
-  bindings;
-- fail gracefully on a missing or corrupt file (fall back to defaults, log
-  the problem, never crash app startup);
-- never silently overwrite the file with an empty/default state as a result
-  of a load failure (a corrupt file SHOULD be preserved/renamed aside, not
-  clobbered, so the user's customization isn't destroyed by a bug).
-
-## 4.7 Non-blocking
-
-Opening and using the settings screen SHALL NOT freeze or measurably stall
-the camera loop / `overlay.pump()` cadence, consistent with `design.md` §19
-of the prior change ("HUD code MUST NOT become the source of truth for
-business logic" / must stay non-blocking).
+Opening/using the settings screen SHALL NOT stall the camera loop.
 
 ---
 
-# PHASE D — Voice model download icon
+# PHASE 9 — Voice model download icon
 
-## 5.1 Location
+(Unchanged from the original version of this proposal.)
 
-The download control SHALL live inside the settings screen (Phase C) as a
-row/button — not as a fourth always-on-top corner icon — unless a future
-request explicitly asks for a standalone icon (see `proposal.md`'s
-non-goals: no scope growth beyond what's asked).
+## 9.1 Location
 
-## 5.2 Disclosure
+Inside the settings screen (Phase 8), as a row/button.
 
-Its tooltip SHALL state, before any download starts:
+## 9.2 Disclosure
 
-- the approximate download size (`~1GB`, matching the actual
-  `Qwen2.5-1.5B-Instruct` Q4_K_M GGUF referenced by
-  `jarvis.llm_intent.MODEL_URL`);
-- what the download is for (local voice-command understanding, offline, no
-  cloud calls);
-- that it additionally requires `requirements-voice.txt` to be installed
-  separately (this control does not install Python packages).
+Tooltip states approximate size (~1GB), purpose (local offline voice-command
+understanding), and that `requirements-voice.txt` must be installed
+separately — before any download starts.
 
-## 5.3 Behavior
+## 9.3 Behavior
 
-Clicking it SHALL:
-
-1. Check (via `importlib.util.find_spec`, not a real import) whether
-   `faster_whisper`, `llama_cpp`, and `sounddevice` are importable. If not,
-   show guidance to run `pip install -r requirements-voice.txt` and take no
-   further action.
-2. If present, run `jarvis.llm_intent._ensure_model_path()` (or an
-   equivalent using the same URL/cache path) on a background thread, so the
-   settings screen and camera loop remain responsive.
-3. Report progress (a percentage or a simple "downloading…" state is
-   sufficient — exact UI is an implementation decision, not a normative
-   requirement) and a final ready/error state.
-
-## 5.4 Idempotency
-
-If the model file already exists at the cached path, clicking SHALL report
-"already downloaded" / ready state without re-downloading.
+Checks dependency availability (`importlib.util.find_spec`, no real import)
+first; if present, downloads the model on a background thread with progress
+reported back to the UI; if the model already exists, reports ready without
+re-downloading.

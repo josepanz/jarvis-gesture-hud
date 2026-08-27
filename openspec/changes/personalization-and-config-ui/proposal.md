@@ -2,109 +2,145 @@
 
 ## 1. Summary
 
-This change adds four user-requested capabilities to the existing, shipped application:
+This change adds the following to the existing, shipped application:
 
 ```text
-A. Lightweight reference icons per gesture (legend + future config screen)
-B. Naruto-style hand-seal gestures, assignable to actions
-C. A settings screen (gear icon) with tooltips to bind gestures/keys/macros
-   to actions, including custom shortcuts and M1/M2/M3-style macro keys
-D. A "download voice model" icon inside the settings screen
+1. Two detection-reliability fixes for existing gestures (real bugs, found by
+   reading the current gestures.py — see §2 below).
+2. A toggleable hand-landmark / quadrant visualization overlay, showing which
+   hand and which gesture currently has priority.
+3. Reference icon infrastructure (one pictogram per gesture, generated, not
+   hand-authored binary assets).
+4. The full Naruto hand-seal set: one-hand AND two-hand static seals.
+5. Jujutsu Kaisen-inspired gestures: Gojo, Sukuna, Megumi.
+6. Common gestures: clapping, Korean finger heart.
+7. A settings screen (gear icon) with tooltips to bind any of the above to
+   actions, including custom shortcuts and macros (M1/M2/M3-style keys).
+8. A "download voice model" control inside that settings screen.
 ```
 
-This is an ADDITIVE change. It follows the same incremental philosophy as
+Every new gesture (4, 5, 6) SHALL ship with its icon (3) as part of the same
+task — icons are not a separate, later phase for anything added after this
+proposal's first phase establishes the icon infrastructure.
+
+This is an ADDITIVE change over the currently-shipped app (`main` as of this
+writing). It follows the same incremental philosophy as
 `openspec/changes/multimodal-interaction-core/`: the existing application is
 the baseline, nothing existing SHALL be silently removed or renamed, and every
-phase SHALL leave the application runnable.
+phase SHALL leave the application runnable. It reuses
+`multimodal-interaction-core/apply.md` as its execution protocol verbatim —
+not duplicated here.
 
-This proposal reuses `multimodal-interaction-core/apply.md` as its execution
-protocol — the rules there (one task at a time, stop after each task, test
-before/after, no speculative dependencies, report format) apply verbatim to
-this change too. It is not duplicated here.
-
----
-
-## 2. Ordering rationale (menor a mayor)
-
-The user explicitly asked for phases ordered from lowest to highest
-complexity/effort/token-cost/dependencies. That evaluation, done against the
-CURRENT codebase (not in the abstract):
-
-| Phase | What | Complexity | New deps | Why this position |
-|---|---|---|---|---|
-| **A** | Reference icons per gesture | Low | +Pillow (icon generation only) | Purely additive display feature. `legend.py`'s `ENTRIES` list already separates gesture/action data from rendering — this only adds a third field and one new rendering path. No interaction with the gesture/command pipeline at all. |
-| **B** | Naruto hand-seal gestures | Moderate | None | New pure-Python landmark geometry (same style as existing `_is_shaka`/pinch detectors in `gestures.py`) plus tests. Its "assignable to actions" requirement is satisfied by wiring the already-built-but-dormant `Profile.gesture_bindings` (PHASE 5 of the prior change) into live dispatch — reuse, not new architecture. |
-| **C** | Settings screen (gear icon, tooltips, bindings, custom shortcuts, macros) | High | None (if scoped as specified below) | The only phase that needs genuinely new architecture: a persistence layer (today `ProfileManager` is in-memory only — nothing in this project has ever been saved to disk), a real settings UI, and a `MacroCommand`. Reused carefully, no new dependency is actually required — see §7 of `design.md`. This is the largest phase by file count, test count, and design decisions that need to be gotten right. |
-| **D** | "Download voice model" icon | Low (but gated) | None | Small in isolation — one icon/row, one background download, reusing `jarvis.llm_intent._ensure_model_path()` almost as-is. It is ordered LAST not because it is hard, but because the user's own request makes it conditional on C ("si se decide poner pantalla de menú principal o solo icono, agregar un icono también...") — it needs a place to live. |
-
-Recommended execution order: **A → B → C → D**. Each phase SHOULD be
-implemented, tested, and reported on independently (per `apply.md` §26 — stop
-after each task, do not auto-continue), because the phases are only loosely
-coupled (D depends on C; B depends on nothing new from A; A depends on
-nothing).
+This is a revision of the original, narrower version of this proposal (5
+Naruto seals only, no reliability fixes, no visualization). Nothing from that
+version was implemented yet, so this file replaces it rather than layering on
+top of it.
 
 ---
 
-## 3. Goals
+## 2. Why the reliability fixes come first
 
-The system SHALL, across the four phases:
+While specifying phase 4-6, the current `src/jarvis/gestures.py` was read in
+full to make sure new gestures wouldn't collide with anything existing. That
+reading surfaced two real, reproducible bugs the user independently reported
+from actual use, with a concrete root cause for each — see `design.md` §1 for
+the full analysis. Summary:
 
-1. Show a small reference icon next to every gesture entry in the existing
-   legend panel, without breaking its current toggle/opacity/click-through
-   behavior.
-2. Recognize at least 5 additional, single-hand, static gesture poses
-   inspired by Naruto hand seals, each independently assignable to any
-   action already in the app's fixed action vocabulary.
-3. Provide a settings screen, reachable from a gear icon, where a user can:
-   - see every bindable trigger (gesture, Naruto seal, voice phrase) with an
-     icon, name, and tooltip;
-   - reassign it to a different action from the existing vocabulary;
-   - define a custom keyboard shortcut as an action;
-   - define a multi-step macro as an action;
-   - persist these choices across restarts.
-4. Provide a way, from that same settings screen, to download the optional
-   voice model on demand, with size and purpose disclosed in a tooltip
-   before the user commits to the download.
+- **Pinch confusion (fist vs. open hand):** every pinch-style gesture
+  (click/drag, right-click, screenshot, zoom, volume) computes its own
+  thumb-to-fingertip distance independently, with no check that the OTHER
+  fingers are in a state consistent with that specific gesture. When the
+  hand is a fist with only thumb+index deployed and pinching, the curled
+  middle/ring/pinky fingertips end up physically close to the thumb's resting
+  position too (a natural consequence of a fist's geometry), so more than one
+  pinch condition can become true in the same frame — e.g. `PINCH_DOWN`
+  (click) and `RIGHT_CLICK` firing together. That is exactly the "se
+  confunde" behavior reported.
+- **Cross-person false positives:** `HandLandmarker` is configured for up to
+  2 hands with no size/plausibility filtering. Two-hand gestures
+  (`_process_two_hand_gestures`) use whichever 2 hands MediaPipe returns,
+  with no check that they belong to the same person, are close to the
+  camera, or are even similarly sized. A second person's hand entering frame
+  can combine with the user's own hand to spuriously satisfy a two-hand
+  gesture (including the 1.2s-hold pause and the 1.5s-hold close-app
+  gestures).
 
-## 4. Non-goals (all four phases)
-
-The following SHALL NOT be part of this change:
-
-- Recognizing the full, authentic 12-seal Naruto sequence system (multi-seal
-  chains, two-hand seals). Scoped to single-hand static poses — see
-  `design.md` §3 for the explicit reasoning.
-- Defining brand-new CAMERA gesture shapes through the settings UI (a
-  gesture-recording/training pipeline). The settings UI lets a user REBIND
-  existing triggers (gestures, seals, voice phrases) to actions — it does not
-  let them invent a new hand pose from the UI.
-- Native support for vendor-specific keyboard macro keys (M1/M2/M3) as a
-  distinct OS-level signal. See `design.md` §6.3 for why, and the documented
-  workaround (rebind the physical key in the keyboard's own vendor software
-  to send an unused key combo, then bind that combo here).
-- Actually running `pip install` at runtime to fetch the voice dependencies.
-  Phase D only downloads the model file; missing Python packages are
-  reported to the user with an instruction, never auto-installed.
-- Global (OS-wide, unfocused-window) hotkey capture. Custom shortcuts are
-  captured only while the settings window has keyboard focus.
-- Animated GIF generation from gesture names. Explicitly deferred — see
-  `design.md` §2.4.
+Both are contained fixes to existing code, no new dependency, directly
+improve the reliability of every gesture added by this proposal too — hence
+first in the order, ahead of anything new.
 
 ---
 
-## 5. Compatibility requirement
+## 3. Ordering rationale (menor a mayor)
 
-Same as the prior change (`multimodal-interaction-core/proposal.md` §11):
+| # | Phase | What | Complexity | New deps | Why here |
+|---|---|---|---|---|---|
+| 1 | Reliability fixes | Pinch-priority resolution + background/other-person hand filtering | Low–Moderate | None | Fixes existing, reported bugs. Contained to `gestures.py`. Everything after this benefits from more reliable detection. |
+| 2 | Landmark/quadrant visualization | Debug overlay: skeleton, bounding quadrant, primary hand + active gesture label, toggleable | Low–Moderate | None | Pure drawing/toggle, no new gesture logic. Genuinely useful WHILE building phases 4-7 (visually confirming landmark geometry beats guessing thresholds blind) — sequencing it here is a practical dependency, not just a complexity score. |
+| 3 | Icon infrastructure | Procedural pictogram generation + legend rendering | Low | +Pillow | Self-contained. Every gesture added in phases 4-7 depends on this existing first. |
+| 4 | One-hand Naruto seals | 8 single-hand static zodiac seals | Moderate | None | Same detection style as existing single-hand gestures (`gestures.py`'s pose checks). |
+| 5 | Two-hand Naruto seals | 5 two-hand static zodiac/release seals | Moderate | None | Same style as existing `both_shaka`/`both_fists` two-hand checks — one class harder than phase 4 only because of the 2-hand collision surface (must also not collide with existing pause/close/pinch-zoom/meta-menu two-hand gestures). |
+| 6 | Jujutsu Kaisen gestures | Gojo (2-hand static), Megumi (1-hand static), Sukuna (1-hand TEMPORAL snap) | Moderate–High | None | Sukuna's finger-snap needs a genuinely new capability: temporal/motion-impulse detection (thumb+finger distance drops then rises within a short window). Built once here, reused by phase 7's clap. |
+| 7 | Common gestures | Clap (2-hand temporal, reuses phase 6's impulse detector), Korean finger heart (1-hand static, highest collision risk with existing pinch-click — needs a hold-confirmation like `LOCK_SESSION` already has) | Moderate | None | Reuses phase 6's new temporal-detection machinery; the Korean heart needs the most careful collision handling of any single gesture in this proposal. |
+| 8 | Settings screen | Gear icon, tooltips, bindings table (now listing every trigger from phases 1-7), custom shortcuts, macros, persistence | High | None (see `design.md` §9 for why) | Same reasoning as before: only phase needing a persistence layer + new UI subsystem. Its bindings table is only meaningfully complete once phases 3-7 exist, hence it comes after them. |
+| 9 | Voice model download icon | One row inside the settings screen | Low (gated) | None | Small in isolation; ordered last because it needs phase 8's screen to live in, per the user's own phrasing. |
 
-```text
-Old functionality
-+
-New capability
-=
-Same existing behavior
-+
-New capability
-```
+Recommended execution order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**. Per
+`apply.md` §26, stop after each task and report — do not auto-continue to
+the next phase.
 
-No phase is complete if an existing supported capability (legend
-toggle/opacity, existing gesture set, existing keyboard shortcuts, voice
-control, undo/redo, profiles, telemetry) is silently broken.
+---
+
+## 4. Goals
+
+The system SHALL, across the nine phases:
+
+1. No longer fire more than one pinch-family gesture from a single
+   thumb-to-fingertip configuration in one frame (§ reliability, phase 1).
+2. Substantially reduce (not necessarily eliminate — see `design.md` §1.2's
+   honesty note) spurious two-hand gestures caused by a second person's hand
+   entering frame (phase 1).
+3. Offer a toggleable overlay showing hand landmarks, a bounding
+   quadrant/box per detected hand, which hand is currently "primary", and
+   which gesture (if any) is currently being recognized (phase 2).
+4. Show a small reference icon next to every gesture entry, existing and new
+   (phase 3, applied to every gesture added by phases 4-7 too).
+5. Recognize the one-hand and two-hand Naruto zodiac seal poses listed in
+   `design.md` §4-5, each independently assignable to an action (phases
+   4-5).
+6. Recognize Gojo's, Sukuna's, and Megumi's signature gestures as described
+   in `design.md` §6, each independently assignable to an action (phase 6).
+7. Recognize a two-hand clap and a one-hand Korean finger heart, each
+   independently assignable to an action (phase 7).
+8. Provide the settings screen and voice-download icon exactly as specified
+   in the original proposal (phases 8-9, content unchanged from the prior
+   version of this document, only their position/rationale updated).
+
+## 5. Non-goals
+
+Same as before, plus:
+
+- **Authentic reproduction of every canonical seal/technique.** Real Naruto
+  seals and JJK techniques vary by source panel/episode and are often
+  two-hand finger-interlacing shapes too fine-grained to detect reliably
+  from 21 sparse landmarks. This proposal scopes to a curated,
+  MUTUALLY-DISTINGUISHABLE, recognizable-at-a-glance approximation of each,
+  documented plainly as such (`design.md` §4-6) rather than promised as
+  pixel-perfect canon accuracy.
+- **All 10 of Megumi's shikigami-specific seals.** One representative pose
+  only (`design.md` §6.3).
+- **Perfect rejection of every possible false-positive hand.** The
+  background/other-person filtering in phase 1 is a plausibility heuristic
+  (size, position, continuity) — it reduces, not eliminates, false
+  positives, and this is stated honestly rather than promised as solved.
+- Everything already listed as non-goals in the original proposal (no
+  gesture-authoring-via-UI, no vendor macro-key SDK integration, no runtime
+  `pip install`, no global hotkey capture, no animated GIFs).
+
+---
+
+## 6. Compatibility requirement
+
+Unchanged from the original proposal — no phase is complete if an existing
+supported capability is silently broken, including every gesture that
+already ships today.

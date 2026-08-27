@@ -2,324 +2,463 @@
 
 ## Global execution rule
 
-Same as `multimodal-interaction-core/tasks.md`: tasks MUST be executed
-sequentially unless a task explicitly allows parallelism. The agent MUST NOT
-implement future tasks automatically. Implement only the requested task and
-its explicitly required dependencies. After each task: run relevant tests,
-run the full regression suite, verify acceptance criteria, report changed
-files, do NOT start the next task automatically. Full protocol:
-`multimodal-interaction-core/apply.md` (reused verbatim, not duplicated
-here).
+Tasks MUST be executed sequentially unless a task explicitly allows
+parallelism. The agent MUST NOT implement future tasks automatically.
+Implement only the requested task and its explicitly required dependencies.
+After each task: run relevant tests, run the full regression suite, verify
+acceptance criteria, report changed files, do NOT start the next task
+automatically. Full protocol: `multimodal-interaction-core/apply.md`
+(reused verbatim, not duplicated here).
 
-Task numbering continues from the prior change's last task, TASK-054.
+Task numbering continues from the prior change's last task, TASK-054. This
+file replaces the previous TASK-055–069 draft of this same change (nothing
+in that draft was implemented) with the expanded scope from the revised
+`proposal.md`/`spec.md`/`design.md`.
 
 ---
 
-# PHASE A — Reference icons (lowest complexity — do this first)
+# PHASE 1 — Reliability fixes (do this first)
 
-## TASK-055 — Icon generation module
+## TASK-055 — Pinch-priority resolution
 
 ### Objective
 
-Create `src/jarvis/gesture_icons.py`: declarative `ICON_SPECS`, `ensure_icon(key) -> Path`, `generate_all_icons()`, per `design.md` §2.1–2.2.
+Fix the multi-pinch-firing bug per `design.md` §1.1: only the smallest-
+distance pinch condition fires per frame.
 
 ### Requirements
 
-- Pillow added to `requirements.txt`.
-- Icons generated at ≤48×48px, cached under `jarvis.paths.assets_dir() / "gesture_icons/"`.
-- `ensure_icon()` MUST NOT regenerate an icon that already exists on disk.
-- Cover every existing `jarvis.legend.ENTRIES` gesture (icon key per entry — see TASK-056).
+Per `spec.md` #1.1. Localized to `gestures.py`'s `process()`.
 
 ### Must NOT
 
-- Add `PIL.ImageTk` as a display dependency (display is Tk-native — design.md §2.3).
-- Commit hand-authored binary image files to the repo.
+- Change any existing single-pinch-condition behavior.
+- Change any threshold constant in `config.py`.
 
 ### Acceptance criteria
 
-- Unit tests (no display needed): `ensure_icon()` produces a valid PNG of the expected size; a second call does not rewrite the file (mtime unchanged, or a call-count spy on the draw path shows it wasn't invoked twice); every `ICON_SPECS` key is visually distinguishable from every other by construction (e.g. assert no two specs are structurally identical).
+- Test: fist-with-thumb+index-pinch fixture (curled middle/ring/pinky
+  landing geometrically close to the thumb) fires ONLY `PINCH_DOWN`, not
+  `RIGHT_CLICK`/`SCREENSHOT`/zoom/volume.
+- Test: every existing single-condition fixture in the current gesture
+  regression suite still fires exactly as before (regression).
+- Test: a genuinely ambiguous synthetic fixture (two conditions equally
+  close) fires exactly one event, deterministically (document the
+  tie-break rule chosen).
 
 ---
 
-## TASK-056 — Legend entries gain an icon key
+## TASK-056 — Background / other-person hand filtering
 
 ### Objective
 
-Extend `jarvis.legend.ENTRIES` with a third element (icon key) per entry; add `build_legend_entries()` returning the full tuples. Keep `build_legend_text()` working unchanged.
+Filter implausible hands (too small / not same-person-plausible) before
+gesture logic, per `design.md` §1.2.
 
 ### Requirements
 
-Per `design.md` §2.1. Every entry gets an icon key that exists in `gesture_icons.ICON_SPECS` (TASK-055).
+Per `spec.md` #1.2. New `config.py` constants
+(`MIN_HAND_AREA_FRACTION`, `TWO_HAND_MAX_CENTER_DISTANCE_FRACTION`), chosen
+and verified against a real camera, documented in the task report.
 
 ### Must NOT
 
-- Remove or reformat `build_legend_text()` — anything still calling it must keep working.
+- Reject the user's own two hands at normal desk-webcam distance (verify
+  this manually, per the requirement above — this is the actual risk of
+  this task, more than the filtering logic itself).
+- Claim to eliminate all false positives (`spec.md` #1.2's honesty
+  requirement) — document the limitation in `ARCHITECTURE.md`.
 
 ### Acceptance criteria
 
-- Test: every `ENTRIES` icon key resolves via `gesture_icons.ensure_icon()` without raising.
-- Test: `build_legend_text()` output is byte-identical to before this task (regression).
+- Test: a synthetic small/background hand is filtered out (single-hand
+  case).
+- Test: two hands of implausible size difference or distance don't trigger
+  two-hand gestures.
+- Test: two normal, similarly-sized, reasonably-close hands still trigger
+  two-hand gestures exactly as before (regression).
+- Manual verification note in the report: real camera, user's two hands,
+  both fixes together, no regression in normal use.
 
 ---
 
-## TASK-057 — Legend panel renders icon + text rows
+# PHASE 2 — Landmark / quadrant visualization
+
+## TASK-057 — Hand visualizer overlay
 
 ### Objective
 
-`overlay.ScreenOverlay.init_legend(entries, corner)` renders one icon+text row per entry (design.md §2.4), replacing the single pre-formatted `Label`. `main.py` calls `build_legend_entries()` instead of `build_legend_text()`.
+`src/jarvis/hand_visualizer.py` (`design.md` §2.1): skeleton + bounding
+quadrant + primary/other-hand distinction + active-gesture label, toggle,
+wired into `main.py`'s `run()` loop.
 
 ### Requirements
 
-- Existing legend behavior unchanged: toggle visibility, opacity adjustment, corner anchoring, click-through on Windows (manual verification, per design.md §2.5 — this file has no automated Tk tests today and this task does not need to add real-window automation, only preserve behavior).
+Per `spec.md` #2. Toggle documented (reused debug-HUD key or new one —
+implementer's choice, must be documented either way).
+
+### Must NOT
+
+- Change any gesture-detection behavior when the overlay is on.
+- Regress frame rate beyond what additional drawing calls already cost
+  elsewhere in this project (measure, per `apply.md` §11).
+
+### Acceptance criteria
+
+- Unit tests (no display needed): `HAND_CONNECTIONS`-based line-segment
+  generation is correct for a synthetic 21-point set; bounding-quadrant
+  computation matches the synthetic set's min/max.
+- Manual smoke test: overlay toggles on/off, shows skeleton + quadrant +
+  primary/other distinction + gesture label on a real camera feed.
+- Full regression suite still green with the toggle both on and off.
+
+---
+
+# PHASE 3 — Reference icon infrastructure
+
+## TASK-058 — Icon generation module
+
+### Objective
+
+`src/jarvis/gesture_icons.py`: `ICON_SPECS`, `ensure_icon()`,
+`generate_all_icons()` — per `design.md` §3, `spec.md` #3.1–3.2. Pillow
+added to `requirements.txt`.
+
+### Must NOT
+
+- Add `PIL.ImageTk` as a dependency.
+- Commit hand-authored binary image assets.
+
+### Acceptance criteria
+
+- Tests: `ensure_icon()` produces a valid ≤48×48 PNG; a second call doesn't
+  regenerate; every spec'd icon is structurally distinguishable from every
+  other.
+
+---
+
+## TASK-059 — Legend entries gain icon keys
+
+### Objective
+
+Extend `jarvis.legend.ENTRIES` with an icon key per entry; add
+`build_legend_entries()`. Keep `build_legend_text()` unchanged.
+
+### Acceptance criteria
+
+- Test: every `ENTRIES` icon key resolves via `ensure_icon()`.
+- Test: `build_legend_text()` output byte-identical to before this task.
+
+---
+
+## TASK-060 — Legend panel renders icon + text rows
+
+### Objective
+
+`overlay.ScreenOverlay.init_legend(entries, corner)` renders icon+text rows
+per `design.md` §3 (same as the original proposal's version of this task).
+`main.py` calls `build_legend_entries()`.
 
 ### Must NOT
 
 - Start a second `Tk()` root.
-- Change the legend's toggle/opacity keyboard bindings.
+- Change legend toggle/opacity keyboard bindings.
 
 ### Acceptance criteria
 
-- Manual smoke test on Windows: legend shows icons, `h` still toggles it, `+`/`-` still change opacity, panel still click-through.
-- Full existing test suite still green (nothing in `tests/` constructs `ScreenOverlay` today, so this is a compile/import-safety check plus the manual smoke test).
+- Manual smoke test: icons visible, toggle/opacity/click-through unchanged.
 
 ---
 
-# PHASE B — Naruto hand-seal gestures (moderate complexity)
+# PHASE 4 — One-hand Naruto seals
 
-## TASK-058 — Collision-avoidance census and roster finalization
+## TASK-061 — One-hand roster collision census
 
 ### Objective
 
-Execute `design.md` §3.2's required process: enumerate every existing gesture check in `gestures.py`, propose final landmark thresholds for the 5-seal roster (`design.md` §3.1), adjust/rename/drop any seal that collides.
+Execute `design.md` §4.2's process for the 8-seal roster in §4.1, resolving
+the `Saru`/Shaka-collision flag explicitly.
 
 ### Must produce
 
-A short written note (in the task report, per `apply.md` §27) listing the final roster with one line of geometric definition each, and confirmation no collision was found (or what was changed to resolve one).
+Written roster note in the task report (final geometric definition per
+seal, confirmation of no collision or what changed to resolve one).
 
 ### Must NOT
 
 - Modify any existing gesture's detection logic.
+- Write detector code in this task (analysis only, feeds TASK-062).
 
 ### Acceptance criteria
 
-- The written roster note exists in the task report.
-- No code changes in this task beyond the note (this is an analysis task feeding TASK-059).
+- Roster note exists and explicitly addresses the `Saru` flag.
 
 ---
 
-## TASK-059 — Seal detectors and engine wiring
+## TASK-062 — One-hand seal detectors
 
 ### Objective
 
-Implement `is_naruto_<name>(landmarks) -> bool` for the roster finalized in TASK-058, wired into `GestureEngine.process()`, emitting `NARUTO_<NAME>` events.
-
-### Requirements
-
-Per `design.md` §3.3, `spec.md` #3.1.
-
-### Must NOT
-
-- Change any existing gesture's event name or trigger condition.
+Implement `is_naruto_<name>()` for TASK-061's finalized roster, wired into
+`GestureEngine.process()`, emitting `NARUTO_<NAME>` events.
 
 ### Acceptance criteria
 
-- One positive synthetic-landmark test per seal.
-- One negative test per seal against every existing gesture fixture (no false positive) and vice versa — `design.md` §3.2's process, made permanent as tests.
-- Full existing `GestureEngine` regression suite still green.
+- One positive synthetic test per seal.
+- One negative test per seal against every existing gesture fixture
+  (including Phase 1's fixes) and vice versa.
+- Full regression suite green.
 
 ---
 
-## TASK-060 — Seal-to-action dispatch and icons
+## TASK-063 — One-hand seal dispatch and icons
 
 ### Objective
 
-Wire `NARUTO_<NAME>` events to actions via `Profile.gesture_bindings`, reusing `_dispatch_voice_action` (`design.md` §3.3, `spec.md` #3.2–3.4). Add an icon per seal (extends TASK-055's `ICON_SPECS`, reuse — not a new icon system).
-
-### Requirements
-
-- `NARUTO_SEAL_DEFAULT_BINDINGS` dict with a sensible default per seal, documented in the task report.
-- A seal bound to a `HOLD_REQUIRED`/`DESTRUCTIVE` command must not bypass that command's existing gating (`spec.md` #3.4) — verify by test (e.g. bind a seal to `LOCK_SESSION` and confirm the existing hold/confirmation behavior still applies, not an instant unguarded execution).
-
-### Must NOT
-
-- Duplicate the action-execution logic that already exists for voice.
+Wire `NARUTO_<NAME>` events to actions via `Profile.gesture_bindings` +
+`_dispatch_voice_action` reuse (`design.md` §4.3). Icon per seal (TASK-058's
+infra).
 
 ### Acceptance criteria
 
 - Test: default binding dispatches the right `Command`.
-- Test: a `Profile` override changes the dispatched action.
-- Test: an unbound seal (no default, no override) is a safe no-op.
-- Live-integration check (extend `tests/manual_live_integration_check.py`) exercising one seal end-to-end, same pattern as the existing voice-dispatch checks.
+- Test: profile override changes the dispatched action.
+- Test: unbound seal is a safe no-op.
+- Test: a seal bound to a `HOLD_REQUIRED` command doesn't bypass its gating.
+- Live-integration check extended with one seal end-to-end.
 
 ---
 
-# PHASE C — Settings screen (highest complexity — do this after A and B)
+# PHASE 5 — Two-hand Naruto seals
 
-## TASK-061 — Persistence layer
+## TASK-064 — Two-hand roster collision census
 
 ### Objective
 
-`src/jarvis/core/config_store.py`: `load_bindings()`/`save_bindings()`, JSON schema per `design.md` §5.2, atomic write, corrupt-file-preserved-not-clobbered handling (`spec.md` #4.6).
+Execute `design.md` §5.2's process for the 5-seal roster in §5.1, against
+BOTH existing two-hand gestures AND phase 4's new one-hand seals.
 
-### Must NOT
+### Must produce
 
-- Touch `jarvis.paths.assets_dir()` — this is user-edited state, not a downloaded/generated asset (`spec.md` #4.6).
-- Ever raise out of `load_bindings()` for a missing/corrupt file.
+Written roster note, same format as TASK-061, explicitly listing which
+existing two-hand gesture each new seal was checked against.
 
 ### Acceptance criteria
 
-- Tests: round-trip save→load; missing file → `{}`/defaults, no exception; corrupt JSON → old file preserved under a `.bak-*` name, defaults returned, no exception; concurrent-crash-safety is satisfied by construction (temp file + `os.replace`), not required to be tested by inducing an actual crash.
+Same as TASK-061, scaled to the larger collision surface (`design.md` §5.1
+flags this as the hardest census in the proposal — budget accordingly, may
+legitimately take longer/more iteration than other census tasks).
 
 ---
 
-## TASK-062 — ProfileManager (de)serialization
+## TASK-065 — Two-hand seal detectors
 
 ### Objective
 
-Bridge `config_store`'s schema to `Profile`/`ProfileManager` construction — `to_dict()`/`from_dict()` (or equivalent adapter functions), per `design.md` §5.2.
-
-### Must NOT
-
-- Introduce a second in-memory representation of a profile alongside the existing `Profile` dataclass (`apply.md` §14).
+Implement the finalized two-hand seal checks inside
+`_process_two_hand_gestures`, following the existing `both_shaka`/
+`both_fists` hold-then-confirm timing pattern.
 
 ### Acceptance criteria
 
-- Round-trip test: construct a `Profile` with bindings, `to_dict()`, `from_dict()`, assert equality.
-- Existing `test_profiles.py` suite still green, unchanged behavior for anything not touching (de)serialization.
+- Same test structure as TASK-062, extended to two-hand synthetic fixtures.
+- Explicit test: each new seal does NOT also satisfy `both_shaka`,
+  `both_fists`, `both_pinching`, or the meta-menu's `fists[0] != fists[1]`
+  condition, and vice versa.
 
 ---
 
-## TASK-063 — HotkeyCommand and MacroCommand
+## TASK-066 — Two-hand seal dispatch and icons
+
+Same structure as TASK-063, for the phase 5 roster.
+
+---
+
+# PHASE 6 — Jujutsu Kaisen gestures
+
+## TASK-067 — Temporal impulse detector primitive
 
 ### Objective
 
-`src/jarvis/actions/macro.py`: `HotkeyCommand(combo)`, `MacroCommand(steps)`, per `design.md` §5.3, `spec.md` #4.4.1–4.4.2.
+`src/jarvis/temporal_gesture.py`: `ImpulseDetector` per `design.md` §6.2 —
+the first temporal/motion-pattern primitive in this codebase (existing
+gestures are single-frame-state or simple hold-timers, not
+drop-then-rise-within-a-window patterns).
 
 ### Requirements
 
-- Both are real `Command` subclasses, flow through `CommandBus` unchanged.
-- `MacroCommand`'s `metadata.safety` is at least as strict as its strictest step (`spec.md` #4.4.2) — implement and test this explicitly, it's a safety requirement, not a nice-to-have.
+`update(distance, now) -> bool`, fires exactly once per completed impulse,
+configurable contact/release thresholds and max window.
+
+### Acceptance criteria
+
+- Test: a synthetic distance sequence that drops below contact and rises
+  above release within the window fires exactly once.
+- Test: a sequence that drops but never rises within the window does not
+  fire.
+- Test: a sequence that stays below contact for a long time (a sustained
+  pinch, not a snap) does not fire — this is the discrimination this
+  primitive exists for (`design.md` §6.2).
+- Test: two consecutive genuine impulses each fire once, independently.
+
+---
+
+## TASK-068 — Gojo and Megumi static detectors
+
+### Objective
+
+Implement `JJK_GOJO` (two-hand static, `design.md` §6.1) and `JJK_MEGUMI`
+(one-hand static, §6.3), including the collision census against phases 1,
+4, 5, and each other (Megumi vs. Hitsuji explicitly, per §6.3).
+
+### Acceptance criteria
+
+Same test structure as TASK-061/064, applied to these two gestures.
+
+---
+
+## TASK-069 — Sukuna snap detector
+
+### Objective
+
+`JJK_SUKUNA` using TASK-067's `ImpulseDetector` on `d_thumb_middle`
+(`design.md` §6.2), including the temporal-discrimination test against
+`RIGHT_CLICK`'s sustained pinch.
+
+### Acceptance criteria
+
+- Test: a snap-shaped landmark sequence fires `JJK_SUKUNA`, not
+  `RIGHT_CLICK`.
+- Test: a sustained right-click-pinch sequence fires `RIGHT_CLICK`, not
+  `JJK_SUKUNA`.
+
+---
+
+## TASK-070 — JJK dispatch and icons
+
+Same structure as TASK-063/066, for Gojo/Sukuna/Megumi. Note in the report
+that Sukuna's icon should visually communicate "snap"/motion (e.g. a small
+motion-line glyph), not just a static hand shape, since it's temporal.
+
+---
+
+# PHASE 7 — Common gestures
+
+## TASK-071 — Clap detector
+
+### Objective
+
+`CLAP` via a second `ImpulseDetector` instance (TASK-067) tracking two-hand
+palm-center distance, per `design.md` §7.1.
 
 ### Must NOT
 
-- Add a new dependency for hotkey execution (`pyautogui.hotkey()` already covers it — `design.md` §5.3).
+- Reimplement impulse detection — reuse `ImpulseDetector`.
 
 ### Acceptance criteria
 
-- Test: `HotkeyCommand("ctrl+alt+t").execute()` calls `pyautogui.hotkey("ctrl", "alt", "t")` (mocked).
-- Test: `MacroCommand` runs steps in order, including a `wait-ms` step producing a measurable (mocked `time.sleep`) delay.
-- Test: a macro containing a `HOLD_REQUIRED` step reports `HOLD_REQUIRED` (or stricter) as its own safety, never `SAFE`.
-- Test: `CommandBus.dispatch(MacroCommand(...))` records one `CommandHistory` entry (not one per step) — confirm this is the intended granularity before asserting it (implementer's call, documented in the report if it differs).
+- Test: a hands-closing-then-separating sequence fires `CLAP` once.
+- Test: hands merely passing near each other without reaching the contact
+  threshold does not fire `CLAP`.
+- Collision check against phases 1/4/5/6's two-hand gestures.
 
 ---
 
-## TASK-064 — Tooltip helper
+## TASK-072 — Korean finger heart detector
 
 ### Objective
 
-`Tooltip` class in `src/jarvis/settings_ui.py`, per `design.md` §5.5.
+`KOREAN_HEART`, one-hand static + hold-confirmation, per `design.md` §7.2 —
+the highest collision-risk gesture in this proposal (explicit geometric
+closeness to `PINCH_CLICK`).
 
-### Acceptance criteria
+### Requirements
 
-- Manual verification only (real Tk widget) — no automated test required for this task; note this explicitly in the report rather than skipping silently.
-
----
-
-## TASK-065 — Gear icon window
-
-### Objective
-
-A small, always-on-top, clickable (NOT click-through) gear icon window, per `design.md` §5.7, opening the settings screen on click.
+Hold duration required (new `config.py` constant), NOT edge-triggered like
+`PINCH_DOWN`.
 
 ### Must NOT
 
-- Overlap the existing legend panel's default corner.
-- Apply `_make_click_through()` to this window (it must remain clickable, unlike the legend/bubbles).
+- Make a bare touch-and-release of thumb+index ever resolve to
+  `KOREAN_HEART` instead of `PINCH_DOWN`/`PINCH_UP` — this MUST remain
+  impossible by construction (tested), not just unlikely.
 
 ### Acceptance criteria
 
-- Manual smoke test: icon visible, clickable, opens settings window, doesn't block the camera loop.
+- Test: a fast touch-and-release fires `PINCH_DOWN`/`PINCH_UP` only.
+- Test: a sustained pose past the hold duration fires `KOREAN_HEART`, and
+  does NOT also fire `PINCH_DOWN` (confirm via TASK-055's priority
+  resolution, extended to include this gesture in the pinch-family
+  ambiguity set if its geometry participates in it).
 
 ---
 
-## TASK-066 — Settings screen: bindings table
+## TASK-073 — Common-gesture dispatch and icons
 
-### Objective
-
-`SettingsWindow` lists every bindable trigger (gestures, seals, voice phrases) with icon, name, current action, tooltip — per `spec.md` #4.2.
-
-### Requirements
-
-Source the trigger list from `jarvis.legend.ENTRIES`, the Phase B seal roster, and `VoiceIntentResolver`'s registered phrases — do not hand-maintain a fourth duplicate list.
-
-### Acceptance criteria
-
-- Manual smoke test: table shows all triggers with correct current bindings on open.
+Same structure as TASK-063/066/070, for Clap and Korean finger heart.
 
 ---
 
-## TASK-067 — Settings screen: rebind, custom shortcut capture, macro builder
+# PHASE 8 — Settings screen
 
-### Objective
+## TASK-074 — Persistence layer
 
-Implement rebinding a row to any fixed-vocabulary action, custom-shortcut capture (`design.md` §5.4), and the macro step builder (`spec.md` #4.4.2), all inside `SettingsWindow`.
+`src/jarvis/core/config_store.py`, per `design.md` §9 (full detail already
+specified in the original proposal — `spec.md` #8.6). Same acceptance
+criteria as before: round-trip test, missing-file-safe, corrupt-file-
+preserved-not-clobbered.
 
-### Requirements
+## TASK-075 — ProfileManager (de)serialization
 
-- Shortcut capture only while the dedicated input has focus (no global hook, no new dependency — `spec.md` non-goals).
-- The M1/M2/M3 limitation and workaround (`spec.md` #4.4.3, `design.md` §6.3) is shown as help text/tooltip near the shortcut-capture control.
+`to_dict()`/`from_dict()`, per `spec.md` #8.6. Round-trip test, no second
+in-memory representation.
 
-### Must NOT
+## TASK-076 — HotkeyCommand and MacroCommand
 
-- Add `pynput`/`keyboard` or any global-hotkey dependency.
+`src/jarvis/actions/macro.py`, per `spec.md` #8.4. `MacroCommand` safety =
+strictest step. No new dependency (`pyautogui.hotkey()` already covers
+execution).
 
-### Acceptance criteria
+## TASK-077 — Tooltip helper
 
-- Manual smoke test: rebind a row, capture a shortcut, build a 2-step macro, all visibly reflected in the UI before saving.
+`Tooltip` class, manual verification only (documented as such in the
+report, not silently skipped).
+
+## TASK-078 — Gear icon window
+
+Always-on-top, clickable (not click-through), opens the settings screen.
+
+## TASK-079 — Settings screen: bindings table
+
+Lists every trigger from `jarvis.legend.ENTRIES` + phases 4-7's rosters +
+registered voice phrases — sourced from those existing structures, not a
+hand-maintained duplicate.
+
+## TASK-080 — Settings screen: rebind, shortcut capture, macro builder
+
+Per `spec.md` #8.3-8.4, including the M1/M2/M3 help text (§8.4.3). No
+global-hotkey dependency.
+
+## TASK-081 — Wire persistence into the live app
+
+Startup loads and applies bindings before the camera loop starts; save on
+change; gesture/seal/voice dispatch all resolve through possibly-overridden
+bindings. Extend `manual_live_integration_check.py`. Full regression suite
+green. Real app boot verified.
+
+(TASK-074–081 acceptance criteria are otherwise unchanged from the original
+version of this proposal — see git history of this file if the earlier
+draft's exact wording is needed; not reproduced a second time here to keep
+this revision focused on what actually changed.)
 
 ---
 
-## TASK-068 — Wire persistence into the live app
+# PHASE 9 — Voice model download icon
 
-### Objective
+## TASK-082 — Voice model download row
 
-Settings changes call `config_store.save_bindings()`; app startup calls `config_store.load_bindings()` and applies it to `ProfileManager` before the camera loop starts; gesture/seal/voice dispatch all resolve through the now-possibly-overridden bindings.
-
-### Requirements
-
-Per `spec.md` #4.3, #4.6.
-
-### Acceptance criteria
-
-- Integration test (extend `tests/manual_live_integration_check.py`): rebind an action via the settings API (not necessarily clicking real UI — calling the underlying save/apply functions is sufficient), restart `JarvisApp` construction, confirm the new binding is active.
-- Full regression suite still green.
-- Real app boot still succeeds (existing discipline for every phase in this project).
-
----
-
-# PHASE D — Voice model download icon (do this last — depends on Phase C)
-
-## TASK-069 — Voice model download row
-
-### Objective
-
-Add the row/button described in `spec.md` §5, `design.md` §7 to `SettingsWindow`.
-
-### Requirements
-
-- Tooltip discloses size, purpose, and the separate `requirements-voice.txt` install step, before any download starts (`spec.md` #5.2).
-- Dependency check via `importlib.util.find_spec`, never a real import just to check (`spec.md` #5.3 step 1).
-- Download runs on a background thread; UI updates are scheduled back onto the Tk thread (`design.md` §7.2) — never touch a Tk widget from the download thread directly.
-- Idempotent: already-downloaded state is detected and shown without re-downloading (`spec.md` #5.4).
-
-### Must NOT
-
-- Attempt `pip install` at runtime.
-- Block the settings window or camera loop during download.
-
-### Acceptance criteria
-
-- Test: dependency-missing path shows guidance, does not start a download (mocked `find_spec`).
-- Test: dependency-present path starts a background download calling the existing model-path-ensuring function (mocked network call — no real 1GB download in CI).
-- Test: already-downloaded path reports ready state without invoking the download.
-- Manual smoke test (optional, requires `requirements-voice.txt` installed): a real download completes and the state updates to ready.
+Per `spec.md` #9, `design.md` §10 — unchanged from the original proposal.
+Dependency check via `find_spec` (no real import), background-thread
+download, progress reporting, idempotent on already-downloaded model. Tests:
+deps-missing path, deps-present path (mocked network), already-downloaded
+path.

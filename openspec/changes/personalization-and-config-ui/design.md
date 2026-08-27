@@ -1,419 +1,453 @@
 # JARVIS Gesture HUD — Personalization & Config UI — Design
 
-## 1. Design objective
+## 0. Design objective
 
-Deliver the four phases in `proposal.md` with the smallest real architectural
-footprint: reuse `Profile.gesture_bindings`, `CommandBus`, `Command`, and the
-existing lazy-model-download pattern (`hand_tracker.py`, `llm_intent.py`)
-rather than inventing parallel mechanisms. Only Phase C introduces genuinely
-new architecture (persistence), because nothing else needed it before.
+Deliver the nine phases in `proposal.md` with the smallest real
+architectural footprint, fixing two real reported bugs first, adding one
+reusable temporal-gesture primitive (used by two different phases instead of
+twice), and reusing `Profile.gesture_bindings`/`CommandBus`/`Command`/the
+existing lazy-download pattern everywhere they already fit.
 
 ---
 
-# 2. PHASE A — Reference icons
+# 1. PHASE 1 — Reliability fixes: root-cause analysis
 
-## 2.1 New module: `src/jarvis/gesture_icons.py`
+## 1.1 Pinch confusion — confirmed by reading `gestures.py`
+
+`gestures.py`'s `process()` computes, every frame, independently:
 
 ```python
-ICON_SPECS = {
-    "pointer": [...],       # declarative draw ops, see 2.2
-    "click_drag": [...],
-    ...
-}
-
-def ensure_icon(key: str) -> Path:
-    """Generates (if missing) and returns the cached PNG path for `key`."""
-
-def generate_all_icons() -> None:
-    """Convenience: ensure_icon() for every key in ICON_SPECS. Called once at
-    app startup (cheap - each icon is generated at most once, ever, then
-    cached under assets/gesture_icons/)."""
+d_thumb_index = self._dist(thumb, index, w, h)
+d_thumb_middle = self._dist(thumb, middle, w, h)
+d_thumb_ring = self._dist(thumb, ring, w, h)
+d_thumb_pinky = self._dist(thumb, pinky, w, h)
 ```
 
-`ICON_SPECS` keys SHOULD match `jarvis.legend.ENTRIES`' existing gesture
-strings closely enough to look up 1:1 — recommend adding a third element
-(icon key) to each `ENTRIES` tuple rather than trying to derive one from the
-free-text gesture description:
+...and then four SEPARATE `if d_thumb_X < THRESHOLD` checks (screenshot,
+zoom, volume, click, right-click), each gating its own event, with no
+cross-check that the OTHER three fingers are in a state consistent with
+that specific gesture (only volume/zoom additionally check `index`'s
+extended/curled state; click and right-click check only the thumb distance).
+
+In a natural fist with just thumb+index deployed and pinching, the curled
+middle/ring/pinky fingertips fold in near the palm — which, depending on
+hand size/camera angle, can land close enough to the thumb's resting point
+to ALSO satisfy `d_thumb_middle < PINCH_RIGHT_CLICK` (or ring/pinky
+thresholds) in the same frame `d_thumb_index < PINCH_CLICK` is true. Both
+`PINCH_DOWN`(click) and `RIGHT_CLICK` (or worse, `SCREENSHOT`/volume/zoom)
+can fire together. `main.py`'s dispatch loop
+(`for event in events: self._dispatch(...)`) executes every event in the
+list, so this isn't just a detection artifact — it becomes a real, visible,
+"confused" multi-action firing.
+
+### Fix
+
+Resolve pinch-family ambiguity BEFORE building `events`, as one explicit
+step:
 
 ```python
-ENTRIES = [
-    ("Índice movido", "Puntero", "pointer"),
-    ("Pulgar + Índice (pinch)", "Click / Drag", "click_drag"),
-    ...
+PINCH_CANDIDATES = [
+    ("SCREENSHOT_PINCH", d_thumb_ring, config.PINCH_SCREENSHOT),   # existing extra conditions still apply
+    ("ZOOM_PINCH",       d_thumb_ring, config.PINCH_ZOOM),
+    ("VOLUME_PINCH",     d_thumb_pinky, config.PINCH_VOLUME),
+    ("CLICK_PINCH",      d_thumb_index, config.PINCH_CLICK),
+    ("RIGHT_CLICK_PINCH",d_thumb_middle, config.PINCH_RIGHT_CLICK),
 ]
+matches = [(name, dist) for name, dist, threshold in PINCH_CANDIDATES if dist < threshold]
+winner = min(matches, key=lambda m: m[1])[0] if matches else None
 ```
 
-This is a backward-compatible extension (adds a field, doesn't remove one) —
-`build_legend_text()` keeps working unchanged for anything still consuming
-it; add a new `build_legend_entries()` that returns the full tuples
-(icon-aware callers use this one, per `spec.md` #2.3).
+Then each existing `if d_thumb_X < THRESHOLD:` branch additionally requires
+`winner == "<ITS_NAME>"`. This is a minimal, localized change: it does not
+touch any branch's existing extra conditions (e.g. screenshot's
+`index.y > pts[6].y and pinky.y > pts[18].y`), it only adds one more
+AND-condition per branch, computed once up front. The exact constant names
+above are illustrative — the implementer MAY name them differently as long
+as the priority-by-smallest-distance behavior is preserved and tested.
 
-## 2.2 Drawing approach
+### Regression risk
 
-Use `PIL.Image` (`"L"` or `"RGBA"` mode, small canvas e.g. 48×48) +
-`PIL.ImageDraw` primitives (`line`, `ellipse`, `polygon`) to draw a stylized
-hand: a rounded palm shape, 5 finger stubs, each independently
-extended/curled per the icon's spec, plus a small overlay glyph for the
-resulting action (e.g. a circular arrow for scroll/zoom, a speaker for
-volume). This is the same level of visual fidelity as a simple pictogram —
-enough to be recognizable at a glance, not a realistic hand.
+Low. The ONLY behavior change is when TWO OR MORE pinch conditions were
+simultaneously true before (which was always a bug, per the user's report —
+never an intentional multi-fire). When only one condition is true (the
+common, correct case today), `winner` is that one condition and nothing
+changes.
 
-`ICON_SPECS[key]` SHOULD be a small declarative structure (e.g. a bitmask of
-which fingers are extended + an optional glyph name) rather than raw
-per-pixel draw calls duplicated per icon, so adding an icon for Phase B's
-seals is a short entry, not a new function.
+## 1.2 Cross-person false positives — confirmed by reading `gestures.py`
 
-## 2.3 Display (no `PIL.ImageTk` needed)
+`HandLandmarker` is constructed with `num_hands=config.MAX_HANDS` (2).
+`_process_two_hand_gestures` uses `hands[0]`/`hands[1]` directly — whatever
+MediaPipe returns as its top-2-confidence detections, with zero filtering
+for hand size, position, or same-person plausibility. If a second person's
+hand (or, at extreme confidence-threshold edge cases, any sufficiently
+hand-like object) is detected, it becomes eligible for every two-hand
+gesture: pause (1.2s hold), close-app (1.5s hold), pinch-zoom, and the
+meta-action menu.
 
-`tkinter.PhotoImage(file=str(png_path))` reads PNG/GIF natively since Tk 8.6
-(bundled with the Python versions this project already requires — no new
-runtime dependency for DISPLAY). Only GENERATING the PNG needs Pillow. This
-avoids `ImageTk`, which has occasionally fragile Tk-linking behavior across
-platforms/PyInstaller builds — worth avoiding when a simpler native path
-exists.
+### Fix
 
-## 2.4 `overlay.py` change
+A new filtering step, run once per frame BEFORE any gesture logic (both
+single- and two-hand), in `hand_tracker.py` or a thin wrapper in
+`gestures.py` (implementer's choice — keeping it in `gestures.py` avoids
+changing `HandTracker`'s public contract, but `hand_tracker.py` already
+knows frame dimensions and is arguably the more natural owner; document
+whichever is chosen):
 
-`init_legend(text, corner)` SHALL become `init_legend(entries, corner)`
-where `entries` is a list of `(icon_path_or_None, gesture_text, action_text)`
-— the panel becomes a vertical stack of small `Frame(icon Label + text
-Label)` rows instead of one big `Label` with a pre-formatted string. Keep
-the same `Toplevel`/`overrideredirect`/`click-through`/alpha logic
-unchanged; only the interior layout changes.
+```python
+def _bbox_area_fraction(landmarks, w, h):
+    xs = [p.x for p in landmarks]; ys = [p.y for p in landmarks]
+    bbox_w = (max(xs) - min(xs)) * w
+    bbox_h = (max(ys) - min(ys)) * h
+    return (bbox_w * bbox_h) / (w * h)
 
-`main.py`'s `self.overlay.init_legend(build_legend_text())` becomes
-`self.overlay.init_legend(build_legend_entries())`.
+def filter_plausible_hands(hands, w, h, min_area_fraction=config.MIN_HAND_AREA_FRACTION):
+    plausible = [h for h in hands if _bbox_area_fraction(h.landmarks, w, h) >= min_area_fraction]
+    plausible.sort(key=lambda h: _bbox_area_fraction(h.landmarks, w, h), reverse=True)
+    return plausible[:2]
+```
 
-## 2.5 Testing
+...plus, specifically for two-hand gesture eligibility (not single-hand
+pointer/gesture eligibility, which can still use the larger/more plausible
+one alone):
 
-`overlay.py` has never had automated tests (real Tkinter windows, previously
-only manually smoke-tested — see `ARCHITECTURE.md` Known limitations). Keep
-that boundary: put all TESTABLE logic in `gesture_icons.py` (pure
-generation, no Tk) and `legend.py`'s `build_legend_entries()` (pure data),
-both fully unit-testable without a display. `overlay.py`'s row-layout change
-stays manually verified, consistent with how the rest of that file is
-validated today.
+```python
+def hands_plausibly_same_person(h1, h2, w, h, max_center_distance_fraction):
+    # centers of each hand's bbox; reject if too far apart relative to frame size
+    ...
+```
 
-## 2.6 Deferred: GIFs
+`config.py` gains `MIN_HAND_AREA_FRACTION` and
+`TWO_HAND_MAX_CENTER_DISTANCE_FRACTION`, both tunable, defaulted
+conservatively (permissive enough not to reject the user's own two hands at
+a normal desk-webcam distance — the implementer MUST verify this against a
+real camera during implementation, same practice as every existing threshold
+in `config.py`, and report the chosen defaults and why in the task report).
 
-Tk can technically cycle GIF frames natively (`PhotoImage(format="gif -index
-N")` + `.after()`), so an animated version wouldn't need a new dependency
-either — but "a GIF generated from the gesture's text" isn't a well-defined
-transformation, and authoring real per-gesture animations is a much bigger
-asset-creation effort than a static pictogram. Ship static icons first; if
-the user wants animated ones after seeing static icons in place, that's a
-small, well-scoped follow-up (swap `ensure_icon` for
-`ensure_icon_frames()` returning N frames instead of 1).
+### Explicit limitation (documented, not silently implied as solved)
+
+This is bounding-box-size and rough-proximity heuristics, not person
+re-identification or depth sensing (this project has no depth camera
+input). A second person standing close to the user, at a similar distance
+from the camera, holding a similarly-sized hand up, is NOT reliably
+filtered by this fix. Document this plainly in `ARCHITECTURE.md`'s Known
+limitations once implemented — matching this project's established honesty
+about what's actually solved versus mitigated.
+
+## 1.3 Testing
+
+Both fixes are synthetic-landmark-testable, same style as the existing
+`GestureEngine` regression suite: construct a fist-with-thumb-index-pinch
+fixture, assert only `PINCH_DOWN` fires (not `RIGHT_CLICK`); construct a
+2-hands-but-implausible-size-difference fixture, assert no two-hand gesture
+fires; construct a normal 2-similar-hands fixture, assert two-hand gestures
+still fire exactly as before (regression).
 
 ---
 
-# 3. PHASE B — Naruto hand seals
+# 2. PHASE 2 — Landmark / quadrant visualization
 
-## 3.1 Roster (starting proposal — MUST be validated per §3.2 before final commit)
+## 2.1 New module: `src/jarvis/hand_visualizer.py`
 
-Real Naruto jutsu seals are mostly two-handed (fingers interlaced), and
-several are visually close to each other. Recreating all 12 authentically
-would mean two-hand fine-grained finger-interlacing detection — high
-false-positive risk, and direct collision risk with the two existing
-two-hand master gestures (fist-pause, Shaka-close). This phase deliberately
-scopes to single-hand, static, INSPIRED-BY poses instead — document this
-plainly (proposal.md already does) so nobody expects the full authentic set.
+```python
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),          # index
+    (5, 9), (9, 10), (10, 11), (11, 12),     # middle
+    (9, 13), (13, 14), (14, 15), (15, 16),   # ring
+    (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
+    (0, 17),                                  # palm base
+]
 
-Starting candidates (5), each a `NARUTO_<NAME>` gesture type:
+def draw_hand_overlay(frame, hands, primary_landmarks, active_gesture_name):
+    """Pure cv2 drawing (circles for landmarks, lines for HAND_CONNECTIONS,
+    a rectangle for each hand's bounding quadrant). Primary hand drawn in one
+    color/thickness, any other detected hand in a dimmer one. active_gesture_name
+    (or None) labeled near the primary hand via cv2.putText."""
+```
+
+`HAND_CONNECTIONS` is the standard 21-landmark hand topology — publicly
+documented hand-landmark connectivity, not something pulled from the removed
+`mp.solutions` module (confirmed: the Tasks API this project already
+migrated to, `hand_tracker.py`'s docstring, does not ship an equivalent
+`draw_landmarks()` helper — this module fills that specific, narrow gap with
+plain `cv2`, zero new dependency).
+
+## 2.2 Toggle
+
+Reuse the existing `d` debug-HUD toggle
+(`JarvisApp._toggle_debug_hud`/`ContextualHudRenderer.debug`) by adding a
+second flag alongside it, OR introduce a dedicated key — either is
+acceptable (`spec.md` #2.1 leaves this an implementation choice); document
+whichever is chosen in `ARCHITECTURE.md` and the legend.
+
+## 2.3 Wiring
+
+`main.py`'s `run()` loop, right after `hands = self.tracker.process(...)`
+and the Phase-1 plausibility filter, calls `draw_hand_overlay(frame, hands,
+primary_landmarks, self._last_gesture_name)` when the toggle is on — same
+"only when enabled, cheap no-op otherwise" pattern as the existing debug
+HUD.
+
+## 2.4 Testing
+
+`HAND_CONNECTIONS`-based line generation and bounding-quadrant computation
+are pure functions, testable without a real window/display (assert the
+right number of line segments for a synthetic landmark set, assert the
+bounding box matches the min/max of the synthetic coordinates). The actual
+`cv2.circle`/`cv2.line`/`cv2.putText` calls are visual and stay
+manually-verified, consistent with how the rest of the camera-frame drawing
+in this project is validated.
+
+---
+
+# 3. PHASE 3 — Reference icon infrastructure
+
+Unchanged from the original version of this proposal — see the version
+history note at the top of `proposal.md`. Summary (full detail was already
+specified once, repeated here only where phases 4-7 depend on it):
+
+- `src/jarvis/gesture_icons.py`: `ICON_SPECS` (declarative, bitmask of which
+  fingers extended + optional glyph name, ONE-HAND or TWO-HAND variants both
+  representable), `ensure_icon(key) -> Path`, cached under
+  `assets_dir()/gesture_icons/`.
+- Drawing via `PIL.Image`/`PIL.ImageDraw` (new dependency: Pillow, added to
+  `requirements.txt`). Display via native `tkinter.PhotoImage(file=...)` —
+  no `PIL.ImageTk` needed.
+- `jarvis.legend.ENTRIES` gains an icon-key field; `build_legend_entries()`
+  returns the full tuples; `overlay.init_legend()` renders icon+text rows.
+- Every gesture added by phases 4-7 registers one `ICON_SPECS` entry as part
+  of its own task (`spec.md` #3.4) — a two-hand seal's icon MAY show two
+  simplified hand glyphs side by side to distinguish it visually from a
+  one-hand seal's icon (implementer's call, document the convention chosen
+  so it stays consistent across ~20 new icons).
+
+---
+
+# 4. PHASE 4 — One-hand Naruto seals
+
+## 4.1 Starting geometric definitions (subject to §4.2's collision process)
 
 ```text
-NARUTO_TORA  (Tiger) — index + middle fingers extended together (touching),
-             ring + pinky curled, thumb crossed over the palm.
-NARUTO_UMA   (Horse) — all 5 fingers extended and spread evenly (distinct
-             from the existing SILENCE pose, which requires the thumb tucked
-             toward the pinky specifically).
-NARUTO_INU   (Dog)   — ring + pinky extended together, index + middle
-             curled, thumb resting on the curled fingers.
-NARUTO_I     (Boar)  — closed fist with the thumb extended outward to the
-             side (not tucked in, not up).
-NARUTO_SARU  (Monkey)— thumb + pinky extended, index/middle/ring curled
-             (visually close to Shaka, which today is TWO-HAND-only for
-             CLOSE_APP — verify no single-hand Shaka-shaped check exists
-             elsewhere before finalizing this one; if it does, rename/drop).
+Tora    (Tiger)  — index + middle extended together (touching), ring +
+                   pinky curled, thumb crossed over the palm.
+Ushi    (Ox)     — index extended, middle/ring/pinky curled, thumb resting
+                   alongside the curled fingers (distinct from a plain
+                   pointing pose by thumb position — verify against no
+                   existing pointer-only check exists, since the pointer is
+                   driven by index position continuously, not a discrete
+                   pose, so this is likely safe by construction).
+U       (Hare)   — index + middle extended and SPREAD apart (a "peace sign"
+                   shape), ring + pinky curled, thumb tucked.
+Uma     (Horse)  — all 5 fingers extended and evenly spread (distinct from
+                   existing SILENCE, which specifically requires the thumb
+                   tucked toward the pinky — Uma's thumb is out, spread).
+Hitsuji (Ram)    — index + middle CROSSED (index over middle, forming an X
+                   near the tips), ring + pinky curled.
+Saru    (Monkey) — thumb + pinky extended, index/middle/ring curled (verify
+                   against Shaka — Shaka today is TWO-HAND-only for
+                   CLOSE_APP and single-hand for LOCK_SESSION via `_is_shaka`;
+                   this pose IS `_is_shaka`'s shape. Saru MUST be dropped or
+                   redefined if it collides — do not silently reuse
+                   `_is_shaka`'s geometry for a different meaning, that would
+                   violate `apply.md` §15 "never silently change existing
+                   gesture meanings").
+Inu     (Dog)    — ring + pinky extended together, index/middle curled,
+                   thumb resting on the curled fingers.
+I       (Boar)   — closed fist with the thumb extended outward to the side
+                   (not tucked in like a plain fist, not up).
 ```
 
-## 3.2 Required collision-avoidance process (normative — spec.md #3.1)
+`Saru` is flagged above as the highest-risk one-hand entry — the
+implementing agent MUST resolve that flag during §4.2's process before
+writing `is_naruto_saru`, not defer it.
 
-Before finalizing thresholds, the implementing agent MUST:
+## 4.2 Collision-avoidance process
 
-1. Enumerate every existing single-hand and two-hand pose check in
-   `gestures.py` (pinch variants, palm/silence, fist, Shaka) — same census
-   `ARCHITECTURE.md`'s "Gesture map" table already documents.
-2. For each new `NARUTO_*` check, write a synthetic-landmark test proving it
-   does NOT also satisfy any existing gesture's condition, and vice versa
-   (existing gesture fixtures must not accidentally satisfy a new seal's
-   condition either) — same discipline already used for the
-   `GestureEngine` regression suite (`tests/test_gesture_engine_regression.py`,
-   see `ARCHITECTURE.md` Decisions for the exact bug class this guards
-   against: a "far away" finger isn't the same as a genuinely curled one).
-3. If a collision is found, adjust the geometric threshold or drop/rename
-   that seal from the roster rather than special-casing detection order
-   (order-dependent detection is a known source of flakiness this project
-   has avoided elsewhere).
+Identical process to the one already specified for the original 5-seal
+version: enumerate every existing pose check (now including Phase 1's
+fixes), write positive + negative synthetic-landmark tests per seal,
+adjust/drop/rename on conflict, document the final roster and any changes
+in the task report.
 
-## 3.3 Wiring
+## 4.3-4.5 Wiring, safety, icons
 
-New module `src/jarvis/naruto_seals.py` (or a new section in `gestures.py`,
-implementer's choice) exposing one function per seal,
-`is_naruto_<name>(landmarks) -> bool`, called from `GestureEngine.process()`
-alongside existing single-hand checks, emitting a `NARUTO_<NAME>` event
-string exactly like existing gesture types.
-
-`main.py` gains:
-
-```python
-NARUTO_SEAL_DEFAULT_BINDINGS = {
-    "NARUTO_TORA": "SCREENSHOT",
-    "NARUTO_UMA":  "VOLUME_UP",
-    ...  # implementer's reasonable default choices, documented in the task report
-}
-
-def _dispatch_naruto_seal(self, seal_name):
-    action = self.profiles.get_gesture_binding(seal_name, NARUTO_SEAL_DEFAULT_BINDINGS)
-    if action:
-        self._dispatch_voice_action(action)  # exact reuse — see spec.md #3.3
-```
-
-This is the THIRD caller of the fixed-action-vocabulary dispatch path
-(gesture-migrated actions call it directly today via `_dispatch_migrated`;
-voice via `_dispatch_voice_action`; this adds seals) — confirms the
-vocabulary/dispatch design introduced for voice already generalizes, no new
-abstraction needed.
-
-## 3.4 Icons
-
-Each `NARUTO_*` seal gets an entry in Phase A's `ICON_SPECS` too (reuse, not
-a parallel icon system) — the settings screen (Phase C) lists seals exactly
-like any other bindable trigger, icon included.
+Identical mechanism to the original proposal: `NARUTO_<NAME>` events from
+`GestureEngine.process()`, default-binding dict, `Profile.gesture_bindings`
+override, dispatch reuse via the same fixed-vocabulary path voice already
+uses, icon per Phase 3.
 
 ---
 
-# 4. Why Phase B doesn't need Phase C
+# 5. PHASE 5 — Two-hand Naruto seals
 
-`Profile.gesture_bindings` is a plain `dict[str, str]` already validated by
-`Profile.__post_init__`. "Assignable to options" (the user's own wording) is
-satisfied by constructing a `Profile` with a `gesture_bindings` override —
-today that requires editing Python (constructing a `Profile(...)` — there is
-no persistence or UI yet). That's a real, if code-level, form of
-assignability, consistent with how every other profile override already
-works pre-Phase-C. Phase C's settings screen later becomes a GUI on top of
-the exact same mechanism — it does not replace it.
-
----
-
-# 5. PHASE C — Settings screen
-
-## 5.1 New modules
+## 5.1 Starting geometric definitions
 
 ```text
-src/jarvis/settings_ui.py     — SettingsWindow (Tkinter Toplevel), Tooltip helper
-src/jarvis/core/config_store.py — load_bindings()/save_bindings(), JSON on disk
-src/jarvis/actions/macro.py   — MacroCommand, HotkeyCommand
+Ne    (Rat)    — hands clasped together, fingers interlocked, held in front
+                 of the chest.
+Tatsu (Dragon) — one hand's fingers wrap over the other's in a layered
+                 shape, thumbs crossed.
+Mi    (Snake)  — hands clasped, fingers interlocked, pointed DOWNWARD
+                 (distinguish from Ne by orientation/hand-y-position, not
+                 finger shape alone, since both are "clasped/interlocked").
+Tori  (Bird)   — fingers interlocked, hands fanned open/spread rather than
+                 clasped tight.
+Kai   (Release)— palms together, fingers interlaced, EXCEPT index and
+                 middle fingers extended and crossed on top.
 ```
 
-## 5.2 `config_store.py`
+These are the hardest poses in this proposal to detect reliably from sparse
+landmarks (fine finger-interlacing is genuinely difficult to distinguish
+combinatorially — MediaPipe's 21 points per hand don't capture inter-hand
+finger occlusion well). The implementer SHOULD budget more iteration here
+than phase 4, and MAY simplify a seal's exact finger-interlacing requirement
+to a coarser proxy (e.g. "both hands' centers within X distance, both
+hands' average finger curl above/below a threshold, relative hand
+orientation") as long as the simplification is documented and the seal
+remains visually recognizable and distinguishable from the other four.
+
+## 5.2 Collision-avoidance
+
+Same process, EXPANDED scope: must also check against `both_shaka`,
+`both_fists`, the two-hand pinch-zoom (`both_pinching`), and the anchor+
+finger-count meta-menu (`fists[0] != fists[1]`) — all four already live in
+`_process_two_hand_gestures`. This is explicitly the largest single
+collision-avoidance task in the whole proposal (`proposal.md` §3's table
+already flags this).
+
+## 5.3 Wiring, safety, icons
+
+Same as §4.3-4.5, via `_process_two_hand_gestures`'s existing pattern
+(compute `p1`/`p2` from both hands, evaluate the new pose pair, emit the
+seal event, apply the standard hold-then-confirm timing pattern already used
+by `both_shaka`/`both_fists` to avoid single-frame flicker).
+
+---
+
+# 6. PHASE 6 — Jujutsu Kaisen gestures
+
+## 6.1 Gojo (two-hand, static)
+
+Both hands' thumb+index fingers form roughly perpendicular L-shapes,
+brought together (hand centers close, per the same proximity check style as
+the two-hand pinch-zoom) in the UPPER portion of frame (both hands' y
+position above some threshold — approximating "held up near the face").
+Starting heuristic: angle between each hand's thumb→index vector is roughly
+90°±tolerance, AND the two hands' centers are within a proximity threshold,
+AND both hands' average y position is above (numerically less than, in
+normalized image coordinates) a configurable threshold.
+
+## 6.2 Sukuna (one-hand, TEMPORAL — new reusable detector)
+
+New module `src/jarvis/temporal_gesture.py`:
 
 ```python
-CONFIG_DIR = Path.home() / ".jarvis-gesture-hud"
-CONFIG_FILE = CONFIG_DIR / "bindings.json"
+class ImpulseDetector:
+    """Fires once when a tracked distance metric drops below `contact_threshold`
+    then rises back above `release_threshold` within `max_window_seconds` of
+    the drop - a "snap" or "clap" shape (fast approach + fast separation),
+    NOT a sustained pinch/hold (which existing PINCH_* gestures already own).
 
-def load_bindings() -> dict:
-    """Returns {} (defaults apply) on missing/corrupt file. On corrupt file,
-    renames it aside (bindings.json.bak-<timestamp>) instead of overwriting -
-    spec.md #4.6's "never silently clobber" requirement. Never raises."""
-
-def save_bindings(data: dict) -> None:
-    """Writes atomically (write to a temp file in the same dir, then
-    os.replace()) so a crash mid-write can't corrupt the previous good
-    file."""
-```
-
-Schema (versioned from day one, so a future format change doesn't need a
-second migration mechanism per `apply.md` §14):
-
-```json
-{
-  "schema_version": 1,
-  "profiles": {
-    "default": {
-      "gesture_bindings": {"NARUTO_TORA": "SCREENSHOT"},
-      "custom_shortcuts": {"MY_SHORTCUT": "ctrl+alt+t"},
-      "macros": {
-        "MACRO:greeting": [
-          {"kind": "type-text", "value": "hola"},
-          {"kind": "wait-ms", "value": 300},
-          {"kind": "press-key", "value": "enter"}
-        ]
-      }
-    }
-  }
-}
-```
-
-`ProfileManager` gains `to_dict()`/`from_dict()` (or a small adapter
-function outside the class, implementer's choice) bridging this schema to
-existing `Profile` construction — do not invent a second, competing
-in-memory representation (`apply.md` §14).
-
-## 5.3 `MacroCommand` / `HotkeyCommand`
-
-```python
-class HotkeyCommand(Command):
-    def __init__(self, combo: str):  # "ctrl+alt+t"
-        self._parts = combo.split("+")
-    def execute(self):
-        try:
-            pyautogui.hotkey(*self._parts)
-            return CommandResult.ok()
-        except Exception as exc:
-            return CommandResult.failed(error=str(exc))
-
-class MacroCommand(Command):
-    def __init__(self, steps: list[Command | WaitStep]):
-        self._steps = steps
-    @property
-    def metadata(self):
-        # safety = the strictest safety level among self._steps - spec.md #4.4.2
+    update(distance, now) -> bool  (True exactly once per completed impulse)
+    """
+    def __init__(self, contact_threshold, release_threshold, max_window_seconds):
         ...
-    def execute(self):
-        for step in self._steps:
-            ...  # run each step; a WaitStep just time.sleep()s
-        return CommandResult.ok()
 ```
 
-Both are ordinary `Command`s — they flow through the existing `CommandBus`,
-get recorded in `CommandHistory`, and get feedback via `FeedbackManager`
-exactly like every other action already does. No new execution layer.
+`JJK_SUKUNA` = one `ImpulseDetector` instance tracking `d_thumb_middle`
+(reuses the distance already computed for `RIGHT_CLICK`'s pinch — note in
+§4.2-equivalent collision testing that `RIGHT_CLICK`'s SUSTAINED
+below-threshold check and Sukuna's IMPULSE (drop-then-rise) check are
+temporally distinguishable by construction: a sustained right-click pinch
+never triggers the impulse detector's release condition quickly enough,
+and a snap never stays below `RIGHT_CLICK`'s threshold long enough to
+satisfy that gesture's own timing — verify this with a temporal synthetic
+test, not just a single-frame one, since this is the first TEMPORAL/
+multi-frame-pattern gesture check in `gestures.py` outside the existing
+hold-timers).
 
-`pyautogui.hotkey()` already supports arbitrary key combinations — confirmed
-no new dependency is needed for EXECUTING a custom shortcut or a macro's key
-steps.
+## 6.3 Megumi (one-hand, static — ONE representative pose)
 
-## 5.4 Capturing a shortcut (no new dependency)
+Starting heuristic: index + middle fingers crossed (similar family to
+Hitsuji's cross, but Megumi's SHALL be visually/geometrically distinguished
+from Hitsuji — e.g. by ring finger position: extended vs. curled — resolve
+the exact distinguishing detail during §6.4's collision process, do not ship
+Megumi identical to Hitsuji with only the bound action differing).
 
-Bind `<KeyPress>` on a dedicated, focused `Entry`/label inside the settings
-window. Canonicalize `event.state`/`event.keysym` into `ctrl`/`alt`/
-`shift`/the base key, in a fixed modifier order, join with `+`. This only
-needs to work while that widget has focus — global (unfocused-window) hotkey
-capture is explicitly out of scope (`proposal.md` non-goals), so no
-`pynput`/`keyboard` dependency is needed here either.
+## 6.4 Collision-avoidance, wiring, safety, icons
 
-## 5.5 Tooltip helper
-
-```python
-class Tooltip:
-    def __init__(self, widget, text):
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
-    def _show(self, event):
-        self._tip = tk.Toplevel(...)  # overrideredirect, small Label, positioned near cursor
-    def _hide(self, event):
-        self._tip.destroy()
-```
-
-Standard, well-known ~25-line Tkinter pattern. No new dependency.
-
-## 5.6 Non-blocking
-
-`SettingsWindow` is a `Toplevel` on the SAME `Tk` root `overlay.py` already
-owns and pumps every frame (`ScreenOverlay._root`) — it does not start a
-second `Tk()`/mainloop (Tkinter does not support multiple `Tk()` instances
-reliably in one process). `ScreenOverlay` gains a way to construct/reveal it
-(e.g. `ScreenOverlay.open_settings(on_save)` or the settings module takes
-`overlay._root` directly) — implementer's choice, but MUST NOT introduce a
-second Tk root.
-
-## 5.7 Gear icon
-
-A small always-on-top, NOT-click-through `Toplevel` (reuse
-`ScreenOverlay`'s window-creation pattern minus the `_make_click_through`
-call), positioned in a screen corner not already used by the legend, with a
-simple `⚙` character/glyph as its content (no new asset needed — Tk can
-render the Unicode gear glyph directly in a `Label`, same as this project
-already renders emoji in bubble text like `"🔒 Bloqueando sesión"`).
+Same process as phases 4-5, expanded to include phases 4-5's new gestures
+too. `ImpulseDetector` (§6.2) is a new primitive — document it in
+`ARCHITECTURE.md`'s module list once implemented, since Phase 7 reuses it.
 
 ---
 
-# 6. Dependency and feasibility notes
+# 7. PHASE 7 — Common gestures
 
-## 6.1 Pillow (Phase A only)
+## 7.1 Clap (two-hand, temporal)
 
-`Pillow` is added to `requirements.txt` (not `requirements-voice.txt` — it's
-needed for the base app's legend, not an optional heavy feature). It is a
-common, pure-C-extension-with-prebuilt-wheels package with wheels for every
-platform/Python version this project targets — low risk to add.
+A second `ImpulseDetector` instance (§6.2, reused not reimplemented)
+tracking the distance between the two hands' centers (same center
+computation already used by the two-hand pinch-zoom,
+`(p[4].x + p[8].x)/2, ...` — for clap, the relevant center is each hand's
+overall palm center, e.g. the average of landmarks 0/5/9/13/17, not the
+pinch-point average). Fires `CLAP` once per completed impulse (hands come
+together then separate — this deliberately does NOT trigger on hands
+merely passing near each other while doing something else, since the
+detector requires the CONTACT threshold to actually be crossed, not just
+approached).
 
-## 6.2 Phase C's "no new dependency" claim
+## 7.2 Korean finger heart (one-hand, static, highest collision risk)
 
-Re-verify at implementation time: `tkinter.ttk` (Combobox/Treeview) ships
-with the Python stdlib on Windows/macOS/most Linux distributions with the
-official python.org installer; on some minimal Linux distros `python3-tk`
-is a separate OS package — this is an EXISTING constraint (the whole app
-already depends on `tkinter` for `overlay.py`), not a new one introduced by
-this phase.
+Thumb and index fingertips crossed at a shallow angle (not
+fingertip-to-fingertip contact like `PINCH_CLICK`, but thumb laid diagonally
+across/near the index's first joint) — geometrically close enough to
+`PINCH_CLICK` that a bare distance threshold is not sufficient
+discrimination on its own. Per `spec.md` #7.2, this gesture REQUIRES a hold
+duration (same `now - hold_start > config.SOME_HOLD_SECONDS` pattern as
+`LOCK_SESSION`) before firing — a fast touch-and-release stays exclusively
+`PINCH_DOWN`/`PINCH_UP`, only a SUSTAINED version of the pose (past the pinch
+distance's own click-cooldown window) is eligible to become
+`KOREAN_HEART`. This is the cleanest available discrimination given the
+geometric overlap, and mirrors an already-proven pattern in this codebase
+(Shaka-hold vs. a passing Shaka-shaped frame).
 
-## 6.3 M1/M2/M3 macro keys — feasibility
+## 7.3 Collision-avoidance, wiring, safety, icons
 
-Gaming keyboards' dedicated macro keys are typically one of:
-
-```text
-(a) Remapped by vendor software (Razer Synapse, Logitech G HUB, Corsair
-    iCUE, ...) to send an ordinary keycode/combo chosen in that software -
-    reaches this app like any other keypress. WORKS with this feature.
-(b) Consumed entirely by the vendor software/driver and never surfaces as a
-    standard OS keystroke at all. DOES NOT reach Python. NOT fixable from
-    this app without vendor-specific SDK integration (out of scope - would
-    be a new, brand-specific dependency per keyboard vendor, explicitly the
-    kind of speculative dependency `apply.md` §12 rules out).
-```
-
-This app can only ever see case (a). The settings screen's help text SHALL
-say so plainly (spec.md #4.4.3) rather than implying blanket "M1/M2/M3
-support" that would fail silently for case (b) users.
+Same process as phases 4-6, expanded to include them.
 
 ---
 
-# 7. PHASE D — Voice model download icon
+# 8. Why phases 4-7 don't need phase 8
 
-## 7.1 Placement
+Same reasoning as the original proposal: `Profile.gesture_bindings` already
+supports code-level assignability before any UI exists. Phase 8 later adds a
+GUI on top of the exact same mechanism, it does not replace it.
 
-A new row inside `SettingsWindow` (Phase C), not a fifth always-on-top
-corner window — keeps screen clutter down, and matches
-`proposal.md`'s "smallest footprint that satisfies the request" framing.
+---
 
-## 7.2 Implementation
+# 9. PHASE 8 — Settings screen
 
-```python
-def _check_voice_deps_available() -> bool:
-    import importlib.util
-    return all(
-        importlib.util.find_spec(mod) is not None
-        for mod in ("faster_whisper", "llama_cpp", "sounddevice")
-    )
+Unchanged from the original version of this proposal — full detail already
+specified there (persistence schema, `HotkeyCommand`/`MacroCommand`,
+Tooltip helper, gear icon, non-blocking requirement, M1/M2/M3 feasibility
+notes). Repeated pointer, not re-derived: `config_store.py`,
+`settings_ui.py`, `actions/macro.py`, JSON schema versioned from day one,
+atomic writes, `pyautogui.hotkey()` already covering shortcut/macro
+execution with no new dependency.
 
-def _start_voice_model_download(on_progress, on_done):
-    def _run():
-        try:
-            path = jarvis.llm_intent._ensure_model_path()  # or a progress-aware variant
-            on_done(success=True, path=path)
-        except Exception as exc:
-            on_done(success=False, error=str(exc))
-    threading.Thread(target=_run, daemon=True).start()
-```
+The bindings table (`spec.md` #8.2) now additionally lists every trigger
+`ICON_SPECS` key from phases 3-7 — sourced from the same data structures
+those phases already build (`gesture_icons.ICON_SPECS`, the seal default-
+binding dicts, `VoiceIntentResolver`'s registered phrases), not a fifth
+hand-maintained list.
 
-`urllib.request.urlretrieve(url, path, reporthook=...)` already supports a
-progress callback `(block_num, block_size, total_size)` — wire it to update
-a label/progress bar via `overlay._root.after(0, ...)` (Tkinter calls must
-happen on the main/Tk thread, not the download thread — schedule the UI
-update instead of touching widgets directly from the background thread).
+---
 
-## 7.3 Idempotency
+# 10. PHASE 9 — Voice model download icon
 
-`_ensure_model_path()` already no-ops (returns the existing path without
-re-downloading) if the file exists — Phase D's UI just needs to check this
-before showing a "download" vs. "already downloaded" state, per spec.md #5.4.
+Unchanged from the original version of this proposal — a row inside the
+Phase 8 settings screen, dependency check via `importlib.util.find_spec`,
+background-thread download reusing `jarvis.llm_intent._ensure_model_path()`,
+progress via `urlretrieve`'s `reporthook`, idempotent on an
+already-downloaded model.
