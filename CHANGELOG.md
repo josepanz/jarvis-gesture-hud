@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-08-27)
+
+### Features
+
+- Filtro de manos de fondo/otra persona (TASK-056) y scroll mas estricto
+  ([`3acbdb5`](https://github.com/josepanz/jarvis-gesture-hud/commit/3acbdb5311573a8a5064786525e2e477e03617bc))
+
+- filter_plausible_hands()/hands_plausibly_same_person() en gestures.py: descarta manos por debajo
+  de MIN_HAND_AREA_FRACTION antes de cualquier logica de gestos, y exige que un par de manos sea
+  plausiblemente de la misma persona (centros cerca, medido en camara real) antes de tratarlas como
+  un gesto conjunto de 2 manos. - Scroll ahora tambien exige el menique recogido (no solo el
+  anular), para no confundirse con otros gestos. - Nuevos tests (BackgroundHandFilterTests,
+  pinky-en-scroll) + fixtures de test ajustadas (bbox ya no colapsa a area 0).
+
+
 ## v0.3.1 (2026-08-27)
 
 ### Bug Fixes
