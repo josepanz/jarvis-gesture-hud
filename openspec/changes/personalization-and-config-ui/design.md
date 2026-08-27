@@ -617,3 +617,116 @@ Phase 8 settings screen, dependency check via `importlib.util.find_spec`,
 background-thread download reusing `jarvis.llm_intent._ensure_model_path()`,
 progress via `urlretrieve`'s `reporthook`, idempotent on an
 already-downloaded model.
+
+---
+
+# Appendix A — Perception robustness evaluation (MediaPipe Pose, depth, lighting)
+
+Requested evaluation, not yet a committed phase — no TASK-XXX numbers exist
+for this yet. Findings below were verified against this project's actual
+installed environment (not assumed from general knowledge), per
+`apply.md`'s "inspect before implementing" discipline.
+
+## A.1 MediaPipe Pose — already available, zero new dependency
+
+Confirmed on this machine: `mediapipe==1.0.1` (the exact version currently
+resolved from `requirements.txt`'s unpinned `mediapipe` entry) already
+exposes `mediapipe.tasks.python.vision.PoseLandmarker` and
+`PoseLandmarkerOptions` — the same Tasks API family `hand_tracker.py`
+already uses for hands. No new pip package. Same lazy-download-and-cache
+pattern applies: a `.task` pose model file, fetched once and cached under
+`assets_dir()` exactly like `hand_landmarker.task` today.
+
+**What it would concretely improve:** Phase 1 §1.2's background/other-person
+hand filter today uses only bounding-box size as a plausibility proxy — a
+real second person standing at a similar distance produces a similarly-sized
+hand and is NOT filtered (documented as an explicit limitation there).
+`PoseLandmarker` detects a full body skeleton, including wrist landmarks. A
+much stronger filter becomes possible: only trust a detected hand if its
+landmark-0 (wrist) position is close to ONE tracked body's corresponding
+wrist landmark (left or right) — i.e., require the hand to be anatomically
+attached to a body the app is already tracking as "the user," not just
+plausibly-sized. This directly closes the gap Phase 1 explicitly left open.
+
+**Real costs, not hidden:**
+- A second per-frame inference pass — genuine CPU cost, on top of
+  `HandLandmarker`'s existing cost. MUST be measured against this project's
+  documented performance baseline (`ARCHITECTURE.md` § Performance baseline)
+  before being adopted, same discipline as every other phase (`apply.md`
+  §11).
+- Another downloaded model file (MediaPipe ships `pose_landmarker_lite`
+  /`_full`/`_heavy` variants trading accuracy for speed/size — `lite` is the
+  practical starting choice here, matching this project's existing
+  preference for the lighter/faster option where one exists, e.g.
+  `faster-whisper`'s "base" over "small"/"medium").
+- More code: a new `pose_tracker.py` (mirroring `hand_tracker.py`) and a new
+  filtering function in the `filter_plausible_hands`/two-hand-eligibility
+  path from Phase 1 §1.2 (this would REPLACE or AUGMENT that heuristic, not
+  sit alongside it unused — implementer's call, document which).
+
+## A.2 The z-coordinate (and `visibility`/`presence`) — already computed, already free, currently unused
+
+Confirmed: `NormalizedLandmark` (the type every hand/pose landmark already
+uses) has fields `x, y, z, visibility, presence, name`. `gestures.py` reads
+only `.x`/`.y` everywhere today — `.z` is already being computed by the
+model on every single frame and thrown away.
+
+**What it would concretely improve, at literally zero additional
+inference/dependency/download cost:**
+- Pinch-family distance checks (`design.md` §1.1's fix) could measure true
+  3D distance (`math.hypot(dx, dy, dz)`) instead of the current 2D
+  screen-projected distance — a thumb and fingertip that are close in (x,y)
+  but far apart in z (one nearer the camera than the other) are NOT
+  actually touching; today's 2D-only distance can't tell the difference.
+  This is a plausible SECOND contributing cause of the pinch-confusion bug
+  worth checking during TASK-055's implementation, not just the
+  same-frame multi-condition-match cause already identified in §1.1.
+- A rough same-person plausibility signal for two-hand gestures: both
+  hands' z-relative-to-their-own-wrist values, compared, give a coarse
+  "are these two hands roughly the same distance from the camera" check —
+  weaker than Pose's anatomical attachment check (§A.1) but genuinely free.
+
+**Honest limitation:** MediaPipe's hand-landmark z is relative to that
+hand's own wrist landmark, normalized to roughly the same scale as x — it
+is NOT a calibrated real-world depth measurement, and is NOT directly
+comparable in absolute terms between two different hands (each hand's z is
+relative to ITS OWN wrist, not a shared origin). Treat it as a coarse,
+free signal, not a substitute for real depth sensing or for Pose-based
+anatomical attachment.
+
+## A.3 Lighting robustness — CLAHE via OpenCV, already a dependency
+
+Confirmed: `cv2.createCLAHE` is available in the already-installed
+`opencv-python` (`cv2.__version__` on this machine: 5.0.0) — zero new
+dependency. Applying CLAHE (typically to the L channel after converting the
+frame to LAB color space, then converting back) before feeding the frame to
+`HandTracker.process()` is the standard, cheap, well-established technique
+for improving landmark-detection consistency under low or uneven lighting.
+
+**Cost:** one more per-frame OpenCV call — negligible relative to the
+camera capture and MediaPipe inference already happening every frame; still
+worth measuring against the performance baseline for completeness, but not
+expected to be meaningfully costly.
+
+**Not recommended for now:** neural low-light image enhancement (e.g.
+Zero-DCE-style models). Free in licensing terms, but a real new ML
+dependency (a second/third model runtime beyond MediaPipe), meaningfully
+heavier than CLAHE, with no concrete problem reported yet that CLAHE
+wouldn't already address. Matches `apply.md` §12's "no speculative
+dependencies" — revisit only if CLAHE turns out insufficient in practice.
+
+## A.4 Recommendation
+
+If/when promoted to a real phase: start with A.2 (already-free z-distance
+improvement to the Phase 1 pinch fix — genuinely zero additional cost,
+could be folded directly into TASK-055) and A.3 (CLAHE — also zero new
+dependency, cheap, directly helps the reliability goal Phase 1 already
+targets). Treat A.1 (MediaPipe Pose) as a separate, larger, explicitly
+opt-in follow-up phase — real second-model inference cost that needs its
+own measured performance report before committing, not something to fold
+silently into Phase 1. This evaluation does not assign TASK-XXX numbers;
+say the word and this gets turned into a real phase with tasks, ordered by
+the same menor-a-mayor criteria as everything else in this document (A.2/
+A.3 would rank low — free, cheap, contained; A.1 would rank closer to
+Phase 5's complexity — a new tracked-object type and a real perf cost to
+budget).

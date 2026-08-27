@@ -150,3 +150,22 @@ Same as before, plus:
 Unchanged from the original proposal — no phase is complete if an existing
 supported capability is silently broken, including every gesture that
 already ships today.
+
+---
+
+## 7. Evaluated, not yet scheduled: perception robustness
+
+Per an explicit request to evaluate (not yet commit to implementing):
+MediaPipe Pose, the already-computed-but-unused landmark `z`/`visibility`/
+`presence` fields, and OpenCV-based lighting normalization, as ways to
+further strengthen Phase 1's reliability fixes. Full findings, verified
+against this project's actual installed environment:
+`design.md` Appendix A.
+
+Short version: the z-coordinate improvement and CLAHE lighting
+normalization are genuinely free (zero new dependency, zero new download)
+and would rank as LOW complexity if scheduled — comparable to or below
+Phase 1. MediaPipe Pose is also zero-new-dependency (same `mediapipe`
+package already installed) but carries a real second-inference performance
+cost that needs measuring before committing — comparable to Phase 5's
+complexity if scheduled. No phase numbers are assigned to any of this yet.
