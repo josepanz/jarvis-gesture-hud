@@ -284,7 +284,10 @@ individual hands against all 9 single-hand checks directly.
 
 Written roster note, same format as TASK-061, explicitly listing which of
 the 4 two-hand AND 9 single-hand existing conditions each new seal was
-checked against (13 total per seal, not 4).
+checked against (13 total per seal, not 4), AND which `design.md` §1.5
+taxonomy pattern (A/B/C/D) each seal uses — expected Pattern B for all 5,
+per `spec.md` #5.2; if any seal doesn't cleanly fit, redesign or drop it
+rather than shipping an ambiguous case.
 
 ### Acceptance criteria
 
@@ -351,9 +354,14 @@ configurable contact/release thresholds and max window.
 ### Objective
 
 Implement `JJK_GOJO_DOMAIN` (two-hand static, Domain Expansion/Ryoiki Tenkai —
-`design.md` §6.1) and `JJK_MEGUMI`
+`design.md` §6.1, taxonomy Pattern B) and `JJK_MEGUMI`
 (one-hand static, §6.3), including the collision census against phases 1,
-4, 5, and each other (Megumi vs. Hitsuji explicitly, per §6.3).
+4, 5, and each other (Megumi vs. Hitsuji explicitly, per §6.3). Report
+`JJK_GOJO_DOMAIN`'s taxonomy pattern per `design.md` §1.5 — confirm it stays
+Pattern B (its condition must be the relative angle/position BETWEEN the two
+hands, never two independently-classified single-hand shapes) rather than
+drifting into the forbidden independent-dual-action pattern during
+implementation.
 
 ### Acceptance criteria
 
@@ -393,11 +401,15 @@ motion-line glyph), not just a static hand shape, since it's temporal.
 ### Objective
 
 `CLAP` via a second `ImpulseDetector` instance (TASK-067) tracking two-hand
-palm-center distance, per `design.md` §7.1.
+palm-center distance, per `design.md` §7.1. Taxonomy Pattern D (`design.md`
+§1.5) — one joint metric, one outcome, never two independently-classified
+hands.
 
 ### Must NOT
 
 - Reimplement impulse detection — reuse `ImpulseDetector`.
+- Classify each hand's shape independently and combine two separate
+  classifications into `CLAP` — the metric is inter-hand distance only.
 
 ### Acceptance criteria
 

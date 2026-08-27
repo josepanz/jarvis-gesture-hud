@@ -24,6 +24,11 @@ Every new gesture (4, 5, 6) SHALL ship with its icon (3) as part of the same
 task — icons are not a separate, later phase for anything added after this
 proposal's first phase establishes the icon infrastructure.
 
+Every two-hand gesture (existing or new) SHALL be a hierarchy, not two
+hands independently interpreted as unrelated single-hand gestures that
+happen to coincide — `design.md` §1.5 formalizes this into four allowed
+patterns and one explicitly forbidden one. This governs phases 5-7.
+
 This is an ADDITIVE change over the currently-shipped app (`main` as of this
 writing). It follows the same incremental philosophy as
 `openspec/changes/multimodal-interaction-core/`: the existing application is

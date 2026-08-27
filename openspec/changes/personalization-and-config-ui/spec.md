@@ -197,7 +197,16 @@ Kai   (Release — common non-zodiac seal, included as it's iconic and
        single-frame-static like the others)
 ```
 
-## 5.2 Collision-avoidance
+## 5.2 Collision-avoidance and taxonomy
+
+Every seal in this roster SHALL be classifiable into exactly one of
+`design.md` §1.5's four allowed two-hand patterns (symmetric / combined-
+joint-shape / anchor+modifier / joint-continuous-signal) — the seals here
+are Pattern B (combined/joint shape: finger-interlacing that only exists as
+a property of both hands together). A seal that cannot be cleanly classified
+SHALL be redesigned or dropped, not shipped as an ambiguous case (`design.md`
+§1.5's forbidden pattern: two hands independently satisfying unrelated
+single-hand shapes is NOT a valid two-hand gesture design).
 
 A two-hand gesture SHALL be checked against BOTH existing sets, not only the
 two-hand one: the 4 existing two-hand gestures (`both_shaka`, `both_fists`,
@@ -226,6 +235,9 @@ roughly perpendicular shapes brought together in front of the upper body/
 face) — Gojo's Domain Expansion / Ryoiki Tenkai pose specifically, not a
 stand-in for any of his other signature moments — SHALL be recognized as
 `JJK_GOJO_DOMAIN`. See `design.md` §6.1 for a starting geometric definition.
+It is Pattern B (combined/joint shape, `design.md` §1.5) — the condition is
+the relative position/angle BETWEEN the two hands, not two independently
+meaningful single-hand shapes.
 
 ## 6.2 Sukuna (temporal)
 
@@ -256,7 +268,9 @@ A two-hand, temporal gesture (both hands' centers rapidly closing distance
 to near-contact, then separating, within a short time window) SHALL be
 recognized as `CLAP`. SHALL reuse the temporal-impulse detector built for
 Phase 6's Sukuna snap (`design.md` §6.2) rather than a second, parallel
-implementation.
+implementation. It is Pattern D (joint continuous signal, `design.md` §1.5)
+— one metric (inter-hand distance) drives one outcome; the two hands are
+never independently classified.
 
 ## 7.2 Korean finger heart
 

@@ -199,6 +199,103 @@ inherit the same latent gap the existing ones already have. Report the
 decision either way (fixed now vs. explicitly deferred) rather than silently
 picking one.
 
+## 1.5 Two-hand gesture taxonomy (normative — governs every new two-hand
+gesture in phases 5, 6, 7)
+
+A "two-hand gesture" MUST be a hierarchy, not two independent single-hand
+interpretations that happen to overlap in time. Every two-hand gesture —
+existing or new — SHALL fall into exactly one of the following patterns.
+None of the existing 4 two-hand gestures, nor any two-hand gesture proposed
+in this document (Naruto Ne/Tatsu/Mi/Tori/Kai, Gojo's Domain, Clap), falls
+outside this taxonomy — verified below, per pattern.
+
+### Pattern A — Symmetric
+
+Both hands must independently satisfy the SAME shape condition.
+
+```text
+both_shaka, both_fists                      (existing)
+```
+
+### Pattern B — Combined/joint shape
+
+The two hands' landmarks TOGETHER form one shape that neither hand
+represents alone (typically finger-interlacing/clasping) — the gesture is a
+property of the joint configuration, not two independently-classified
+single-hand poses stitched together.
+
+```text
+Ne, Tatsu, Mi, Tori, Kai                    (Naruto two-hand seals, phase 5)
+JJK_GOJO_DOMAIN                             (phase 6 — the "frame" shape only
+                                              exists as a joint condition:
+                                              relative position/angle BETWEEN
+                                              the two hands, not each hand's
+                                              shape alone)
+```
+
+### Pattern C — Anchor + modifier
+
+One hand holds a fixed anchor pose; the other hand's state selects a
+variant WITHIN THE SAME gesture family. Handedness SHALL NOT matter (either
+hand may be the anchor) — this already holds for the existing meta-menu and
+SHALL continue to hold for any new gesture using this pattern.
+
+```text
+anchor(fist) + finger-count(1-4) -> {TOGGLE_LEGEND, TOGGLE_MIRROR,
+  LEGEND_ALPHA_UP, LEGEND_ALPHA_DOWN}       (existing meta-menu — one family,
+                                              4 related outcomes, not 4
+                                              unrelated ones)
+```
+
+### Pattern D — Joint continuous signal
+
+Both hands contribute to ONE continuous metric (a distance, a velocity) that
+maps to a bounded set of RELATED, typically opposite-direction outcomes.
+
+```text
+inter-pinch-distance -> {ZOOM_IN, ZOOM_OUT}            (existing pinch-zoom)
+hands-closing-then-separating -> {CLAP}                (phase 7 — a single
+                                                          event, not a
+                                                          direction pair, but
+                                                          still one joint
+                                                          metric producing
+                                                          one outcome, not two
+                                                          hands independently
+                                                          producing two)
+```
+
+### FORBIDDEN pattern — independent, unrelated dual action
+
+A two-hand gesture SHALL NOT be defined as: hand A independently satisfies
+single-hand-shape-1 (mapped to action-1) AND hand B independently satisfies
+single-hand-shape-2 (mapped to UNRELATED action-2), combined only by "both
+happening in the same frame." This pattern SHALL NOT be introduced by any
+task in this proposal, and SHALL be rejected if proposed in a future one
+without first being justified against this taxonomy.
+
+Reasoning (the user's own, stated plainly): each hand already has its own
+independent single-hand interpretation running every frame (`design.md`
+§1.4's 9 checks). Defining a "two-hand gesture" as two of those independent
+interpretations happening to coincide does not reduce ambiguity, it
+MULTIPLIES it — the system would have to decide, every time two unrelated
+single-hand shapes coincide, whether that's an intentional combined gesture
+or two coincidental single-hand gestures that should both fire (or neither).
+There is no principled way to resolve that ambiguity from landmarks alone,
+and it is exactly the class of bug already reported in §1.1 (independent
+per-finger distance checks colliding), scaled up to two full hands. Every
+two-hand gesture in this proposal is pattern A/B/C/D specifically to avoid
+this trap — the two hands' conditions are either identical (A), jointly
+computed (B/D), or explicitly one-family-one-outcome-set (C), never two
+independently-meaningful, unrelated single-hand classifications glued
+together.
+
+### Requirement on future tasks
+
+Every task in phases 5-7 that defines a new two-hand gesture SHALL state,
+in its task report, which pattern (A/B/C/D) it uses. A proposed gesture that
+does not cleanly fit one of the four SHALL be redesigned until it does, or
+rejected — not shipped as an ambiguous fifth case.
+
 ---
 
 # 2. PHASE 2 — Landmark / quadrant visualization
