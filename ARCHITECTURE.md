@@ -559,6 +559,15 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   `PINCH_DOWN`'s branch runs first each frame, so it was already accidentally
   masking that specific pair from co-firing — `SCREENSHOT` (its own independent
   cooldown) was the pairing that actually reproduced the bug.
+- **`PINCH_DOWN`/`RIGHT_CLICK` sharing one cooldown timer was itself a second,
+  separate real bug — fixed too.** Not the same-frame ambiguity above (already
+  closed by the fix): a *genuine, unambiguous* right-click done shortly after a
+  genuine left-click (or vice versa) got silently swallowed, because whichever
+  fired first reset the shared `last_click_time` the other one's cooldown check
+  read from. Confirmed both directions by reverting and reproducing (a clean
+  right-click immediately after a clean left-click produced no `RIGHT_CLICK`
+  event, and the symmetric case likewise dropped `PINCH_DOWN`). Fixed with a
+  second, independent `last_right_click_time`.
 
 ## Known limitations
 

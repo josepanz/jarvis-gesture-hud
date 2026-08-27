@@ -61,6 +61,7 @@ class GestureEngine:
         self.prev_pinky_y = None
         self.lock_start_time = None
         self.last_click_time = 0.0
+        self.last_right_click_time = 0.0
         self.last_screenshot_time = 0.0
         self.last_toggle_time = 0.0
         self.last_silence_time = 0.0
@@ -297,15 +298,20 @@ class GestureEngine:
             events.append("PINCH_UP")
         self.was_pinching = is_pinching
 
-        # Click derecho (edge-triggered)
+        # Click derecho (edge-triggered). Cooldown propio (last_right_click_time) -
+        # antes compartia last_click_time con el click izquierdo, asi que un click
+        # izquierdo reciente podia "tragarse" un click derecho genuino y no
+        # ambiguo hecho poco despues (encontrado documentando TASK-055, arreglado
+        # aparte porque es un bug distinto: temporal entre gestos, no ambiguedad
+        # dentro de un mismo frame).
         is_right_pinching = pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
         if (
             is_right_pinching
             and not self.was_right_pinching
-            and now - self.last_click_time > config.RIGHT_CLICK_COOLDOWN
+            and now - self.last_right_click_time > config.RIGHT_CLICK_COOLDOWN
         ):
             events.append("RIGHT_CLICK")
-            self.last_click_time = now
+            self.last_right_click_time = now
         self.was_right_pinching = is_right_pinching
 
         return screen_xy, cam_xy, events

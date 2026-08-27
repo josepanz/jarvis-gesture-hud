@@ -487,5 +487,27 @@ class PinchPriorityTests(unittest.TestCase):
         self.assertIn("SCREENSHOT", events)
 
 
+class ClickCooldownIndependenceTests(unittest.TestCase):
+    """PINCH_DOWN and RIGHT_CLICK used to share one cooldown timer
+    (last_click_time) - a genuine, unambiguous right-click done shortly after a
+    genuine, unambiguous left-click got silently swallowed, since the left
+    click's own branch (which runs first each frame) had just reset the shared
+    timer. This is a different bug than TASK-055's same-frame ambiguity (which
+    already prevents index/middle from both winning in one frame) - this one is
+    about two clean, non-overlapping gestures shortly apart in time."""
+
+    def test_genuine_right_click_shortly_after_a_genuine_left_click_still_fires(self):
+        engine = GestureEngine()
+        process(engine, pinch_click_hand(pinched=True))
+        _, _, events = process(engine, right_click_hand())
+        self.assertIn("RIGHT_CLICK", events)
+
+    def test_genuine_left_click_shortly_after_a_genuine_right_click_still_fires(self):
+        engine = GestureEngine()
+        process(engine, right_click_hand())
+        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        self.assertIn("PINCH_DOWN", events)
+
+
 if __name__ == "__main__":
     unittest.main()
