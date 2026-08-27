@@ -99,7 +99,15 @@ class GestureEngine:
         return best.landmarks
 
     def _process_two_hand_gestures(self, hands, w, h, now):
-        """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka)."""
+        """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
+        two_hand_active). two_hand_active (TASK-055b) es la condicion geometrica cruda
+        de CUALQUIER gesto de 2 manos (shaka/punos/pinch-zoom/menu meta) - no si ese
+        gesto ya disparo su evento (algunos requieren sostenerlo) - para que quien
+        llama pueda suprimir los 9 chequeos de 1 mano que hoy corren igual sobre la
+        mano "primaria" sin importar que este haciendo la otra (ver design.md TASK-055b:
+        antes solo LOCK_SESSION/PINCH_DOWN estaban protegidos, con su propia condicion
+        angosta - esta queda igual sin tocar, two_hand_active es la version general
+        nueva para los 7 chequeos que no tenian ninguna proteccion)."""
         events = []
         if len(hands) != 2:
             self.pause_hold_start = None
@@ -108,7 +116,7 @@ class GestureEngine:
             self.meta_pose = None
             self.meta_hold_start = None
             self.meta_consumed = False
-            return events, False, False
+            return events, False, False, False
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
         both_shaka = _is_shaka(p1) and _is_shaka(p2)
@@ -176,13 +184,14 @@ class GestureEngine:
             self.meta_hold_start = None
             self.meta_consumed = False
 
-        return events, both_pinching, both_shaka
+        two_hand_active = both_shaka or both_fists or both_pinching or (fists[0] != fists[1])
+        return events, both_pinching, both_shaka, two_hand_active
 
     def process(self, hands, w, h, screen_w, screen_h):
         """Devuelve (screen_xy, cam_xy, events). screen_xy/cam_xy son None si no hay
         puntero que mover (sin manos, o lectura de gestos en pausa)."""
         now = time.time()
-        events, suppress_pinch, both_shaka = self._process_two_hand_gestures(hands, w, h, now)
+        events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(hands, w, h, now)
 
         if not self.active or not hands:
             return None, None, events
@@ -235,24 +244,26 @@ class GestureEngine:
 
         # Silencio: mano abierta con pulgar recogido hacia la base del meñique.
         # Excluyente con el toggle de teclado (que exige el pulgar bien separado).
-        if fingers_extended and d_thumb_pinky_mcp < config.SILENCE_TUCK_MAX:
+        # TASK-055b: suprimidos mientras la otra mano esta en un gesto de 2 manos -
+        # antes corrian igual sobre la mano "primaria" sin importar la otra mano.
+        if not two_hand_active and fingers_extended and d_thumb_pinky_mcp < config.SILENCE_TUCK_MAX:
             if now - self.last_silence_time > config.SILENCE_COOLDOWN:
                 events.append("SILENCE")
                 self.last_silence_time = now
-        elif fingers_extended and d_thumb_index > config.PALM_OPEN_MIN_SPREAD:
+        elif not two_hand_active and fingers_extended and d_thumb_index > config.PALM_OPEN_MIN_SPREAD:
             if now - self.last_toggle_time > config.KEYBOARD_TOGGLE_COOLDOWN:
                 events.append("KEYBOARD_TOGGLE")
                 self.last_toggle_time = now
 
         # Screenshot: pulgar+anular pinch con índice y meñique recogidos
-        screenshot_pinch = pinch_winner == "ring" and d_thumb_ring < config.PINCH_SCREENSHOT
+        screenshot_pinch = not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_SCREENSHOT
         if screenshot_pinch and index.y > pts[6].y and pinky.y > pts[18].y:
             if now - self.last_screenshot_time > config.SCREENSHOT_COOLDOWN:
                 events.append("SCREENSHOT")
                 self.last_screenshot_time = now
 
         # Zoom: pulgar+anular pinch con índice extendido, dirección por movimiento vertical del anular
-        elif pinch_winner == "ring" and d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
+        elif not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
             if self.prev_zoom_y is not None:
                 delta = self.prev_zoom_y - ring.y
                 if delta > config.VOLUME_DELTA_THRESHOLD:
@@ -264,7 +275,7 @@ class GestureEngine:
             self.prev_zoom_y = None
 
         # Volumen: pulgar+meñique pinch, dirección por movimiento vertical del meñique
-        if pinch_winner == "pinky" and d_thumb_pinky < config.PINCH_VOLUME:
+        if not two_hand_active and pinch_winner == "pinky" and d_thumb_pinky < config.PINCH_VOLUME:
             if self.prev_pinky_y is not None:
                 delta = self.prev_pinky_y - pinky.y
                 if delta > config.VOLUME_DELTA_THRESHOLD:
@@ -276,7 +287,13 @@ class GestureEngine:
             self.prev_pinky_y = None
 
         # Scroll: índice+medio extendidos, anular recogido, pulgar separado del índice
-        if index.y < pts[6].y and middle.y < pts[10].y and ring.y > pts[14].y and d_thumb_index > 40:
+        if (
+            not two_hand_active
+            and index.y < pts[6].y
+            and middle.y < pts[10].y
+            and ring.y > pts[14].y
+            and d_thumb_index > 40
+        ):
             if self.prev_scroll_y is not None:
                 delta = self.prev_scroll_y - index.y
                 if delta > config.VOLUME_DELTA_THRESHOLD:
@@ -304,7 +321,9 @@ class GestureEngine:
         # ambiguo hecho poco despues (encontrado documentando TASK-055, arreglado
         # aparte porque es un bug distinto: temporal entre gestos, no ambiguedad
         # dentro de un mismo frame).
-        is_right_pinching = pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
+        is_right_pinching = (
+            not two_hand_active and pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
+        )
         if (
             is_right_pinching
             and not self.was_right_pinching

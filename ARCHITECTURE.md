@@ -568,6 +568,23 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   right-click immediately after a clean left-click produced no `RIGHT_CLICK`
   event, and the symmetric case likewise dropped `PINCH_DOWN`). Fixed with a
   second, independent `last_right_click_time`.
+- **The 7 single-hand checks that had no two-hand suppression now do
+  (TASK-055b, `openspec/changes/personalization-and-config-ui`).** Only
+  `LOCK_SESSION` and `PINCH_DOWN`/`PINCH_UP` were ever gated against a
+  concurrent two-hand gesture — `SILENCE`, `KEYBOARD_TOGGLE`, `SCREENSHOT`,
+  single-hand `ZOOM_IN`/`ZOOM_OUT`, `VOLUME_UP`/`VOLUME_DOWN`,
+  `SCROLL_UP`/`SCROLL_DOWN`, and `RIGHT_CLICK` ran unconditionally on the
+  primary hand regardless of what the other hand was doing. `_process_two_hand_
+  gestures` now also returns a general `two_hand_active` flag (the raw
+  geometric OR of `both_shaka`/`both_fists`/`both_pinching`/"one hand is a fist
+  and the other isn't" — not whether a two-hand event actually fired, since
+  some require a hold to confirm), and all 7 are gated by it. `LOCK_SESSION`'s
+  and `PINCH_DOWN`'s existing, narrower suppression conditions were left
+  untouched (they were already correct for their specific known collision, no
+  need to broaden them). This was optional per the task's own spec — done now
+  because it also reduces the collision-avoidance burden for every future
+  two-hand gesture this project adds (Naruto/JJK/common gestures), rather than
+  re-litigating it per gesture later.
 
 ## Known limitations
 

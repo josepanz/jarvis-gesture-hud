@@ -509,5 +509,72 @@ class ClickCooldownIndependenceTests(unittest.TestCase):
         self.assertIn("PINCH_DOWN", events)
 
 
+def two_hand_process(engine, primary_pts, other_pts):
+    """primary_pts listed first so _pick_primary picks it on a cold-start
+    engine (no established _primary_pos yet)."""
+    hands = [Hand(primary_pts, "Right"), Hand(other_pts, "Left")]
+    return engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+
+
+class TwoHandSuppressionTests(unittest.TestCase):
+    """TASK-055b: the 7 single-hand checks that had no two-hand suppression
+    before this task (SILENCE, KEYBOARD_TOGGLE, SCREENSHOT, single-hand
+    ZOOM_IN/OUT, VOLUME_UP/DOWN, SCROLL_UP/DOWN, RIGHT_CLICK) must not fire on
+    the primary hand while the OTHER hand makes it a two-hand gesture (here:
+    a fist, satisfying the general fists[0] != fists[1] condition - the same
+    raw geometric trigger the meta-menu itself is gated on, not the meta-menu's
+    own held/confirmed event). LOCK_SESSION and PINCH_DOWN already had their
+    own narrower suppression before this task and are unchanged/untested here."""
+
+    def test_silence_suppressed(self):
+        engine = GestureEngine()
+        _, _, events = two_hand_process(engine, silence_hand(), fist_hand(0.8, 0.5))
+        self.assertNotIn("SILENCE", events)
+
+    def test_keyboard_toggle_suppressed(self):
+        engine = GestureEngine()
+        _, _, events = two_hand_process(engine, open_palm_hand(), fist_hand(0.8, 0.5))
+        self.assertNotIn("KEYBOARD_TOGGLE", events)
+
+    def test_screenshot_suppressed(self):
+        engine = GestureEngine()
+        _, _, events = two_hand_process(engine, screenshot_hand(), fist_hand(0.8, 0.5))
+        self.assertNotIn("SCREENSHOT", events)
+
+    def test_single_hand_zoom_suppressed(self):
+        engine = GestureEngine()
+        two_hand_process(engine, zoom_hand(ring_y=0.5), fist_hand(0.8, 0.5))
+        _, _, events = two_hand_process(engine, zoom_hand(ring_y=0.35), fist_hand(0.8, 0.5))
+        self.assertNotIn("ZOOM_IN", events)
+        self.assertNotIn("ZOOM_OUT", events)
+
+    def test_volume_suppressed(self):
+        engine = GestureEngine()
+        two_hand_process(engine, volume_hand(pinky_y=0.5), fist_hand(0.8, 0.5))
+        _, _, events = two_hand_process(engine, volume_hand(pinky_y=0.35), fist_hand(0.8, 0.5))
+        self.assertNotIn("VOLUME_UP", events)
+        self.assertNotIn("VOLUME_DOWN", events)
+
+    def test_scroll_suppressed(self):
+        engine = GestureEngine()
+        two_hand_process(engine, scroll_hand(cy=0.5), fist_hand(0.8, 0.5))
+        _, _, events = two_hand_process(engine, scroll_hand(cy=0.35), fist_hand(0.8, 0.5))
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_right_click_suppressed(self):
+        engine = GestureEngine()
+        _, _, events = two_hand_process(engine, right_click_hand(), fist_hand(0.8, 0.5))
+        self.assertNotIn("RIGHT_CLICK", events)
+
+    def test_suppression_lifts_once_the_other_hand_is_no_longer_a_fist(self):
+        # Regression: this isn't a permanent lockout - once the second hand
+        # stops making it a two-hand gesture, the single-hand check works again.
+        engine = GestureEngine()
+        two_hand_process(engine, silence_hand(), fist_hand(0.8, 0.5))
+        _, _, events = process(engine, silence_hand())
+        self.assertIn("SILENCE", events)
+
+
 if __name__ == "__main__":
     unittest.main()
