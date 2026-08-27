@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.1.2 (2026-08-27)
+
+### Bug Fixes
+
+- Click izquierdo y derecho ya no comparten cooldown
+  ([`910b0fb`](https://github.com/josepanz/jarvis-gesture-hud/commit/910b0fb9deaf979113bb44332b007d8fdbac428f))
+
+PINCH_DOWN y RIGHT_CLICK usaban el mismo timer (last_click_time) para sus cooldowns. Como la rama de
+  PINCH_DOWN corre primero cada frame, un click izquierdo genuino podia "tragarse" un click derecho
+  genuino hecho poco despues (y viceversa, porque RIGHT_CLICK tambien escribia en el mismo timer) -
+  un bug real, distinto al de TASK-055 (esa ambiguedad era dentro del mismo frame; esta es entre 2
+  gestos limpios y separados en el tiempo).
+
+Verificado revirtiendo el fix en ambas direcciones antes de confiar en el test. Fix:
+  last_right_click_time propio para RIGHT_CLICK.
+
+447 tests (2 nuevos), regresion completa y boot real de la app verificados.
+
+
 ## v0.1.1 (2026-08-27)
 
 ### Bug Fixes
