@@ -41,7 +41,21 @@ def _is_fist(pts):
 
 
 def _is_shaka(pts):
-    return pts[20].y < pts[18].y and pts[4].y < pts[2].y and pts[8].y > pts[6].y and pts[12].y > pts[10].y
+    # El anular curvado se agrego despues de verificar en camara real que la
+    # transicion al abrir/cerrar un puno pasa, por un instante, por una forma
+    # que ya cumplia esta funcion sin el chequeo de anular (menique se
+    # "extiende" antes que el resto, pulgar ya arriba, indice/medio todavia
+    # curvados) - eso podia sostenerse el tiempo suficiente para disparar
+    # LOCK_SESSION sin que el usuario hiciera Shaka a proposito. Un Shaka real
+    # (hang loose) tiene el anular curvado tambien, asi que este chequeo no
+    # le saca alcance al gesto genuino.
+    return (
+        pts[20].y < pts[18].y
+        and pts[4].y < pts[2].y
+        and pts[8].y > pts[6].y
+        and pts[12].y > pts[10].y
+        and pts[16].y > pts[14].y
+    )
 
 
 def _extended_finger_count(pts):
@@ -65,6 +79,12 @@ class GestureEngine:
         self.last_screenshot_time = 0.0
         self.last_toggle_time = 0.0
         self.last_silence_time = 0.0
+
+        # Cuantos frames seguidos lleva cada dedo por debajo de su umbral de pinch -
+        # confirmado (config.PINCH_CONFIRM_FRAMES) recien entra a competir por
+        # pinch_winner. Absorbe el ruido de un solo frame (mano relajada moviendose
+        # cerca del umbral, medido en camara real - ver config.py).
+        self._pinch_streak = {"index": 0, "middle": 0, "ring": 0, "pinky": 0}
 
         self.pause_hold_start = None
         self.close_hold_start = None
@@ -236,7 +256,20 @@ class GestureEngine:
             ("ring", d_thumb_ring, _ring_pinch_threshold),
             ("pinky", d_thumb_pinky, config.PINCH_VOLUME),
         ]
-        _active_pinches = [(name, dist) for name, dist, threshold in _pinch_candidates if dist < threshold]
+        # TASK-055/1.5 (medido en camara real, ver config.py): un solo frame bajo el
+        # umbral no alcanza - un pinch recien "confirma" tras PINCH_CONFIRM_FRAMES
+        # frames seguidos, para no reaccionar al ruido de la mano relajada pasando
+        # cerca del umbral en un movimiento normal.
+        for _name, _dist, _threshold in _pinch_candidates:
+            if _dist < _threshold:
+                self._pinch_streak[_name] = min(self._pinch_streak[_name] + 1, config.PINCH_CONFIRM_FRAMES)
+            else:
+                self._pinch_streak[_name] = 0
+        _active_pinches = [
+            (name, dist)
+            for name, dist, threshold in _pinch_candidates
+            if dist < threshold and self._pinch_streak[name] >= config.PINCH_CONFIRM_FRAMES
+        ]
         pinch_winner = min(_active_pinches, key=lambda p: p[1])[0] if _active_pinches else None
 
         fingers_extended = all(pts[i].y < pts[i - 2].y for i in (8, 12, 16, 20))

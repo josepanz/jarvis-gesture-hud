@@ -595,15 +595,42 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   existing synthetic fixture uses `z=0`, so the 3D formula degrades exactly to
   the 2D one for all of them (verified — full suite unchanged). **Real-camera
   threshold re-verification (`config.py`'s `PINCH_*` constants) was NOT done
-  as part of this task** — this environment has no webcam access, so the
-  thresholds were left numerically unchanged rather than guessed. Do this
-  manually on a real machine before relying on it: MediaPipe's hand landmark
-  `z` is normalized relative to each hand's own wrist and roughly x-scaled,
-  not calibrated real-world depth, so a genuine pinch's 3D distance should be
-  close to but not necessarily identical to its 2D distance — if pinch
-  gestures feel less sensitive after this change, `PINCH_CLICK`/
-  `PINCH_RIGHT_CLICK`/`PINCH_ZOOM`/`PINCH_VOLUME`/`PINCH_SCREENSHOT` may need
-  a small bump.
+  as part of this task** — this environment initially had no webcam access,
+  so the thresholds were left numerically unchanged at first. **Update: real
+  camera access (DroidCam) became available shortly after** — see the next
+  two entries for what that made possible.
+- **Real-camera diagnosis (DroidCam, 2026-08-27) of two reports from actual
+  use: Shaka/fist confusion (a fist locked the session) and "everything
+  fires too easily."** Both root-caused with live landmark data, not guessed:
+  - *Shaka/fist confusion*: `_is_shaka` never checked the ring finger. Live
+    capture showed the natural motion of opening a held fist passes, for a
+    few frames, through a pose that already satisfied `_is_shaka` (pinky
+    reading "extended" before the other fingers catch up, thumb already
+    tip-up, index/middle still curled) — with the ring finger extended too,
+    which a real Shaka/hang-loose sign doesn't have (it curls). Fixed by
+    requiring the ring finger curled in `_is_shaka` too — verified live
+    before/after: before, the transition sustained `is_shaka=True` for a
+    visible stretch; after, only 3 scattered, non-consecutive frames spanning
+    0.18s (nowhere near `LOCK_HOLD_SECONDS=1.5`). Pinned as a permanent
+    regression test built from the actual captured geometry.
+  - *"Everything fires too easily"*: measured real thumb-to-fingertip
+    distances with the hand relaxed (not intentionally pinching) vs.
+    intentionally pinching. A relaxed hand's index dipped to 15.5px and
+    middle to 19.2px during ordinary movement — already under the old 30px
+    thresholds — while an intentional pinch's median was 9.6px. The old
+    thresholds (25–30px, nearly identical across all 5 pinch families) sat
+    too close to relaxed-hand noise, especially for click/right-click.
+    Fixed two ways: (1) thresholds lowered with a safety margin from the
+    measured data (`PINCH_CLICK` 30→18, `PINCH_RIGHT_CLICK` 30→20,
+    `PINCH_SCREENSHOT` 25→20, `PINCH_ZOOM` 30→25, `PINCH_VOLUME` 30→28); (2) a
+    new `PINCH_CONFIRM_FRAMES=2` requirement — a pinch-family finger must be
+    under its threshold for 2 consecutive frames before it's allowed to win
+    `pinch_winner`, absorbing single-frame noise regardless of exact
+    threshold values (generalizes better than threshold-tuning alone, which
+    is inherently specific to this one camera/session's measurements).
+    Verified live end-to-end afterward: 5 clean `PINCH_DOWN`/4 `PINCH_UP`
+    matching deliberate pinches, 1 genuine `RIGHT_CLICK`, 2 `KEYBOARD_TOGGLE`
+    from open-palm — no misfiring, no rapid-fire duplicates.
 
 ## Known limitations
 

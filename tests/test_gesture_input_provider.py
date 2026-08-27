@@ -58,6 +58,7 @@ class GestureInputProviderTests(unittest.TestCase):
         frame_source = lambda: (object(), 640, 480)  # noqa: E731
         provider = GestureInputProvider(tracker, GestureEngine(), 1920, 1080, frame_source=frame_source)
 
+        provider.poll()  # confirm-frame warmup (gestures.py's pinch-confirm streak)
         events = provider.poll()
 
         self.assertTrue(len(events) >= 1)

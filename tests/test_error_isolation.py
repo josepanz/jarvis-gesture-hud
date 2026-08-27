@@ -54,6 +54,7 @@ class TTSFailureDoesNotStopTrackingTests(unittest.TestCase):
         # broken TTS engine to even propagate through. Demonstrated by running
         # detection to completion with no voice object involved anywhere.
         engine = GestureEngine()
+        engine.process([Hand(_flat_hand(), "Right")], 640, 480, 1920, 1080)  # confirm-frame warmup
         screen_xy, _, events = engine.process([Hand(_flat_hand(), "Right")], 640, 480, 1920, 1080)
         self.assertIsNotNone(screen_xy)
         self.assertIn("PINCH_DOWN", events)

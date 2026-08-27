@@ -16,7 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from jarvis import config  # noqa: E402
 from jarvis.gestures import GestureEngine  # noqa: E402
+from jarvis.gestures import _is_shaka  # noqa: E402
 from jarvis.hand_tracker import Hand  # noqa: E402
 
 Landmark = namedtuple("Landmark", "x y z")
@@ -161,6 +163,28 @@ def shaka_hand(cx=0.5, cy=0.5):
     return pts
 
 
+def fist_opening_transition_hand(cx=0.5, cy=0.5):
+    """Captured from a real DroidCam feed while closing/opening a fist
+    (2026-08-27 live diagnostic): mid-transition, the pinky reads "extended"
+    before the other fingers catch up, the thumb is already tip-up, and index/
+    middle are still curled - the exact shape _is_shaka checked for, before it
+    also required the ring finger curled. The ring stays extended here (not
+    yet curled back down), same as the captured frame that produced a false
+    is_shaka=True mid-motion, well before the user made any deliberate Shaka."""
+    pts = flat(cx, cy)
+    pts[20] = Landmark(cx, cy - 0.1, 0)  # pinky extended
+    pts[18] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx - 0.1, cy - 0.1, 0)  # thumb tip above mcp
+    pts[2] = Landmark(cx - 0.05, cy, 0)
+    pts[8] = Landmark(cx, cy + 0.05, 0)  # index curled
+    pts[6] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx, cy + 0.05, 0)  # middle curled
+    pts[10] = Landmark(cx, cy, 0)
+    pts[16] = Landmark(cx, cy - 0.1, 0)  # ring EXTENDED (not curled) - the fix's whole point
+    pts[14] = Landmark(cx, cy, 0)
+    return pts
+
+
 def fist_hand(cx=0.5, cy=0.5):
     pts = flat(cx, cy)
     pts[4] = Landmark(cx - 0.08, cy, 0)
@@ -252,6 +276,23 @@ def process(engine, pts):
     return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
 
 
+def confirm_pinch(engine, pts):
+    """1.5 (measured on real camera): a pinch-family finger needs
+    config.PINCH_CONFIRM_FRAMES consecutive frames under its threshold before
+    it's allowed to win pinch_winner, absorbing relaxed-hand noise. Call this
+    before a test's own process() calls so the FIRST of those already counts
+    as "confirmed" (does CONFIRM_FRAMES - 1 warmup calls at the same pose)."""
+    for _ in range(config.PINCH_CONFIRM_FRAMES - 1):
+        process(engine, pts)
+
+
+def process_confirmed(engine, pts):
+    """confirm_pinch() then one more process() call - for tests asserting an
+    edge-triggered pinch-family gesture fires on first genuine, held contact."""
+    confirm_pinch(engine, pts)
+    return process(engine, pts)
+
+
 class PointerAndSmoothingTests(unittest.TestCase):
     def test_pointer_moves_with_smoothing(self):
         engine = GestureEngine()
@@ -262,18 +303,19 @@ class PointerAndSmoothingTests(unittest.TestCase):
 class LeftClickDragTests(unittest.TestCase):
     def test_pinch_fires_pinch_down_once(self):
         engine = GestureEngine()
-        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertEqual(events, ["PINCH_DOWN"])
 
     def test_holding_the_pinch_does_not_repeat_pinch_down(self):
         engine = GestureEngine()
-        process(engine, pinch_click_hand(pinched=True))
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))  # confirmed - fires here
         _, _, events = process(engine, pinch_click_hand(pinched=True))
         self.assertNotIn("PINCH_DOWN", events)
 
     def test_releasing_the_pinch_fires_pinch_up(self):
         engine = GestureEngine()
-        process(engine, pinch_click_hand(pinched=True))
+        process_confirmed(engine, pinch_click_hand(pinched=True))
         _, _, events = process(engine, pinch_click_hand(pinched=False))
         self.assertIn("PINCH_UP", events)
 
@@ -281,12 +323,13 @@ class LeftClickDragTests(unittest.TestCase):
 class RightClickTests(unittest.TestCase):
     def test_pinch_thumb_middle_fires_right_click(self):
         engine = GestureEngine()
-        _, _, events = process(engine, right_click_hand())
+        _, _, events = process_confirmed(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
     def test_does_not_repeat_within_cooldown(self):
         engine = GestureEngine()
-        process(engine, right_click_hand())
+        confirm_pinch(engine, right_click_hand())
+        process(engine, right_click_hand())  # confirmed - fires here
         _, _, events = process(engine, right_click_hand())
         self.assertNotIn("RIGHT_CLICK", events)
 
@@ -308,12 +351,14 @@ class ScrollTests(unittest.TestCase):
 class ZoomTests(unittest.TestCase):
     def test_ring_moving_up_zooms_in(self):
         engine = GestureEngine()
-        process(engine, zoom_hand(ring_y=0.5))
+        confirm_pinch(engine, zoom_hand(ring_y=0.5))
+        process(engine, zoom_hand(ring_y=0.5))  # confirmed - sets the delta baseline
         _, _, events = process(engine, zoom_hand(ring_y=0.35))
         self.assertIn("ZOOM_IN", events)
 
     def test_ring_moving_down_zooms_out(self):
         engine = GestureEngine()
+        confirm_pinch(engine, zoom_hand(ring_y=0.35))
         process(engine, zoom_hand(ring_y=0.35))
         _, _, events = process(engine, zoom_hand(ring_y=0.5))
         self.assertIn("ZOOM_OUT", events)
@@ -322,12 +367,14 @@ class ZoomTests(unittest.TestCase):
 class VolumeTests(unittest.TestCase):
     def test_pinky_moving_up_raises_volume(self):
         engine = GestureEngine()
+        confirm_pinch(engine, volume_hand(pinky_y=0.5))
         process(engine, volume_hand(pinky_y=0.5))
         _, _, events = process(engine, volume_hand(pinky_y=0.35))
         self.assertIn("VOLUME_UP", events)
 
     def test_pinky_moving_down_lowers_volume(self):
         engine = GestureEngine()
+        confirm_pinch(engine, volume_hand(pinky_y=0.35))
         process(engine, volume_hand(pinky_y=0.35))
         _, _, events = process(engine, volume_hand(pinky_y=0.5))
         self.assertIn("VOLUME_DOWN", events)
@@ -336,12 +383,13 @@ class VolumeTests(unittest.TestCase):
 class ScreenshotTests(unittest.TestCase):
     def test_fires_screenshot(self):
         engine = GestureEngine()
-        _, _, events = process(engine, screenshot_hand())
+        _, _, events = process_confirmed(engine, screenshot_hand())
         self.assertIn("SCREENSHOT", events)
 
     def test_does_not_repeat_within_cooldown(self):
         engine = GestureEngine()
-        process(engine, screenshot_hand())
+        confirm_pinch(engine, screenshot_hand())
+        process(engine, screenshot_hand())  # confirmed - fires here
         _, _, events = process(engine, screenshot_hand())
         self.assertNotIn("SCREENSHOT", events)
 
@@ -379,6 +427,13 @@ class LockSessionTests(unittest.TestCase):
         engine = GestureEngine()
         _, _, events = process(engine, shaka_hand())
         self.assertNotIn("LOCK_SESSION", events)
+
+    def test_fist_opening_transition_is_not_read_as_shaka(self):
+        # Real-camera regression: a real fist-opening motion transiently
+        # matched _is_shaka before it required the ring finger curled too -
+        # confirmed live (DroidCam), fixed, and pinned here so it can't
+        # silently regress.
+        self.assertFalse(_is_shaka(fist_opening_transition_hand()))
 
 
 class TwoHandMasterGestureTests(unittest.TestCase):
@@ -450,21 +505,21 @@ class PinchPriorityTests(unittest.TestCase):
 
     def test_fist_with_index_pinch_fires_only_pinch_down(self):
         engine = GestureEngine()
-        _, _, events = process(engine, fist_with_index_pinch_hand())
+        _, _, events = process_confirmed(engine, fist_with_index_pinch_hand())
         self.assertEqual(events, ["PINCH_DOWN"])
         self.assertNotIn("RIGHT_CLICK", events)
         self.assertNotIn("SCREENSHOT", events)
 
     def test_fist_with_index_pinch_release_fires_pinch_up_cleanly(self):
         engine = GestureEngine()
-        process(engine, fist_with_index_pinch_hand())
+        process_confirmed(engine, fist_with_index_pinch_hand())
         _, _, events = process(engine, pinch_click_hand(pinched=False))
         self.assertIn("PINCH_UP", events)
         self.assertNotIn("SCREENSHOT", events)
 
     def test_ambiguous_tie_fires_exactly_one_event_deterministically(self):
         engine = GestureEngine()
-        _, _, events = process(engine, two_way_tie_pinch_hand())
+        _, _, events = process_confirmed(engine, two_way_tie_pinch_hand())
         fired = [e for e in events if e in ("PINCH_DOWN", "SCREENSHOT")]
         self.assertEqual(len(fired), 1)
         # documented tie-break: "index" is listed before "ring" in gestures.py's
@@ -475,16 +530,45 @@ class PinchPriorityTests(unittest.TestCase):
         # Regression: every pre-existing, unambiguous single-condition fixture
         # in this file still fires exactly as it did before TASK-055.
         engine = GestureEngine()
-        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process(engine, right_click_hand())
+        _, _, events = process_confirmed(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
-        _, _, events = process(engine, screenshot_hand())
+        _, _, events = process_confirmed(engine, screenshot_hand())
         self.assertIn("SCREENSHOT", events)
+
+
+class PinchConfirmFrameTests(unittest.TestCase):
+    """1.5 (measured on a real DroidCam feed 2026-08-27): a relaxed, non-
+    pinching hand's thumb-to-fingertip distance briefly crossed the old
+    threshold during ordinary movement (index dipped to 15.5px, threshold was
+    30px) - "everything fires too easily" report. A single frame under
+    threshold now isn't enough; config.PINCH_CONFIRM_FRAMES consecutive
+    frames are required."""
+
+    def test_single_frame_under_threshold_does_not_fire(self):
+        engine = GestureEngine()
+        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        self.assertNotIn("PINCH_DOWN", events)
+
+    def test_confirm_frames_consecutive_frames_does_fire(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertIn("PINCH_DOWN", events)
+
+    def test_a_brief_dip_that_never_reaches_confirm_frames_never_fires(self):
+        # Simulates the measured real-world case: distance dips under threshold
+        # for 1 frame, then moves back out, repeatedly - never sustained long
+        # enough to confirm.
+        engine = GestureEngine()
+        for _ in range(5):
+            _, _, events = process(engine, pinch_click_hand(pinched=True))
+            self.assertNotIn("PINCH_DOWN", events)
+            process(engine, pinch_click_hand(pinched=False))  # breaks the streak
 
 
 class Pinch3DDistanceTests(unittest.TestCase):
@@ -492,6 +576,10 @@ class Pinch3DDistanceTests(unittest.TestCase):
     not just the 2D screen-projected (x, y) distance."""
 
     def test_close_in_xy_but_far_in_z_does_not_register_as_a_pinch(self):
+        # Even held for enough consecutive frames to satisfy TASK-055/1.5's
+        # confirm-streak requirement, the z gap alone must keep this from
+        # registering - proves the z-distance itself is doing the work here,
+        # not just the frame count.
         engine = GestureEngine()
         pts = flat(0.5, 0.5)
         pts[4] = Landmark(0.5, 0.5, 0.0)  # thumb
@@ -500,7 +588,7 @@ class Pinch3DDistanceTests(unittest.TestCase):
         pts[12] = Landmark(0.8, 0.2, 0.0)
         pts[16] = Landmark(0.8, 0.2, 0.0)
         pts[20] = Landmark(0.8, 0.2, 0.0)
-        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process_confirmed(engine, pts)
         self.assertNotIn("PINCH_DOWN", events)
 
     def test_flat_z_fixtures_behave_identically_to_before_this_task(self):
@@ -508,14 +596,15 @@ class Pinch3DDistanceTests(unittest.TestCase):
         # formula must degrade exactly to the 2D one in that case. Spot-check
         # a representative few rather than re-asserting the whole file.
         engine = GestureEngine()
-        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process(engine, right_click_hand())
+        _, _, events = process_confirmed(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
+        confirm_pinch(engine, volume_hand(pinky_y=0.5))
         process(engine, volume_hand(pinky_y=0.5))
         _, _, events = process(engine, volume_hand(pinky_y=0.35))
         self.assertIn("VOLUME_UP", events)
@@ -532,14 +621,14 @@ class ClickCooldownIndependenceTests(unittest.TestCase):
 
     def test_genuine_right_click_shortly_after_a_genuine_left_click_still_fires(self):
         engine = GestureEngine()
-        process(engine, pinch_click_hand(pinched=True))
-        _, _, events = process(engine, right_click_hand())
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        _, _, events = process_confirmed(engine, right_click_hand())
         self.assertIn("RIGHT_CLICK", events)
 
     def test_genuine_left_click_shortly_after_a_genuine_right_click_still_fires(self):
         engine = GestureEngine()
-        process(engine, right_click_hand())
-        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertIn("PINCH_DOWN", events)
 
 

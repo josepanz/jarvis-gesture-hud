@@ -6,12 +6,22 @@ FRAME_HEIGHT = 480
 EMA_ALPHA = 0.35
 POINTER_MARGIN = 0.1  # recorte de bordes al mapear cámara -> pantalla
 
-# Umbrales de pinch/distancia (px sobre el frame)
-PINCH_CLICK = 30
-PINCH_RIGHT_CLICK = 30
-PINCH_ZOOM = 30
-PINCH_VOLUME = 30
-PINCH_SCREENSHOT = 25
+# Umbrales de pinch/distancia (px sobre el frame). Recalibrados 2026-08-27 con
+# datos reales de camara (DroidCam): mano relajada (sin pellizcar a proposito)
+# llego a 15.5px en indice / 19.2px en medio / 34.2px en anular / 51.3px en
+# menique por momentos de movimiento natural, mientras que un pinch
+# intencional (indice) tuvo mediana 9.6px. Los valores viejos (25-30 para
+# todos) quedaban demasiado cerca del ruido de mano relajada, sobre todo para
+# indice/medio - de ahi el reporte de "todo dispara muy facil". Bajados con
+# margen de seguridad sobre indice/medio (los mas expuestos); anular/menique
+# ya tenian margen razonable, se ajustan un poco igual por consistencia. Ver
+# ARCHITECTURE.md para el detalle completo de la medicion.
+PINCH_CLICK = 18
+PINCH_RIGHT_CLICK = 20
+PINCH_ZOOM = 25
+PINCH_VOLUME = 28
+PINCH_SCREENSHOT = 20
+PINCH_CONFIRM_FRAMES = 2  # frames seguidos bajo el umbral antes de confirmar un pinch - absorbe ruido de un solo frame
 PALM_OPEN_MIN_SPREAD = 60
 SILENCE_TUCK_MAX = 40
 
