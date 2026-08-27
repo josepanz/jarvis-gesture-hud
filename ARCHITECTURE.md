@@ -543,6 +543,22 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
 - **Natural-language voice control (STT + LLM) is now implemented** on
   `feature/full-integration-voice-llm` (merged) — see Status and Known limitations
   for what shipped and what's still open (wake word, exe bundling).
+- **Pinch-family gestures could fire together on a fist with only thumb+index
+  deployed — real bug, reported from actual use, fixed (`openspec/changes/
+  personalization-and-config-ui`, TASK-055).** `gestures.py` computed each
+  pinch-family distance (click, right-click, screenshot, zoom, volume)
+  independently, with no check that only one was meant. In a natural fist with
+  just thumb+index pinching, the curled middle/ring/pinky fingertips land close
+  enough to the thumb's resting point to also satisfy another pinch family's own
+  threshold — confirmed by reverting the fix and reproducing `['SCREENSHOT',
+  'PINCH_DOWN']` firing together from a single synthetic fixture (not assumed).
+  Fixed by resolving one winner per frame — the pinch family with the smallest
+  thumb-to-fingertip distance — before any branch is allowed to fire; every
+  other candidate is suppressed that frame. Discovered along the way: `PINCH_DOWN`
+  and `RIGHT_CLICK` share `self.last_click_time` for their cooldowns, and
+  `PINCH_DOWN`'s branch runs first each frame, so it was already accidentally
+  masking that specific pair from co-firing — `SCREENSHOT` (its own independent
+  cooldown) was the pairing that actually reproduced the bug.
 
 ## Known limitations
 

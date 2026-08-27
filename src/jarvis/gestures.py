@@ -201,6 +201,24 @@ class GestureEngine:
         d_thumb_pinky = self._dist(thumb, pinky, w, h)
         d_thumb_pinky_mcp = self._dist(thumb, pts[17], w, h)
 
+        # TASK-055: resolucion de prioridad entre gestos de pinch. En un puno con
+        # solo pulgar+indice desplegados y pellizcando, las puntas de los demas
+        # dedos curvados quedan geometricamente cerca del pulgar (consecuencia
+        # natural de la forma de un puno) y pueden cumplir el umbral de OTRO pinch
+        # (ej. click derecho) en el mismo frame - antes de este fix, ambos
+        # disparaban juntos ("se confunde"). Gana el dedo con distancia mas chica
+        # (el pellizco mas ajustado, el mas probable de ser intencional); en un
+        # empate exacto gana el primero listado abajo (orden fijo, deterministico).
+        _ring_pinch_threshold = max(config.PINCH_SCREENSHOT, config.PINCH_ZOOM)
+        _pinch_candidates = [
+            ("index", d_thumb_index, config.PINCH_CLICK),
+            ("middle", d_thumb_middle, config.PINCH_RIGHT_CLICK),
+            ("ring", d_thumb_ring, _ring_pinch_threshold),
+            ("pinky", d_thumb_pinky, config.PINCH_VOLUME),
+        ]
+        _active_pinches = [(name, dist) for name, dist, threshold in _pinch_candidates if dist < threshold]
+        pinch_winner = min(_active_pinches, key=lambda p: p[1])[0] if _active_pinches else None
+
         fingers_extended = all(pts[i].y < pts[i - 2].y for i in (8, 12, 16, 20))
 
         # Lock session: Shaka (pulgar+meñique extendidos, índice/medio recogidos) sostenido.
@@ -226,13 +244,14 @@ class GestureEngine:
                 self.last_toggle_time = now
 
         # Screenshot: pulgar+anular pinch con índice y meñique recogidos
-        if d_thumb_ring < config.PINCH_SCREENSHOT and index.y > pts[6].y and pinky.y > pts[18].y:
+        screenshot_pinch = pinch_winner == "ring" and d_thumb_ring < config.PINCH_SCREENSHOT
+        if screenshot_pinch and index.y > pts[6].y and pinky.y > pts[18].y:
             if now - self.last_screenshot_time > config.SCREENSHOT_COOLDOWN:
                 events.append("SCREENSHOT")
                 self.last_screenshot_time = now
 
         # Zoom: pulgar+anular pinch con índice extendido, dirección por movimiento vertical del anular
-        elif d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
+        elif pinch_winner == "ring" and d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
             if self.prev_zoom_y is not None:
                 delta = self.prev_zoom_y - ring.y
                 if delta > config.VOLUME_DELTA_THRESHOLD:
@@ -244,7 +263,7 @@ class GestureEngine:
             self.prev_zoom_y = None
 
         # Volumen: pulgar+meñique pinch, dirección por movimiento vertical del meñique
-        if d_thumb_pinky < config.PINCH_VOLUME:
+        if pinch_winner == "pinky" and d_thumb_pinky < config.PINCH_VOLUME:
             if self.prev_pinky_y is not None:
                 delta = self.prev_pinky_y - pinky.y
                 if delta > config.VOLUME_DELTA_THRESHOLD:
@@ -270,7 +289,7 @@ class GestureEngine:
         # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click
         # de paso con la mano que termina siendo "primaria".
-        is_pinching = d_thumb_index < config.PINCH_CLICK and not suppress_pinch
+        is_pinching = pinch_winner == "index" and d_thumb_index < config.PINCH_CLICK and not suppress_pinch
         if is_pinching and not self.was_pinching and now - self.last_click_time > config.CLICK_COOLDOWN:
             events.append("PINCH_DOWN")
             self.last_click_time = now
@@ -279,7 +298,7 @@ class GestureEngine:
         self.was_pinching = is_pinching
 
         # Click derecho (edge-triggered)
-        is_right_pinching = d_thumb_middle < config.PINCH_RIGHT_CLICK
+        is_right_pinching = pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
         if (
             is_right_pinching
             and not self.was_right_pinching

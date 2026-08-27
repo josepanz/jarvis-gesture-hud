@@ -197,6 +197,57 @@ def pinch_hand(cx, cy):
     return pts
 
 
+def fist_with_index_pinch_hand(cx=0.5, cy=0.5):
+    """TASK-055 regression fixture, verified against the real pre-fix behavior
+    (not just assumed): thumb+index is the closest, intentional pinch; ring and
+    pinky are also curled close enough to the thumb to independently satisfy
+    SCREENSHOT's own condition (index-curled requirement met too - PINCH_DOWN
+    never cared about index's curl state, only its distance from the thumb).
+
+    Confirmed by directly reverting this fix and running this exact fixture:
+    pre-fix this fires ['SCREENSHOT', 'PINCH_DOWN'] together - a real
+    reproduction of the "se confunde" report, not a guess. (An earlier draft of
+    this fixture used index-vs-middle/RIGHT_CLICK instead: that pair turned out
+    to be accidentally protected by an unrelated quirk - PINCH_DOWN and
+    RIGHT_CLICK share `self.last_click_time` for their cooldowns, and
+    PINCH_DOWN's branch runs first each frame, so it stomps the shared timer
+    before RIGHT_CLICK's own check runs, blocking it on the same frame
+    regardless of this fix. SCREENSHOT uses its own independent
+    `last_screenshot_time`, so no such accidental protection exists there -
+    this is why that pairing was chosen instead.)
+    """
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, cy, 0)  # thumb
+    pts[8] = Landmark(cx + 0.003, cy + 0.003, 0)  # index: closest pinch, wins priority
+    pts[6] = Landmark(cx + 0.05, cy, 0)  # curled (also satisfies screenshot's index-curled check)
+    pts[16] = Landmark(cx + 0.01, cy + 0.01, 0)  # ring: farther than index, still under SCREENSHOT's threshold
+    pts[14] = Landmark(cx + 0.05, cy, 0)
+    pts[20] = Landmark(cx + 0.01, cy + 0.01, 0)  # pinky curled (screenshot requires it)
+    pts[18] = Landmark(cx + 0.05, cy, 0)
+    pts[12] = Landmark(cx + 0.3, cy - 0.3, 0)  # middle out of the way
+    pts[10] = Landmark(cx + 0.15, cy - 0.15, 0)
+    return pts
+
+
+def two_way_tie_pinch_hand(cx=0.5, cy=0.5):
+    """Index (click family) and ring (screenshot family) are equidistant from
+    the thumb - an intentionally ambiguous fixture for TASK-055's deterministic
+    tie-break requirement. Same independent-cooldown pairing as
+    fist_with_index_pinch_hand, for the same verified reason (click vs.
+    right-click's shared cooldown timer would mask a click/middle tie)."""
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.01, cy + 0.01, 0)  # index: same distance as ring below
+    pts[6] = Landmark(cx + 0.05, cy, 0)
+    pts[16] = Landmark(cx + 0.01, cy + 0.01, 0)  # ring: tied with index
+    pts[14] = Landmark(cx + 0.05, cy, 0)
+    pts[20] = Landmark(cx + 0.01, cy + 0.01, 0)  # pinky curled (screenshot requires it)
+    pts[18] = Landmark(cx + 0.05, cy, 0)
+    pts[12] = Landmark(cx + 0.3, cy - 0.3, 0)  # middle out of the way
+    pts[10] = Landmark(cx + 0.15, cy - 0.15, 0)
+    return pts
+
+
 def process(engine, pts):
     return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
 
@@ -392,6 +443,48 @@ class PrimaryHandContinuityTests(unittest.TestCase):
         )
 
         self.assertGreater(screen_xy[0], SCREEN_W // 2)
+
+
+class PinchPriorityTests(unittest.TestCase):
+    """TASK-055: only the smallest-distance pinch condition fires per frame."""
+
+    def test_fist_with_index_pinch_fires_only_pinch_down(self):
+        engine = GestureEngine()
+        _, _, events = process(engine, fist_with_index_pinch_hand())
+        self.assertEqual(events, ["PINCH_DOWN"])
+        self.assertNotIn("RIGHT_CLICK", events)
+        self.assertNotIn("SCREENSHOT", events)
+
+    def test_fist_with_index_pinch_release_fires_pinch_up_cleanly(self):
+        engine = GestureEngine()
+        process(engine, fist_with_index_pinch_hand())
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("SCREENSHOT", events)
+
+    def test_ambiguous_tie_fires_exactly_one_event_deterministically(self):
+        engine = GestureEngine()
+        _, _, events = process(engine, two_way_tie_pinch_hand())
+        fired = [e for e in events if e in ("PINCH_DOWN", "SCREENSHOT")]
+        self.assertEqual(len(fired), 1)
+        # documented tie-break: "index" is listed before "ring" in gestures.py's
+        # pinch-priority candidate list, so index wins an exact tie.
+        self.assertEqual(fired, ["PINCH_DOWN"])
+
+    def test_existing_single_pinch_fixtures_are_unaffected(self):
+        # Regression: every pre-existing, unambiguous single-condition fixture
+        # in this file still fires exactly as it did before TASK-055.
+        engine = GestureEngine()
+        _, _, events = process(engine, pinch_click_hand(pinched=True))
+        self.assertEqual(events, ["PINCH_DOWN"])
+
+        engine = GestureEngine()
+        _, _, events = process(engine, right_click_hand())
+        self.assertEqual(events, ["RIGHT_CLICK"])
+
+        engine = GestureEngine()
+        _, _, events = process(engine, screenshot_hand())
+        self.assertIn("SCREENSHOT", events)
 
 
 if __name__ == "__main__":
