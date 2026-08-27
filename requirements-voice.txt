@@ -8,3 +8,25 @@
 faster-whisper>=1.0.0
 llama-cpp-python>=0.3.0
 sounddevice>=0.4.6
+
+# NOTA (Windows): si `pip install -r requirements-voice.txt` falla instalando
+# llama-cpp-python con "No such file or directory" apuntando a una ruta muy
+# larga bajo AppData\Local\Temp\...\vendor\llama.cpp\... , es el limite de
+# ruta de Windows (MAX_PATH=260) - pip bajo el codigo fuente completo (incluye
+# la UI web de llama.cpp, con rutas muy anidadas) porque no encontro wheel
+# prearmado para tu Python/plataforma. 3 formas de resolverlo, de mas simple
+# a mas permanente:
+#
+#   A. Acortar TEMP antes de instalar (sin admin):
+#        mkdir C:\t ; $env:TEMP="C:\t"; $env:TMP="C:\t"
+#        pip install -r requirements.txt -r requirements-voice.txt
+#
+#   B. Habilitar rutas largas en Windows (admin, permanente):
+#        New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+#          -Name "LongPathsEnabled" -Value 1 -PropertyType DWord -Force
+#        git config --global core.longpaths true
+#
+#   C. Evitar compilar desde codigo fuente (tambien evita necesitar Visual
+#      Studio Build Tools/CMake si no los tenes instalados):
+#        pip install llama-cpp-python --prefer-binary `
+#          --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu

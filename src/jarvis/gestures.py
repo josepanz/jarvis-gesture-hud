@@ -135,6 +135,7 @@ class GestureEngine:
         self.meta_consumed = False
 
         self._primary_pos = None  # (x, y) normalizado del indice de la ultima mano "activa"
+        self.last_primary_landmarks = None  # TASK-057: para que hand_visualizer distinga mano primaria
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -272,9 +273,11 @@ class GestureEngine:
         events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(hands, w, h, now)
 
         if not self.active or not hands:
+            self.last_primary_landmarks = None
             return None, None, events
 
         pts = self._pick_primary(hands)
+        self.last_primary_landmarks = pts
         thumb, index, middle, ring, pinky = pts[4], pts[8], pts[12], pts[16], pts[20]
 
         raw_x = _interp(index.x, config.POINTER_MARGIN, 1 - config.POINTER_MARGIN, 0, screen_w)

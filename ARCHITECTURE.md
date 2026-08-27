@@ -138,7 +138,8 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | One hand closed fist (anchor, either hand) + the other showing 1/2/3/4 fingers, held 0.6s | Secondary menu: 1 = toggle gesture legend, 2 = toggle mirror mode, 3 = legend more opaque, 4 = legend more transparent — the same four actions already bound to `h`/`m`/`+`/`-`, now also reachable without touching the keyboard. Debounced: won't repeat while the pose is held, needs to be released and re-formed. |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
-toggle mirror mode, `+`/`-` legend opacity.
+toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
+overlay (TASK-057, off by default).
 
 ### Camera mirroring & handedness
 
@@ -271,6 +272,8 @@ assumption:
 | `GestureEngine.process()` (one frame, one hand, worst-case branch coverage) | **~2.65µs/call** (5,000-iteration average) | design.md #25: "gesture event generation: < 1 frame of additional latency" (~16–33ms at 30–60fps) — ~0.01–0.02% of that budget |
 | `CommandBus.dispatch()` overhead alone (pyautogui mocked, so only the architecture's own cost is measured) | **~11.8µs/call** (5,000-iteration average) | design.md #25: "local command dispatch: < 20ms target" — ~0.06% of that budget |
 | Packaged `.exe`, idle with camera running, no hand in frame | ~260MB RAM, clean log, no crash across 7+ separate manual boot checks (one per phase since PHASE 6) | spec.md #1: "≤ 7% CPU on quad-core" — not independently profiled per-core, but sustained real-time operation across every check is consistent with it |
+| `HandLandmarker.process()` (real camera frame, real inference — the existing per-frame cost, not new) | **~10.0ms/frame average, ~12.7ms p95** | (baseline for the row below, not previously measured on its own) |
+| `PoseLandmarker.process()` (TASK-060c, lite variant, real camera frame — new, opt-in) | **~10.4ms/frame average, ~12.6ms p95** — roughly doubles combined per-frame vision-inference cost when enabled | design.md #25's ~16–33ms/frame budget — significant enough that this ships disabled by default (`config.POSE_HAND_OWNERSHIP_ENABLED`), see Decisions |
 
 There is no meaningful "before" to compare against beyond "zero abstraction
 overhead by definition" (the original monolithic prototype called `pyautogui`
@@ -668,6 +671,66 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   requires `pinky.y > pts[18].y`, matching the user's explicit description
   ("el resto de los dedos" — ring AND pinky — curled, not just ring), same
   disambiguation reasoning as the earlier Shaka/fist fix.
+- **Phase 3B (TASK-060b/060c) — MediaPipe Pose-based anatomical hand-ownership
+  filter.** New `src/jarvis/pose_tracker.py` (`PoseTracker`, mirrors
+  `hand_tracker.py`'s structure, `num_poses=1` deliberately — see its
+  docstring), plus `filter_hands_by_pose_ownership()`: a detected hand is only
+  kept if its wrist (landmark 0) is within `config.POSE_MAX_WRIST_DISTANCE_FRACTION`
+  of the frame diagonal from the tracked body's left- or right-wrist landmark
+  (indices 15/16 of MediaPipe's 33-point BlazePose topology). Wired into
+  `main.py`'s `run()`, right after `HandTracker.process()`: when a body is
+  confidently tracked, its result narrows `hands` before they reach
+  `GestureEngine.process()` (which still runs TASK-056's bbox-area filter
+  underneath — augments, doesn't replace); when no body is tracked that
+  frame, `filter_hands_by_pose_ownership()` returns `None` and `hands` is
+  left untouched, falling back to TASK-056's heuristic exactly as before —
+  verified live (8s, real camera, no body in the frame's close-up
+  hand/desk framing): 0 exceptions, hand tracking/pointer behavior
+  unchanged throughout the whole run.
+  - **Performance measurement (`spec.md` #3B.3), real camera, this
+    development machine:** `PoseLandmarker` (lite variant) costs **~10.4ms/
+    frame average, ~12.6ms p95** — measured back-to-back with
+    `HandLandmarker`'s own **~10.0ms/frame average, ~12.7ms p95** on the same
+    hardware/frames. Running both every frame roughly **doubles** per-frame
+    vision-inference cost (~20ms combined) against design.md #25's "< 1 frame
+    of additional latency" budget (~16–33ms at 30–60fps) — a real, non-trivial
+    cost, not negligible.
+  - **Decision: disabled by default** (`config.POSE_HAND_OWNERSHIP_ENABLED =
+    False`), togglable via that constant — not "clearly bad" (TASK-056's
+    heuristic keeps working standalone with zero regression), but doubling
+    inference cost is significant enough that shipping it opt-in, honestly
+    documented with real numbers, is the responsible default per design.md
+    §3B.3's own guidance for a borderline-not-catastrophic cost.
+  - **Explicit limitations, not silently solved:** (1) `POSE_MAX_WRIST_DISTANCE_FRACTION`
+    (0.08) is a *reasoned* default (2 different models agreeing on the same
+    physical wrist point should be very close), **not measured against real
+    full-body camera data** — this session's camera framing (hand/desk
+    close-up) never had a full body in view, so the wrist-agreement distance
+    and the "hand correctly kept when a body IS tracked" path were verified
+    only via `tests/test_pose_tracker.py`'s deterministic unit tests, not live
+    end-to-end. (2) Same residual gap Phase 1 §1.2 already documented for a
+    second person at a *similar* distance — Pose ownership fixes the "hand
+    not attached to any tracked body" case, not "two people, each anatomically
+    holding up their own hand, close together" (only 1 body is tracked,
+    `num_poses=1`, by design — see §3B.1's own rationale).
+- **Phase 2 (TASK-057) — toggleable hand/landmark visualization overlay.**
+  New `src/jarvis/hand_visualizer.py`: `HAND_CONNECTIONS` (standard 21-point
+  hand topology, declared locally — not from the removed `mp.solutions`, same
+  reasoning as `hand_tracker.py`'s own docstring), `hand_connection_segments()`/
+  `bounding_quadrant()` (pure, unit-tested against synthetic landmark sets),
+  and `draw_hand_overlay()` (plain `cv2` drawing, zero new dependency):
+  skeleton lines + landmark dots + a bounding-quadrant rectangle per detected
+  hand, primary hand in `config.HAND_OVERLAY_PRIMARY_COLOR` (green) vs. any
+  other detected hand in `config.HAND_OVERLAY_OTHER_COLOR` (dim gray) — primary
+  determined by object identity against `GestureEngine.last_primary_landmarks`
+  (new attribute, set every `process()` call, `None` when paused/no hands) —
+  and the last-fired gesture name labeled next to the primary hand. New key
+  **`l`** toggles it (off by default); reuses the existing `events[-1] if
+  events else None` convention the debug HUD already uses for "current
+  gesture." Manually verified: toggles on/off over a real camera feed,
+  doesn't change any gesture-detection behavior (full regression suite green
+  with the toggle both on and off, since the draw call only runs after
+  `GestureEngine.process()` has already produced its result).
 
 ## Known limitations
 

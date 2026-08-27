@@ -118,10 +118,12 @@ from jarvis.core.undo_redo import UndoRedoController
 from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
+from jarvis.hand_visualizer import draw_hand_overlay
 from jarvis.hud_keyboard import HUDKeyboard
 from jarvis.legend import build_legend_text
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
+from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
 from jarvis.voice import VoiceJarvis
 from jarvis.voice_capture import VoiceListener
 
@@ -176,6 +178,11 @@ class JarvisApp:
         self.tracker = HandTracker(
             max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
         )
+        # TASK-060c (Fase 3B): PoseTracker solo se construye si esta habilitado -
+        # deshabilitado por default (costo de inferencia medido, ver config.py),
+        # asi que en el caso default no se paga ni el costo de construccion ni
+        # la descarga del modelo de pose.
+        self.pose_tracker = PoseTracker() if config.POSE_HAND_OWNERSHIP_ENABLED else None
         self.screen_w, self.screen_h = pyautogui.size()
 
         self.gestures = GestureEngine(smoothing_enabled=self.profiles.get_setting("smoothing_enabled"))
@@ -205,6 +212,7 @@ class JarvisApp:
         self.voice_confidence_filter = ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)
 
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
+        self._show_hand_overlay = False  # TASK-057: tecla 'l', apagado por default
         self.is_dragging = False
         self.should_quit = False
         self._last_screen_xy = None
@@ -395,6 +403,9 @@ class JarvisApp:
     def _toggle_debug_hud(self):
         self.hud_renderer.debug = not self.hud_renderer.debug
 
+    def _toggle_hand_overlay(self):
+        self._show_hand_overlay = not self._show_hand_overlay
+
     # --- PHASE 14: voz STT + LLM (cableado en vivo) -------------------------------
 
     def _toggle_voice_listening(self):
@@ -464,6 +475,8 @@ class JarvisApp:
             self._toggle_debug_hud()
         elif key == ord("v"):
             self._toggle_voice_listening()
+        elif key == ord("l"):
+            self._toggle_hand_overlay()
 
     def run(self):
         self.voice.speak("Jarvis en línea.")
@@ -479,6 +492,18 @@ class JarvisApp:
             h, w, _ = frame.shape
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hands = self.tracker.process(rgb, mirrored=self.mirrored)
+
+            if self.pose_tracker is not None:
+                pose_start = time.perf_counter()
+                pose_landmarks = self.pose_tracker.process(rgb)
+                self.telemetry.record("performance", "pose_inference_ms", (time.perf_counter() - pose_start) * 1000)
+                # TASK-060c: None (sin cuerpo trackeado este frame) deja `hands`
+                # sin tocar - cae al heuristico de TASK-056, que ya corre dentro
+                # de GestureEngine.process() de todas formas (design.md §3B.2:
+                # una falla de pose NUNCA debe dejar a la app sin responder).
+                owned_hands = filter_hands_by_pose_ownership(hands, pose_landmarks, w, h)
+                if owned_hands is not None:
+                    hands = owned_hands
 
             screen_xy, cam_xy, events = self.gestures.process(hands, w, h, self.screen_w, self.screen_h)
             self._last_screen_xy = screen_xy
@@ -496,6 +521,9 @@ class JarvisApp:
 
             if not self.gestures.active:
                 cv2.putText(frame, "PAUSADO", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            if self._show_hand_overlay and hands:
+                draw_hand_overlay(frame, hands, self.gestures.last_primary_landmarks, events[-1] if events else None)
 
             if self.hud_renderer.debug:
                 self.hud_renderer.render(

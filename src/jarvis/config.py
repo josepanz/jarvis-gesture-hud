@@ -56,6 +56,28 @@ MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False 
 MIN_HAND_AREA_FRACTION = 0.0015
 TWO_HAND_MAX_CENTER_DISTANCE_FRACTION = 0.55
 
+# TASK-060c (Fase 3B): filtro de propiedad anatomica mano-cuerpo via
+# MediaPipe Pose. Deshabilitado por default: medido en camara real
+# (2026-08-27) que PoseLandmarker cuesta ~10.4ms/frame promedio (p95 ~12.6ms),
+# practicamente el mismo costo que HandLandmarker (~10.0ms/frame promedio) -
+# activarlo DUPLICA el costo de inferencia por frame (~20ms combinado), un
+# costo real y no trivial contra el presupuesto de "menos de 1 frame" de
+# design.md #25 (~16-33ms a 30-60fps). No es un costo "claramente malo" (el
+# heuristico de TASK-056 sigue funcionando solo, sin esto), pero tampoco es
+# gratis - se deja togglable y apagado por default en vez de descartarlo,
+# per design.md §3B.3. Ver ARCHITECTURE.md para el detalle completo.
+POSE_HAND_OWNERSHIP_ENABLED = False
+# Distancia maxima (fraccion de la diagonal del frame) entre la muñeca que
+# reporta HandTracker y la muñeca correspondiente que reporta PoseTracker
+# para considerar que son el mismo punto fisico (2 modelos distintos
+# detectando el mismo punto del cuerpo, no 2 manos distintas - por eso el
+# margen es chico, muy por debajo de TWO_HAND_MAX_CENTER_DISTANCE_FRACTION
+# de arriba, que es entre 2 MANOS DISTINTAS de la misma persona). No pudo
+# verificarse con datos reales de cuerpo completo en esta sesion (la camara
+# disponible estaba encuadrada en la mano/escritorio, no en el torso) -
+# valor razonado, no medido; documentado como limitacion conocida.
+POSE_MAX_WRIST_DISTANCE_FRACTION = 0.08
+
 CAPTURES_DIR = "captures"
 
 HUD_KEY_COLOR = (255, 0, 0)
@@ -64,3 +86,7 @@ HUD_TEXT_COLOR = (255, 255, 255)
 HUD_START_Y = 50
 HUD_ROW_HEIGHT = 35
 HUD_KEY_WIDTH = 52
+
+# TASK-057 (Fase 2): overlay toggleable de landmarks/cuadrante de mano.
+HAND_OVERLAY_PRIMARY_COLOR = (0, 255, 0)  # mano primaria (BGR, verde)
+HAND_OVERLAY_OTHER_COLOR = (120, 120, 120)  # cualquier otra mano detectada (BGR, gris)
