@@ -41,6 +41,21 @@ TWO_HAND_ZOOM_DELTA_PX = 15
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
 
+# TASK-056: filtro de manos implausibles (fondo/otra persona) antes de la
+# logica de gestos. Medido 2026-08-27 con datos reales de camara (DroidCam),
+# usuario en posicion normal de escritorio: el bbox de una mano propia (sola
+# o de a 2, en uso normal, no necesariamente juntas) fue de 0.0028 a 0.0126
+# de fraccion del area del frame. MIN_HAND_AREA_FRACTION queda bien por
+# debajo del minimo real observado (una mano de fondo, a mayor distancia de
+# la camara, cae por debajo mucho mas rapido porque el area escala con el
+# cuadrado de la distancia). La distancia entre centros de las 2 manos
+# propias, en uso normal (no necesariamente un gesto de 2 manos deliberado),
+# fue 0.384-0.398 de la diagonal del frame; TWO_HAND_MAX_CENTER_DISTANCE_FRACTION
+# queda con margen holgado por encima de ese maximo real para no rechazar las
+# 2 manos del usuario. Ver ARCHITECTURE.md para el detalle de la medicion.
+MIN_HAND_AREA_FRACTION = 0.0015
+TWO_HAND_MAX_CENTER_DISTANCE_FRACTION = 0.55
+
 CAPTURES_DIR = "captures"
 
 HUD_KEY_COLOR = (255, 0, 0)

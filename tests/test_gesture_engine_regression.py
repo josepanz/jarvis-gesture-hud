@@ -27,7 +27,14 @@ W, H, SCREEN_W, SCREEN_H = 640, 480, 1920, 1080
 
 
 def flat(x=0.5, y=0.5):
-    return [Landmark(x, y, 0) for _ in range(21)]
+    # El landmark 0 (muñeca) se separa un poco del resto para que el bbox no
+    # tenga area 0 (TASK-056 filtra manos por area de bbox de los 21 puntos;
+    # una mano real nunca tiene todos sus landmarks exactamente superpuestos).
+    # Ningun chequeo de gestos usa el landmark 0, asi que esto no cambia el
+    # comportamiento de ningun otro fixture que parte de flat().
+    pts = [Landmark(x, y, 0) for _ in range(21)]
+    pts[0] = Landmark(x - 0.08, y + 0.2, 0)
+    return pts
 
 
 def pinch_click_hand(cx=0.5, cy=0.5, pinched=True):
@@ -70,6 +77,8 @@ def scroll_hand(cx=0.5, cy=0.5):
     pts[10] = Landmark(cx, cy, 0)
     pts[16] = Landmark(cx, cy + 0.1, 0)
     pts[14] = Landmark(cx, cy, 0)
+    pts[20] = Landmark(cx, cy + 0.1, 0)  # meñique recogido tambien - pedido explícito
+    pts[18] = Landmark(cx, cy, 0)
     return pts
 
 
@@ -346,6 +355,20 @@ class ScrollTests(unittest.TestCase):
         process(engine, scroll_hand(cy=0.35))
         _, _, events = process(engine, scroll_hand(cy=0.5))
         self.assertIn("SCROLL_DOWN", events)
+
+    def test_pinky_extended_does_not_scroll(self):
+        # Pedido explicito: el resto de los dedos (no solo el anular) tiene
+        # que estar recogido para que cuente como el gesto de scroll.
+        engine = GestureEngine()
+        pts = scroll_hand(cy=0.5)
+        pts[20] = Landmark(0.5, 0.4, 0)  # meñique extendido (tip por arriba del pip)
+        pts[18] = Landmark(0.5, 0.5, 0)
+        process(engine, pts)
+        pts2 = scroll_hand(cy=0.35)
+        pts2[20] = Landmark(0.5, 0.25, 0)
+        pts2[18] = Landmark(0.5, 0.35, 0)
+        _, _, events = process(engine, pts2)
+        self.assertNotIn("SCROLL_UP", events)
 
 
 class ZoomTests(unittest.TestCase):
@@ -697,6 +720,64 @@ class TwoHandSuppressionTests(unittest.TestCase):
         two_hand_process(engine, silence_hand(), fist_hand(0.8, 0.5))
         _, _, events = process(engine, silence_hand())
         self.assertIn("SILENCE", events)
+
+
+def tiny_hand(cx=0.5, cy=0.5):
+    """TASK-056: bbox de area muy por debajo de config.MIN_HAND_AREA_FRACTION -
+    simula una mano de fondo/otra persona, mucho mas lejos de la camara que el
+    usuario (a mayor distancia el area del bbox cae con el cuadrado de la
+    distancia, ver config.py)."""
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx - 0.01, cy + 0.02, 0)
+    return pts
+
+
+class BackgroundHandFilterTests(unittest.TestCase):
+    """TASK-056: filtro de manos implausibles (fondo/otra persona) antes de
+    la logica de gestos - design.md §1.2."""
+
+    def test_lone_tiny_hand_is_filtered_out_entirely(self):
+        engine = GestureEngine()
+        screen_xy, _, events = engine.process([Hand(tiny_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIsNone(screen_xy)
+        self.assertEqual(events, [])
+
+    def test_background_tiny_hand_does_not_block_the_real_hand(self):
+        # Un objeto/persona de fondo detectado junto a la mano real del
+        # usuario no debe impedir que la mano real siga funcionando normal.
+        engine = GestureEngine()
+        pts = pinch_click_hand(pinched=True)
+        confirm_pinch(engine, pts)
+        hands = [Hand(pts, "Right"), Hand(tiny_hand(0.1, 0.1), "Left")]
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("PINCH_DOWN", events)
+
+    def test_two_plausibly_sized_hands_too_far_apart_do_not_trigger_two_hand_gesture(self):
+        # Ambas manos son de tamano plausible (no filtradas por area), pero
+        # estan en extremos opuestos del frame - implausible para las 2 manos
+        # de una misma persona a distancia normal de escritorio (medido en
+        # camara real, ver config.py). No deben tratarse como UN gesto de
+        # 2 manos aunque geometricamente ambas sean puños.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.05, 0.5), "Left"), Hand(fist_hand(0.95, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("TOGGLE_ACTIVE", events)
+
+    def test_two_hands_at_normal_desk_distance_still_trigger_two_hand_gesture(self):
+        # Regression: el filtro de "misma persona" no debe rechazar el caso
+        # normal ya cubierto por TwoHandMasterGestureTests.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.3, 0.5), "Left"), Hand(fist_hand(0.6, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("TOGGLE_ACTIVE", events)
 
 
 if __name__ == "__main__":

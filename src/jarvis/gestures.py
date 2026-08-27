@@ -62,6 +62,47 @@ def _extended_finger_count(pts):
     return sum(1 for i in (8, 12, 16, 20) if pts[i].y < pts[i - 2].y)
 
 
+def _bbox_area_fraction(landmarks, w, h):
+    xs = [p.x for p in landmarks]
+    ys = [p.y for p in landmarks]
+    bbox_w = (max(xs) - min(xs)) * w
+    bbox_h = (max(ys) - min(ys)) * h
+    return (bbox_w * bbox_h) / (w * h)
+
+
+def filter_plausible_hands(hands, w, h):
+    """TASK-056: descarta manos cuyo bounding box es demasiado chico para ser
+    la mano del usuario a distancia normal de escritorio (persona u objeto de
+    fondo, mas lejos de la camara - ver config.py para la medicion real que
+    justifica el umbral). Corre una vez por frame antes de toda logica de
+    gestos, de 1 o 2 manos. Si quedan mas de 2 plausibles se queda con las 2
+    mas grandes (HandLandmarker ya limita a config.MAX_HANDS, esto deja el
+    criterio explicito sin depender de eso)."""
+    plausible = [hand for hand in hands if _bbox_area_fraction(hand.landmarks, w, h) >= config.MIN_HAND_AREA_FRACTION]
+    plausible.sort(key=lambda hand: _bbox_area_fraction(hand.landmarks, w, h), reverse=True)
+    return plausible[:2]
+
+
+def hands_plausibly_same_person(h1, h2, w, h):
+    """TASK-056: especifico para elegibilidad de gestos de 2 manos (no de
+    elegibilidad de mano primaria/puntero, que puede seguir usando la mas
+    grande/plausible sola). Rechaza el par si los centros de ambas manos
+    estan demasiado lejos entre si en el frame, relativo a la diagonal -
+    las 2 manos de una misma persona en uso normal de escritorio quedan bien
+    por debajo del umbral (medido en camara real, ver config.py); una
+    segunda persona de fondo con una mano de tamano similar tipicamente no."""
+
+    def _center(landmarks):
+        xs = [p.x for p in landmarks]
+        ys = [p.y for p in landmarks]
+        return (sum(xs) / len(xs)) * w, (sum(ys) / len(ys)) * h
+
+    c1x, c1y = _center(h1.landmarks)
+    c2x, c2y = _center(h2.landmarks)
+    frame_diag = math.hypot(w, h)
+    return math.hypot(c2x - c1x, c2y - c1y) <= config.TWO_HAND_MAX_CENTER_DISTANCE_FRACTION * frame_diag
+
+
 class GestureEngine:
     def __init__(self, smoothing_enabled=True):
         self.active = True
@@ -139,7 +180,11 @@ class GestureEngine:
         angosta - esta queda igual sin tocar, two_hand_active es la version general
         nueva para los 7 chequeos que no tenian ninguna proteccion)."""
         events = []
-        if len(hands) != 2:
+        # TASK-056: ademas de requerir exactamente 2 manos, exige que sean
+        # plausiblemente de la misma persona (§1.2/§3B). Si no, cada mano
+        # sigue siendo elegible individualmente como primaria mas abajo -
+        # solo se descarta tratarlas como UN gesto conjunto de 2 manos.
+        if len(hands) != 2 or not hands_plausibly_same_person(hands[0], hands[1], w, h):
             self.pause_hold_start = None
             self.close_hold_start = None
             self.prev_two_hand_pinch_dist = None
@@ -221,6 +266,9 @@ class GestureEngine:
         """Devuelve (screen_xy, cam_xy, events). screen_xy/cam_xy son None si no hay
         puntero que mover (sin manos, o lectura de gestos en pausa)."""
         now = time.time()
+        # TASK-056: filtro de manos implausibles (fondo/otra persona) antes de
+        # CUALQUIER logica de gestos, de 1 o 2 manos - ver design.md §1.2.
+        hands = filter_plausible_hands(hands, w, h)
         events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(hands, w, h, now)
 
         if not self.active or not hands:
@@ -329,12 +377,17 @@ class GestureEngine:
         else:
             self.prev_pinky_y = None
 
-        # Scroll: índice+medio extendidos, anular recogido, pulgar separado del índice
+        # Scroll: índice+medio juntos extendidos, resto de los dedos recogidos
+        # (anular Y meñique, no solo anular - pedido explícito para no
+        # confundirse con otros gestos que solo recogen el anular), pulgar
+        # separado del índice. Dirección: mover la mano hacia arriba dispara
+        # SCROLL_UP, hacia abajo SCROLL_DOWN (natural, igual que zoom/volumen).
         if (
             not two_hand_active
             and index.y < pts[6].y
             and middle.y < pts[10].y
             and ring.y > pts[14].y
+            and pinky.y > pts[18].y
             and d_thumb_index > 40
         ):
             if self.prev_scroll_y is not None:

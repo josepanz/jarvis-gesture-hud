@@ -125,7 +125,7 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Index fingertip (landmark 8) moved | Mouse pointer (EMA-smoothed) |
 | Pinch thumb(4)+index(8) < 30px | Left click / drag / HUD keyboard key select |
 | Pinch thumb(4)+middle(12) < 30px | Right click |
-| Index+middle extended, ring curled | Vertical scroll |
+| Index+middle extended, ring+pinky curled | Vertical scroll |
 | Pinch thumb(4)+ring(16), index extended | Zoom (Ctrl+Scroll) |
 | Open palm (index/middle/ring/pinky extended, thumb spread >60px) | Toggle on-screen keyboard |
 | Pinch thumb(4)+pinky(20) + vertical movement | Volume up/down |
@@ -631,6 +631,43 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     Verified live end-to-end afterward: 5 clean `PINCH_DOWN`/4 `PINCH_UP`
     matching deliberate pinches, 1 genuine `RIGHT_CLICK`, 2 `KEYBOARD_TOGGLE`
     from open-palm — no misfiring, no rapid-fire duplicates.
+- **TASK-056 (`openspec/changes/personalization-and-config-ui`) — background /
+  other-person hand filtering.** `GestureEngine.process()` now runs
+  `filter_plausible_hands()` (new, `gestures.py`) once per frame, before any
+  gesture logic: discards hands whose 21-landmark bounding-box area (fraction
+  of the frame) is below `config.MIN_HAND_AREA_FRACTION`, keeps the 2 largest
+  if more remain. Separately, `_process_two_hand_gestures()` now also
+  requires `hands_plausibly_same_person()` (new) — both hands' bbox centers
+  within `config.TWO_HAND_MAX_CENTER_DISTANCE_FRACTION` of the frame
+  diagonal — before treating a 2-hand pair as one joint gesture; if not, each
+  hand stays individually eligible as the single primary hand (only the
+  *joint* 2-hand interpretation is rejected, not the hands themselves).
+  Thresholds measured live (DroidCam, 2026-08-27, normal desk-webcam
+  distance): a real single/either hand's bbox area fraction ranged
+  0.0028–0.0126; `MIN_HAND_AREA_FRACTION=0.0015` sits comfortably below that
+  (a background hand meaningfully farther from the camera falls off much
+  faster, since bbox area scales with the square of distance). The same
+  user's 2 hands' center-distance fraction, in normal desk use (not
+  necessarily posed together), ranged 0.384–0.398 of the frame diagonal;
+  `TWO_HAND_MAX_CENTER_DISTANCE_FRACTION=0.55` leaves comfortable margin
+  above that so the user's own spread-apart hands are never rejected.
+  **Explicit limitation, not silently solved:** this is a bounding-box-size
+  and rough-proximity heuristic, not person re-identification or depth
+  sensing — a second person standing close to the user, at a similar
+  distance from the camera, with a similarly-sized hand nearby, is NOT
+  reliably filtered by this (Phase 3B's `PoseLandmarker`-based anatomical
+  wrist-ownership check, not yet implemented, is the stronger fix for that
+  case — see `openspec/changes/personalization-and-config-ui/design.md`
+  §3B). Verified live end-to-end afterward: 236 frames over 8s with a real
+  hand in frame, 0 frames where the filter incorrectly dropped it (pointer
+  stayed non-`None` throughout).
+- **Scroll gesture tightened (same session as TASK-056, ad hoc per user
+  report): now also requires the pinky curled, not just the ring finger.**
+  Previously `index.y < pip.y and middle.y < pip.y and ring.y > pip.y` was
+  enough — a hand with the pinky still extended could satisfy it. Now also
+  requires `pinky.y > pts[18].y`, matching the user's explicit description
+  ("el resto de los dedos" — ring AND pinky — curled, not just ring), same
+  disambiguation reasoning as the earlier Shaka/fist fix.
 
 ## Known limitations
 

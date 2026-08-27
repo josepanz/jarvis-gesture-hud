@@ -19,7 +19,12 @@ Landmark = namedtuple("Landmark", "x y z")
 
 
 def _flat_hand(x=0.5, y=0.5):
-    return [Landmark(x, y, 0) for _ in range(21)]
+    # Landmark 0 (muñeca) separado del resto para que el bbox no tenga area 0
+    # (TASK-056 filtra manos por area de bbox) - ver misma nota en
+    # test_gesture_engine_regression.py's flat().
+    pts = [Landmark(x, y, 0) for _ in range(21)]
+    pts[0] = Landmark(x - 0.08, y + 0.2, 0)
+    return pts
 
 
 class SmoothingToggleTests(unittest.TestCase):

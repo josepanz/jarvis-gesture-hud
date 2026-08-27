@@ -25,7 +25,12 @@ Landmark = namedtuple("Landmark", "x y z")
 
 
 def _flat_hand():
-    return [Landmark(0.5, 0.5, 0) for _ in range(21)]
+    # Landmark 0 (muñeca) separado del resto para que el bbox no tenga area 0
+    # (TASK-056 filtra manos por area de bbox) - ver misma nota en
+    # test_gesture_engine_regression.py's flat().
+    pts = [Landmark(0.5, 0.5, 0) for _ in range(21)]
+    pts[0] = Landmark(0.42, 0.7, 0)
+    return pts
 
 
 class _AlwaysFailsCommand(Command):
