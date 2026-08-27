@@ -142,6 +142,63 @@ fixture, assert only `PINCH_DOWN` fires (not `RIGHT_CLICK`); construct a
 fires; construct a normal 2-similar-hands fixture, assert two-hand gestures
 still fire exactly as before (regression).
 
+## 1.4 The full existing collision surface (corrects an undercount in an
+earlier draft of this document)
+
+`process()` does not gate the single-hand checks behind "no two-hand
+gesture is active" — `pts = self._pick_primary(hands)` and every check that
+follows (silence, keyboard-toggle, screenshot, single-hand zoom, volume,
+scroll, click, right-click, single-hand-shaka/lock) run on the primary hand
+EVERY frame, independent of whatever `_process_two_hand_gestures` decided
+about the other hand. Of those 9 single-hand checks, only 2 have explicit
+two-hand suppression today:
+
+```text
+LOCK_SESSION        suppressed when both_shaka        (single-hand Shaka+hold)
+PINCH_DOWN/PINCH_UP suppressed when both_pinching      (suppress_pinch flag)
+```
+
+The other 7 (SILENCE, KEYBOARD_TOGGLE, SCREENSHOT, single-hand ZOOM_IN/OUT,
+VOLUME_UP/DOWN, SCROLL_UP/DOWN, RIGHT_CLICK) have NO two-hand suppression —
+if the primary hand's shape happens to also satisfy one of them while a
+two-hand gesture is in progress on both hands, both fire together today,
+pre-existing this proposal.
+
+**Consequence for phases 4-7's collision-avoidance process:** "check against
+existing two-hand gestures" (as phases 5-7 said) is necessary but not
+sufficient. A NEW TWO-HAND gesture must also be checked against the full
+9-check SINGLE-HAND set, because one of its two hands becomes "primary" and
+gets evaluated against all of them regardless. A NEW ONE-HAND gesture was
+already correctly scoped to check only against the single-hand set (phase
+4's original process was right); it does not need to check against the
+4 two-hand-specific checks, since a lone hand can never satisfy a check that
+requires two hands' landmarks.
+
+Restated as a table, for every phase 4-7 collision census:
+
+```text
+New ONE-HAND gesture  → must not collide with: the 9 single-hand checks
+                         (+ any earlier phase's new one-hand gestures)
+New TWO-HAND gesture  → must not collide with: the 4 two-hand checks
+                         AND the 9 single-hand checks (each of its 2 hands,
+                         evaluated individually, must not accidentally
+                         satisfy a single-hand check)
+                         (+ any earlier phase's new gestures, both kinds)
+```
+
+**Recommended, not required, scope addition to Phase 1:** since this gap is
+real and pre-existing (not introduced by this proposal), the implementer MAY
+extend TASK-055/056 (or add a small TASK-055b) to add the same suppression
+pattern already used for `LOCK_SESSION`/`PINCH_DOWN` to the other 7
+single-hand checks whenever ANY two-hand gesture (existing or new, from
+phases 4-7) is concurrently satisfied on both hands. This is optional
+because the user's original report was specifically about the pinch-family
+ambiguity (§1.1) and cross-person false positives (§1.2), not this — but
+leaving it undocumented would mean phases 5-7's new two-hand gestures
+inherit the same latent gap the existing ones already have. Report the
+decision either way (fixed now vs. explicitly deferred) rather than silently
+picking one.
+
 ---
 
 # 2. PHASE 2 — Landmark / quadrant visualization
@@ -367,6 +424,14 @@ multi-frame-pattern gesture check in `gestures.py` outside the existing
 hold-timers).
 
 ## 6.3 Megumi (one-hand, static — ONE representative pose)
+
+Megumi's Ten Shadows Technique canonically involves multiple distinct
+shikigami (the exact count/roster shown across the source material is not
+precisely pinned down here, and isn't load-bearing for this spec — see
+`proposal.md` §5's non-goal: this phase does not attempt one seal per
+shikigami regardless of how many there turn out to be). `JJK_MEGUMI` SHALL
+be ONE stylized, representative "summon" pose standing in for the technique
+as a whole.
 
 Starting heuristic: index + middle fingers crossed (similar family to
 Hitsuji's cross, but Megumi's SHALL be visually/geometrically distinguished

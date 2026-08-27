@@ -159,6 +159,10 @@ adjust/rename/drop on conflict. This applies to phases 4, 5, 6, and 7
 individually AND cumulatively — a later phase's new gesture must not
 collide with an earlier phase's new gesture either.
 
+A one-hand gesture only needs to be checked against the single-hand check
+set (9 today, see `design.md` §1.4) — it can never collide with a two-hand-
+only check, which by definition requires two hands' landmarks.
+
 ## 4.3 Assignability and dispatch
 
 Identical mechanism to the original proposal's Naruto phase: default binding
@@ -195,10 +199,17 @@ Kai   (Release — common non-zodiac seal, included as it's iconic and
 
 ## 5.2 Collision-avoidance
 
-Same process as §4.2, extended to also check against the existing two-hand
-gestures (`both_shaka`, `both_fists`, two-hand pinch-zoom, the anchor+finger-
-count meta-menu) — this is the largest collision surface in this proposal,
-since five NEW two-hand poses join four EXISTING ones.
+A two-hand gesture SHALL be checked against BOTH existing sets, not only the
+two-hand one: the 4 existing two-hand gestures (`both_shaka`, `both_fists`,
+two-hand pinch-zoom, the anchor+finger-count meta-menu) AND the 9 existing
+single-hand checks — because `GestureEngine.process()` evaluates every
+single-hand check on the primary hand every frame regardless of what the
+other hand is doing (`design.md` §1.4; only `LOCK_SESSION` and
+`PINCH_DOWN`/`PINCH_UP` are suppressed today when a two-hand gesture is also
+satisfied). Each hand of a candidate two-hand seal, considered on its own,
+MUST NOT also satisfy a single-hand check. This is the largest collision
+surface in this proposal: 13 existing conditions, not 4, before even
+counting phase 4's new one-hand seals.
 
 ## 5.3 Assignability, dispatch, safety, icons
 

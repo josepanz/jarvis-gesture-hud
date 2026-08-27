@@ -48,6 +48,42 @@ Per `spec.md` #1.1. Localized to `gestures.py`'s `process()`.
 
 ---
 
+## TASK-055b — (Optional) Extend two-hand suppression to the remaining single-hand checks
+
+### Objective
+
+`design.md` §1.4 found that only `LOCK_SESSION` and `PINCH_DOWN`/`PINCH_UP`
+are suppressed today when a two-hand gesture is also satisfied — the other 7
+single-hand checks (SILENCE, KEYBOARD_TOGGLE, SCREENSHOT, single-hand
+ZOOM_IN/OUT, VOLUME_UP/DOWN, SCROLL_UP/DOWN, RIGHT_CLICK) are not, a
+pre-existing gap. This task extends the same suppression pattern to all of
+them.
+
+### Requirements
+
+This task is OPTIONAL — it is not what the user reported as broken (TASK-055
+and TASK-056 are the reported bugs). Explicitly decide and report whether to
+do it now or defer it; do not silently skip without saying so. Doing it now
+reduces the collision-avoidance burden on phases 5-7 (fewer existing
+conditions a new two-hand gesture's individual hands can accidentally
+satisfy); deferring it means phases 5-7 must still individually verify their
+new two-hand gestures' hands don't trip these 7 checks (`spec.md` #5.2), so
+the work isn't avoided, only postponed to be redone per-gesture instead of
+once centrally.
+
+### Must NOT
+
+- Change single-hand-only behavior (no two-hand gesture active).
+
+### Acceptance criteria
+
+- Test: each of the 7 checks, when a two-hand gesture is concurrently
+  satisfied on both hands, does not fire (extends the existing
+  `LOCK_SESSION`/`PINCH_DOWN` pattern's own tests).
+- Full regression suite green.
+
+---
+
 ## TASK-056 — Background / other-person hand filtering
 
 ### Objective
@@ -236,12 +272,19 @@ infra).
 ### Objective
 
 Execute `design.md` §5.2's process for the 5-seal roster in §5.1, against
-BOTH existing two-hand gestures AND phase 4's new one-hand seals.
+the FULL existing surface: the 4 existing two-hand gestures, the 9 existing
+single-hand checks (each seal's two hands checked individually — `spec.md`
+#5.2, `design.md` §1.4), AND phase 4's new one-hand seals. If TASK-055b was
+done, the single-hand side of this census is already suppressed while a
+two-hand gesture is active and only needs confirming, not re-fixing; if
+TASK-055b was deferred, this task must still verify each new seal's
+individual hands against all 9 single-hand checks directly.
 
 ### Must produce
 
-Written roster note, same format as TASK-061, explicitly listing which
-existing two-hand gesture each new seal was checked against.
+Written roster note, same format as TASK-061, explicitly listing which of
+the 4 two-hand AND 9 single-hand existing conditions each new seal was
+checked against (13 total per seal, not 4).
 
 ### Acceptance criteria
 
