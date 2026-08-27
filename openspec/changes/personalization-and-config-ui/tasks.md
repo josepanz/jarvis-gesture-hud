@@ -350,7 +350,8 @@ configurable contact/release thresholds and max window.
 
 ### Objective
 
-Implement `JJK_GOJO` (two-hand static, `design.md` §6.1) and `JJK_MEGUMI`
+Implement `JJK_GOJO_DOMAIN` (two-hand static, Domain Expansion/Ryoiki Tenkai —
+`design.md` §6.1) and `JJK_MEGUMI`
 (one-hand static, §6.3), including the collision census against phases 1,
 4, 5, and each other (Megumi vs. Hitsuji explicitly, per §6.3).
 

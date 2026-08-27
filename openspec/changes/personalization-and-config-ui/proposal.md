@@ -12,7 +12,8 @@ This change adds the following to the existing, shipped application:
 3. Reference icon infrastructure (one pictogram per gesture, generated, not
    hand-authored binary assets).
 4. The full Naruto hand-seal set: one-hand AND two-hand static seals.
-5. Jujutsu Kaisen-inspired gestures: Gojo, Sukuna, Megumi.
+5. Jujutsu Kaisen-inspired gestures: Gojo's Domain Expansion (Ryoiki
+   Tenkai), Sukuna's finger-snap, Megumi's Ten Shadows summon.
 6. Common gestures: clapping, Korean finger heart.
 7. A settings screen (gear icon) with tooltips to bind any of the above to
    actions, including custom shortcuts and macros (M1/M2/M3-style keys).

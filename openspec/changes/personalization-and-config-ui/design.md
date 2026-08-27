@@ -383,7 +383,11 @@ by `both_shaka`/`both_fists` to avoid single-frame flicker).
 
 # 6. PHASE 6 — Jujutsu Kaisen gestures
 
-## 6.1 Gojo (two-hand, static)
+## 6.1 Gojo — Domain Expansion / Ryoiki Tenkai (two-hand, static)
+
+`JJK_GOJO_DOMAIN` names this gesture specifically (not "any Gojo gesture" —
+he has several iconic ones; this is the hand-frame pose associated with
+opening his Domain Expansion, "Unlimited Void"/Ryoiki Tenkai).
 
 Both hands' thumb+index fingers form roughly perpendicular L-shapes,
 brought together (hand centers close, per the same proximity check style as

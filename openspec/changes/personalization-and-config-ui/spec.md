@@ -219,12 +219,13 @@ Same requirements as §4.3-4.5.
 
 # PHASE 6 — Jujutsu Kaisen gestures
 
-## 6.1 Gojo
+## 6.1 Gojo — Domain Expansion (Ryoiki Tenkai)
 
 A two-hand, static "frame" gesture (both hands' thumb+index fingers forming
 roughly perpendicular shapes brought together in front of the upper body/
-face) SHALL be recognized as `JJK_GOJO`. See `design.md` §6.1 for a starting
-geometric definition.
+face) — Gojo's Domain Expansion / Ryoiki Tenkai pose specifically, not a
+stand-in for any of his other signature moments — SHALL be recognized as
+`JJK_GOJO_DOMAIN`. See `design.md` §6.1 for a starting geometric definition.
 
 ## 6.2 Sukuna (temporal)
 
