@@ -84,6 +84,7 @@ first in the order, ahead of anything new.
 | 1 | Reliability fixes | Pinch-priority resolution + background/other-person hand filtering | Low–Moderate | None | Fixes existing, reported bugs. Contained to `gestures.py`. Everything after this benefits from more reliable detection. |
 | 2 | Landmark/quadrant visualization | Debug overlay: skeleton, bounding quadrant, primary hand + active gesture label, toggleable | Low–Moderate | None | Pure drawing/toggle, no new gesture logic. Genuinely useful WHILE building phases 4-7 (visually confirming landmark geometry beats guessing thresholds blind) — sequencing it here is a practical dependency, not just a complexity score. |
 | 3 | Icon infrastructure | Procedural pictogram generation + legend rendering | Low | +Pillow | Self-contained. Every gesture added in phases 4-7 depends on this existing first. |
+| 3B | MediaPipe Pose hand-ownership filter | Body pose tracking + anatomical wrist-matching, strengthening phase 1's background-hand filter | Moderate | None (`mediapipe` already provides it) | Named "3B" to slot in without renumbering 4-9. A real second-inference performance cost — measured, not assumed — but no new dependency/download family beyond what `hand_tracker.py` already established. Placed here (not later) so phases 4-8's manual verification benefits from the stronger filter while building ~20 new gestures. |
 | 4 | One-hand Naruto seals | 8 single-hand static zodiac seals | Moderate | None | Same detection style as existing single-hand gestures (`gestures.py`'s pose checks). |
 | 5 | Two-hand Naruto seals | 5 two-hand static zodiac/release seals | Moderate | None | Same style as existing `both_shaka`/`both_fists` two-hand checks — one class harder than phase 4 only because of the 2-hand collision surface (must also not collide with existing pause/close/pinch-zoom/meta-menu two-hand gestures). |
 | 6 | Jujutsu Kaisen gestures | Gojo (2-hand static), Megumi (1-hand static), Sukuna (1-hand TEMPORAL snap) | Moderate–High | None | Sukuna's finger-snap needs a genuinely new capability: temporal/motion-impulse detection (thumb+finger distance drops then rises within a short window). Built once here, reused by phase 7's clap. |
@@ -91,9 +92,14 @@ first in the order, ahead of anything new.
 | 8 | Settings screen | Gear icon, tooltips, bindings table (now listing every trigger from phases 1-7), custom shortcuts, macros, persistence | High | None (see `design.md` §9 for why) | Same reasoning as before: only phase needing a persistence layer + new UI subsystem. Its bindings table is only meaningfully complete once phases 3-7 exist, hence it comes after them. |
 | 9 | Voice model download icon | One row inside the settings screen | Low (gated) | None | Small in isolation; ordered last because it needs phase 8's screen to live in, per the user's own phrasing. |
 
-Recommended execution order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**. Per
+Recommended execution order: **1 → 2 → 3 → 3B → 4 → 5 → 6 → 7 → 8 → 9**. Per
 `apply.md` §26, stop after each task and report — do not auto-continue to
 the next phase.
+
+Phase 1 additionally includes two small, promoted-from-evaluation tasks
+(TASK-055c, TASK-056b — 3D pinch distance and CLAHE lighting, respectively,
+both zero-new-dependency and low complexity, see §7 below) — they run
+within phase 1's own sequence, no separate row needed.
 
 ---
 
@@ -153,19 +159,24 @@ already ships today.
 
 ---
 
-## 7. Evaluated, not yet scheduled: perception robustness
+## 7. Perception robustness (promoted from evaluation)
 
-Per an explicit request to evaluate (not yet commit to implementing):
-MediaPipe Pose, the already-computed-but-unused landmark `z`/`visibility`/
-`presence` fields, and OpenCV-based lighting normalization, as ways to
-further strengthen Phase 1's reliability fixes. Full findings, verified
-against this project's actual installed environment:
-`design.md` Appendix A.
+`design.md` Appendix A evaluated MediaPipe Pose, the already-computed-but-
+unused landmark `z` coordinate, and OpenCV-based lighting normalization —
+all verified against this project's actual installed environment, all free
+(zero new dependency in every case), one (neural low-light enhancement)
+explicitly evaluated and NOT recommended (a real new ML dependency with no
+concrete problem yet that CLAHE wouldn't already address — `design.md`
+Appendix A.3).
 
-Short version: the z-coordinate improvement and CLAHE lighting
-normalization are genuinely free (zero new dependency, zero new download)
-and would rank as LOW complexity if scheduled — comparable to or below
-Phase 1. MediaPipe Pose is also zero-new-dependency (same `mediapipe`
-package already installed) but carries a real second-inference performance
-cost that needs measuring before committing — comparable to Phase 5's
-complexity if scheduled. No phase numbers are assigned to any of this yet.
+All 3 recommended items are now scheduled, per instruction to promote
+everything recommended and skip the one that wasn't:
+
+```text
+3D pinch-family distance   -> TASK-055c, inside Phase 1 (§3 table)
+CLAHE lighting normalization -> TASK-056b, inside Phase 1 (§3 table)
+MediaPipe Pose hand-ownership filter -> Phase 3B (§3 table), TASK-060b/060c
+```
+
+The full evaluation reasoning stays in `design.md` Appendix A — this
+section only records that it was acted on, and how.

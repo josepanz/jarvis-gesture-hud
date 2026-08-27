@@ -296,6 +296,43 @@ in its task report, which pattern (A/B/C/D) it uses. A proposed gesture that
 does not cleanly fit one of the four SHALL be redesigned until it does, or
 rejected — not shipped as an ambiguous fifth case.
 
+## 1.6 3D pinch-family distance (promoted from Appendix A.2)
+
+```python
+def _dist3(p1, p2, w, h):
+    # Same normalized-to-pixel scaling as the existing _dist(), extended
+    # with z. MediaPipe's z is already roughly the same scale as x (both
+    # normalized to image width) - no extra calibration step needed for a
+    # relative-distance comparison like this.
+    return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h, (p1.z - p2.z) * w)
+```
+
+Replace `self._dist(...)` with `self._dist3(...)` (or rename in place —
+implementer's call) for every pinch-family distance in `process()`. This is
+a small, mechanical change; the real work is TASK-055c's threshold
+re-verification against a real camera (§1.4/spec.md #1.4 already requires
+this).
+
+## 1.7 Lighting normalization via CLAHE (promoted from Appendix A.3)
+
+```python
+def normalize_lighting(bgr_frame):
+    lab = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+```
+
+Called once per frame in `main.py`'s `run()`, right after `cap.read()` (and
+after the existing mirror-flip, order doesn't matter for this step) and
+before `cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)`/`tracker.process()`. Gated
+by a `config.py` constant (default enabled) so it can be disabled without a
+code change if it ever regresses a specific setup (`spec.md` #1.5).
+`clipLimit`/`tileGridSize` are the two CLAHE parameters worth exposing/
+tuning against a real camera — start with the commonly-used defaults above,
+adjust per manual verification.
+
 ---
 
 # 2. PHASE 2 — Landmark / quadrant visualization
@@ -374,6 +411,76 @@ specified once, repeated here only where phases 4-7 depend on it):
   simplified hand glyphs side by side to distinguish it visually from a
   one-hand seal's icon (implementer's call, document the convention chosen
   so it stays consistent across ~20 new icons).
+
+---
+
+# 3B. PHASE 3B — MediaPipe Pose-based hand-ownership filtering
+
+Promoted from Appendix A.1 (full evaluation/reasoning there — this section
+is the implementation design). Named "3B" specifically to slot between
+Phase 3 and Phase 4 without renumbering phases 4-9 (and every cross-
+reference to them across all four documents) — same minimal-diff principle
+`apply.md` already prefers over rewrites/renames.
+
+## 3B.1 New module: `src/jarvis/pose_tracker.py`
+
+Mirrors `hand_tracker.py`'s structure:
+
+```python
+class PoseTracker:
+    def __init__(self):
+        model_path = _ensure_pose_model()  # lazy download, cached via jarvis.paths.assets_dir()
+        options = vision.PoseLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=str(model_path)),
+            running_mode=vision.RunningMode.VIDEO,
+            num_poses=1,  # only the primary user's body is relevant here
+        )
+        self._landmarker = vision.PoseLandmarker.create_from_options(options)
+
+    def process(self, rgb_frame) -> "PoseResult | None":
+        ...  # returns wrist landmarks (left/right) or None if no confident pose
+```
+
+`num_poses=1` is a deliberate scope choice: this feature exists to answer
+"which hands belong to THE user," not to track multiple people's poses —
+tracking more than one body would reintroduce the same ambiguity this phase
+exists to remove.
+
+Model: `pose_landmarker_lite.task` (smallest/fastest of MediaPipe's 3 pose
+model variants), same URL-download-and-cache pattern as
+`hand_tracker.py`'s `_ensure_model()`.
+
+## 3B.2 Filter integration
+
+Extends Phase 1 §1.2's `filter_plausible_hands` (or sits alongside it,
+implementer's documented choice — §3B's spec requirement is behavioral, not
+prescriptive about exact code structure):
+
+```python
+def filter_hands_by_pose_ownership(hands, pose_result, max_wrist_distance):
+    if pose_result is None:
+        return None  # signal "fall back to the Phase 1 heuristic", per spec.md #3B.2
+    owned = []
+    for hand in hands:
+        wrist = hand.landmarks[0]
+        if _near(wrist, pose_result.left_wrist, max_wrist_distance) or \
+           _near(wrist, pose_result.right_wrist, max_wrist_distance):
+            owned.append(hand)
+    return owned
+```
+
+`main.py`'s `run()` calls `PoseTracker.process()` once per frame alongside
+`HandTracker.process()`, feeds the result into the hand-filtering step
+already established by Phase 1.
+
+## 3B.3 Performance measurement (required before this phase is "done")
+
+Add a second `perf_metrics`-style measurement (reuse `TelemetryManager`,
+already live-wired per `ARCHITECTURE.md`'s Status table) for pose-inference
+time specifically, separate from the existing frame-time/FPS metrics, so the
+cost of this phase is visible on its own, not folded invisibly into overall
+frame time. Report before/after numbers against the documented baseline in
+the task report (`spec.md` #3B.3).
 
 ---
 
@@ -715,18 +822,20 @@ heavier than CLAHE, with no concrete problem reported yet that CLAHE
 wouldn't already address. Matches `apply.md` §12's "no speculative
 dependencies" — revisit only if CLAHE turns out insufficient in practice.
 
-## A.4 Recommendation
+## A.4 Recommendation — promoted, all 3 recommended items scheduled
 
-If/when promoted to a real phase: start with A.2 (already-free z-distance
-improvement to the Phase 1 pinch fix — genuinely zero additional cost,
-could be folded directly into TASK-055) and A.3 (CLAHE — also zero new
-dependency, cheap, directly helps the reliability goal Phase 1 already
-targets). Treat A.1 (MediaPipe Pose) as a separate, larger, explicitly
-opt-in follow-up phase — real second-model inference cost that needs its
-own measured performance report before committing, not something to fold
-silently into Phase 1. This evaluation does not assign TASK-XXX numbers;
-say the word and this gets turned into a real phase with tasks, ordered by
-the same menor-a-mayor criteria as everything else in this document (A.2/
-A.3 would rank low — free, cheap, contained; A.1 would rank closer to
-Phase 5's complexity — a new tracked-object type and a real perf cost to
-budget).
+Per instruction to promote everything recommended and skip the one that
+wasn't (neural low-light enhancement, §A.3):
+
+```text
+A.2 (z-distance)  -> TASK-055c, Phase 1     (§1.6)
+A.3 (CLAHE)       -> TASK-056b, Phase 1     (§1.7)
+A.1 (MediaPipe Pose) -> Phase 3B, TASK-060b/060c (§3B)
+```
+
+A.1 got its own phase ("3B", not folded into Phase 1) exactly as
+recommended here — real second-model inference cost, needs its own measured
+performance report before shipping enabled by default (`spec.md` #3B.3).
+A.2/A.3 stayed inside Phase 1 as small additional tasks, also as
+recommended — free, cheap, contained, same file/area as the rest of Phase
+1's work.

@@ -84,6 +84,41 @@ once centrally.
 
 ---
 
+## TASK-055c — 3D pinch-family distance
+
+### Objective
+
+Use the landmark `z` coordinate (already computed, unused today) so
+pinch-family distances are true 3D, not 2D screen-projected — per
+`design.md` §1.6, `spec.md` #1.4. Promoted from the perception-robustness
+evaluation (`design.md` Appendix A.2).
+
+### Requirements
+
+Every `d_thumb_*` distance in `gestures.py` uses `_dist3()` (or equivalent)
+instead of `_dist()`. Every pinch-family threshold in `config.py`
+re-verified against a real camera; re-tuned values (or confirmation none
+were needed) documented in the report.
+
+### Must NOT
+
+- Change any non-pinch-family distance/check.
+- Skip the real-camera re-verification — 3D and 2D distances for the same
+  physical pinch are not guaranteed numerically identical.
+
+### Acceptance criteria
+
+- Test: existing pinch synthetic fixtures (2D-only landmarks, `z=0`)
+  produce identical results to before this task (regression — confirms the
+  3D formula degrades correctly to the 2D one when z is flat).
+- Test: a synthetic fixture with two points close in (x, y) but far apart
+  in z does NOT register as a pinch (this is the concrete case 3D distance
+  exists to fix).
+- Manual verification note: real camera, existing pinch gestures still work
+  at the (possibly re-tuned) thresholds.
+
+---
+
 ## TASK-056 — Background / other-person hand filtering
 
 ### Objective
@@ -115,6 +150,39 @@ and verified against a real camera, documented in the task report.
   two-hand gestures exactly as before (regression).
 - Manual verification note in the report: real camera, user's two hands,
   both fixes together, no regression in normal use.
+
+---
+
+## TASK-056b — Lighting normalization (CLAHE)
+
+### Objective
+
+`normalize_lighting()` (CLAHE on the L channel), applied once per frame
+before hand tracking, per `design.md` §1.7, `spec.md` #1.5. Promoted from
+the perception-robustness evaluation (`design.md` Appendix A.3).
+
+### Requirements
+
+Toggleable via a `config.py` constant, default enabled. No new dependency
+(`cv2.createCLAHE` is already available in the installed `opencv-python`).
+
+### Must NOT
+
+- Apply normalization anywhere it could affect what's shown to the user
+  (the displayed `cv2.imshow` frame) unless that's an explicit, documented
+  choice — default expectation is normalization affects only the frame fed
+  to `HandTracker`, not necessarily the visible camera window (implementer's
+  call, document which was chosen and why).
+
+### Acceptance criteria
+
+- Test: `normalize_lighting()` returns a same-shape BGR frame, doesn't raise
+  on a synthetic all-black or all-white frame (edge cases CLAHE must handle
+  gracefully).
+- Manual verification note: real camera, low/uneven lighting, tracking
+  feels at least as reliable as before, not worse — this is inherently a
+  subjective/manual check, document what was actually tried.
+- Full regression suite green with the toggle both on and off.
 
 ---
 
@@ -203,6 +271,82 @@ per `design.md` §3 (same as the original proposal's version of this task).
 ### Acceptance criteria
 
 - Manual smoke test: icons visible, toggle/opacity/click-through unchanged.
+
+---
+
+# PHASE 3B — MediaPipe Pose-based hand-ownership filtering
+
+Named "3B" (not "4") to avoid renumbering phases 4-9 and every
+cross-reference to them across all four documents — see `design.md`'s note
+at the top of its own "PHASE 3B" section. Promoted from the
+perception-robustness evaluation (`design.md` Appendix A.1).
+
+## TASK-060b — Pose tracker module
+
+### Objective
+
+`src/jarvis/pose_tracker.py`: `PoseTracker`, mirroring `hand_tracker.py`'s
+structure, per `design.md` §3B.1. `pose_landmarker_lite.task` downloaded and
+cached via `jarvis.paths.assets_dir()`.
+
+### Requirements
+
+`num_poses=1` — only the primary user's body, deliberately (`design.md`
+§3B.1 explains why: tracking more than one body reintroduces the ambiguity
+this phase exists to remove).
+
+### Must NOT
+
+- Add a new pip dependency (`mediapipe` already provides `PoseLandmarker`).
+- Track more than 1 pose.
+
+### Acceptance criteria
+
+- Test: `PoseTracker.process()` returns `None` gracefully when no body is
+  detected (mocked landmarker), doesn't raise.
+- Manual verification: real camera, pose model downloads once and caches,
+  wrist landmarks reported for a real body in frame.
+
+---
+
+## TASK-060c — Anatomical hand-ownership filter + performance measurement
+
+### Objective
+
+`filter_hands_by_pose_ownership()` per `design.md` §3B.2, wired into
+`main.py`'s `run()` alongside `HandTracker`, extending/augmenting Phase 1
+§1.2's filter (implementer's documented choice on exactly how they compose).
+Performance measurement per `design.md` §3B.3, `spec.md` #3B.3.
+
+### Requirements
+
+- Falls back to Phase 1 §1.2's heuristic when no pose is confidently
+  tracked (`spec.md` #3B.2) — pose-detection failure SHALL NOT stop the app
+  from responding to gestures.
+- A dedicated telemetry metric for pose-inference time, separate from
+  existing frame-time/FPS metrics.
+- A measured before/after performance report against
+  `ARCHITECTURE.md`'s documented baseline, in the task report.
+
+### Must NOT
+
+- Reject all hands when pose detection has no result for a frame — fall
+  back, don't fail closed.
+- Ship enabled-by-default if the measured performance cost is clearly bad
+  (implementer's documented judgment, with numbers) — ship
+  disabled-by-default and togglable instead in that case, rather than
+  discarding the feature entirely.
+
+### Acceptance criteria
+
+- Test: hands whose wrist is near a tracked body's wrist are kept; hands
+  whose wrist is far from both tracked wrists are filtered.
+- Test: with `pose_result=None`, filtering falls back to Phase 1's
+  heuristic (not "reject everything").
+- Performance report present in the task report, compared against the
+  documented baseline, with an explicit enabled-by-default vs.
+  disabled-by-default decision and why.
+- Full regression suite green.
 
 ---
 

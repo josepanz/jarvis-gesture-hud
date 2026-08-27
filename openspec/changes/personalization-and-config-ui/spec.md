@@ -54,6 +54,34 @@ Every existing gesture's currently-passing test SHALL still pass unchanged
 after this phase. This phase adds filtering/priority logic; it SHALL NOT
 change any existing gesture's landmark geometry/thresholds.
 
+## 1.4 3D pinch-family distance (promoted from `design.md` Appendix A.2)
+
+Every pinch-family distance already computed in `gestures.py`
+(`d_thumb_index`, `d_thumb_middle`, `d_thumb_ring`, `d_thumb_pinky`) SHALL be
+computed using the landmark's `z` coordinate in addition to `x`/`y` (true 3D
+distance), not the 2D screen-projected distance used today. This SHALL be
+implemented as part of §1.1's fix (same code, same task), since it may be a
+second, independent contributing cause of the reported pinch-confusion bug —
+two points close in (x, y) but far apart in z are not actually touching, and
+2D-only distance cannot express that.
+
+Every existing threshold constant tuned against 2D distance (`config.py`'s
+`PINCH_CLICK`, `PINCH_RIGHT_CLICK`, etc.) SHALL be re-verified against real
+camera input once 3D distance is used — 3D distances for a genuine pinch are
+not numerically identical to the 2D distances the current thresholds were
+tuned against, even though they SHOULD be close for a hand roughly facing
+the camera. Document the re-tuned values (or confirmation none were needed)
+in the task report.
+
+## 1.5 Lighting normalization (promoted from `design.md` Appendix A.3)
+
+Camera frames SHALL be normalized for lighting (CLAHE on the L channel in
+LAB color space, or an equivalent OpenCV-only technique) before being passed
+to `HandTracker.process()`. This SHALL be toggleable (config default: on)
+so it can be disabled if it ever regresses detection on a specific setup —
+no normalization technique is universally an improvement in every lighting
+condition.
+
 ---
 
 # PHASE 2 — Landmark / quadrant visualization
@@ -126,6 +154,48 @@ deferred to a separate later task once phase 3 exists.
 
 Unchanged: per-gesture animated (GIF) demonstrations remain explicitly
 deferred, scoped as a future follow-up if requested.
+
+---
+
+# PHASE 3B — MediaPipe Pose-based hand-ownership filtering
+
+(Promoted from `design.md` Appendix A.1. Named "3B", not "4", to avoid
+renumbering phases 4-9 and every cross-reference to them — see `tasks.md`'s
+note on this at TASK-060b. Positioned here, between icons and the gesture
+library, because it strengthens Phase 1 §1.2's filter before phases 4-8 add
+many more gestures that depend on reliable hand detection.)
+
+## 3B.1 Pose tracking
+
+The app SHALL track human body pose via MediaPipe's `PoseLandmarker` (Tasks
+API, same `mediapipe` package already required — no new dependency), using
+the `lite` model variant, downloaded and cached the same way as the hand
+model (`jarvis.paths.assets_dir()`).
+
+## 3B.2 Anatomical hand-ownership filter
+
+A detected hand SHALL only be considered eligible for gesture processing if
+its wrist landmark (landmark 0) is within a configurable distance of a
+tracked body's corresponding wrist landmark (left or right). This SHALL
+replace or augment (implementer's documented choice) Phase 1 §1.2's
+bounding-box-size heuristic — the goal is a stronger, anatomically-grounded
+same-person check, not a parallel, redundant one.
+
+If no body is confidently tracked in a given frame, hand filtering SHALL
+fall back to Phase 1 §1.2's existing heuristic rather than rejecting all
+hands outright (pose detection failing SHALL NOT make the whole app stop
+responding to gestures).
+
+## 3B.3 Performance requirement
+
+The measured performance cost of adding pose tracking SHALL be reported
+against this project's documented performance baseline
+(`ARCHITECTURE.md` § Performance baseline) before this phase is considered
+complete. If the cost is not acceptable (implementer's judgment, documented
+with numbers, not a vague impression), report the finding and do not ship
+pose tracking enabled by default — it MAY still ship disabled-by-default
+and togglable, rather than being discarded entirely, if the numbers are
+borderline rather than clearly bad.
 
 ---
 
