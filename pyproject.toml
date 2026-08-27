@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-gesture-hud"
-version = "0.3.0"
+version = "0.3.1"
 description = "Webcam hand-gesture desktop controller with offline Jarvis voice feedback, native translucent overlays, and local voice+LLM command understanding."
 readme = "README.md"
 requires-python = ">=3.10"

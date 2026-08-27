@@ -1,6 +1,37 @@
 # CHANGELOG
 
 
+## v0.3.1 (2026-08-27)
+
+### Bug Fixes
+
+- Confusion Shaka/puno y pinch demasiado sensible (verificado en camara real)
+  ([`8c43d4c`](https://github.com/josepanz/jarvis-gesture-hud/commit/8c43d4c082722e22f289e39acfba2fa6a8abb295))
+
+Diagnosticado con DroidCam en vivo, no adivinado - dos reportes reales de uso:
+
+1. Un puno bloqueaba la sesion. _is_shaka nunca chequeaba el anular. La transicion real de abrir un
+  puno sostenido pasa, por un instante, por una forma que ya cumplia _is_shaka (menique "se
+  extiende" antes que el resto, pulgar ya arriba, indice/medio todavia curvados) - con el anular
+  tambien extendido, cosa que un Shaka real no tiene (se curva). Verificado en vivo antes/despues:
+  antes, la transicion sostenia is_shaka=True un tramo visible; despues, solo 3 frames sueltos en
+  0.18s, lejos del hold de 1.5s. Fix: exigir anular curvado en _is_shaka tambien.
+
+2. "Todo dispara muy facil". Medidos en camara real: mano relajada llego a 15.5px en indice / 19.2px
+  en medio durante movimiento normal, umbral viejo era 30px para practicamente todos los pinch.
+  Pinch intencional: mediana 9.6px, bien separado del reposo. Fix doble: (1) umbrales bajados con
+  margen sobre los datos medidos (config.py, ver comentario ahi); (2) PINCH_CONFIRM_FRAMES=2 - un
+  dedo necesita 2 frames seguidos bajo su umbral antes de poder ganar pinch_winner, absorbe ruido de
+  un solo frame sin depender de esta unica medicion para generalizar a otra camara.
+
+Reverificado en vivo end-to-end despues del fix: 5 PINCH_DOWN/4 PINCH_UP limpios siguiendo pellizcos
+  deliberados, sin ráfagas ni disparos falsos.
+
+461 tests (17 actualizados para el nuevo requisito de confirmacion de 2 frames, 3 nuevos test
+  dedicados, 1 nuevo con la geometria real capturada del bug de Shaka). Regresion completa,
+  compilacion y ambos checks de integracion manual verificados.
+
+
 ## v0.3.0 (2026-08-27)
 
 ### Features
