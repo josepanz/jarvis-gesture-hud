@@ -858,55 +858,29 @@ def naruto_ushi_hand(cx=0.5, cy=0.5):
 
 
 def naruto_uma_hand(cx=0.5, cy=0.5):
-    # REDEFINIDO (censo de colision) - ver ARCHITECTURE.md y el comentario de
-    # `_is_naruto_uma` en gestures.py.
+    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
+    # ver ARCHITECTURE.md y el comentario de `_is_naruto_uma` en gestures.py.
+    # Ahora: pulgar+indice+menique extendidos, medio+anular recogidos.
     pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)  # indice extendido
     pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx - 0.02, cy - 0.15, 0)
-    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
-    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)
-    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)  # menique recogido
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.15, cy - 0.05, 0)  # pulgar extendido hacia el costado
-    pts[2] = Landmark(cx - 0.1, cy, 0)
-    return pts
-
-
-def naruto_saru_hand(cx=0.5, cy=0.5):
-    # REDEFINIDO (censo de colision, flag explicito de design.md) - ver
-    # ARCHITECTURE.md y el comentario de `_is_naruto_saru` en gestures.py.
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[6] = Landmark(cx - 0.06, cy, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)  # medio recogido
     pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)  # anular extendido
-    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)  # anular recogido
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
+    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
     pts[4] = Landmark(cx - 0.15, cy - 0.05, 0)  # pulgar extendido
     pts[2] = Landmark(cx - 0.1, cy, 0)
     return pts
 
 
-def naruto_inu_hand(cx=0.5, cy=0.5):
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[6] = Landmark(cx - 0.06, cy, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)  # anular extendido
-    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
-    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido, junto al anular
-    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
-    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido
-    pts[2] = Landmark(cx - 0.09, cy, 0)
-    return pts
-
-
-def naruto_i_hand(cx=0.5, cy=0.5):
+def naruto_saru_hand(cx=0.5, cy=0.5):
+    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
+    # ver ARCHITECTURE.md y el comentario de `_is_naruto_saru` en gestures.py.
+    # Ahora: puño cerrado con el pulgar hacia ARRIBA (distinto de I, que es
+    # hacia el costado) - pulgar alineado con el nudillo medio (landmark 9)
+    # en x, bien arriba en y.
     pts = _naruto_base(cx, cy)
     pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
     pts[6] = Landmark(cx - 0.06, cy, 0)
@@ -916,8 +890,44 @@ def naruto_i_hand(cx=0.5, cy=0.5):
     pts[14] = Landmark(cx + 0.02, cy, 0)
     pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
     pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.2, cy - 0.05, 0)  # pulgar extendido hacia el costado
-    pts[2] = Landmark(cx - 0.1, cy, 0)
+    pts[4] = Landmark(cx - 0.02, cy - 0.2, 0)  # pulgar recto hacia arriba desde el mcp medio
+    pts[2] = Landmark(cx - 0.02, cy - 0.05, 0)
+    return pts
+
+
+def naruto_inu_hand(cx=0.5, cy=0.5):
+    # REDEFINIDO (verificado en camara real, 2026-08-27) - ver
+    # ARCHITECTURE.md y el comentario de `_is_naruto_inu` en gestures.py.
+    # Ahora: solo el menique extendido, resto recogido.
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[6] = Landmark(cx - 0.06, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
+    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
+    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido
+    pts[2] = Landmark(cx - 0.09, cy, 0)
+    return pts
+
+
+def naruto_i_hand(cx=0.5, cy=0.5):
+    # FIX (verificado en camara real, 2026-08-27) - ver ARCHITECTURE.md y el
+    # comentario de `_is_naruto_i` en gestures.py. Pulgar bien lateral
+    # (domina el eje x, no el y) respecto al mcp medio (landmark 9).
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[6] = Landmark(cx - 0.06, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.25, cy + 0.01, 0)  # pulgar lateral, mismo nivel que el mcp medio
+    pts[2] = Landmark(cx - 0.15, cy, 0)
     return pts
 
 
@@ -958,14 +968,35 @@ class NarutoOneHandSealTests(unittest.TestCase):
                 _, _, events = engine.process([Hand(fixture_fn(), "Right")], W, H, SCREEN_W, SCREEN_H)
                 self.assertEqual(events, [])
 
-    def test_releasing_the_seal_before_the_hold_resets_it(self):
+    def test_releasing_the_seal_past_the_miss_tolerance_resets_it(self):
+        # open_palm_hand() como "sin match" en vez de flat(): flat() tiene
+        # las 21 landmarks coincidentes, lo que la hace pellizcar por
+        # construccion (d_thumb_index=0) y contamina el assert con un
+        # PINCH_UP de paso - open_palm_hand() no matchea ningun sello NI
+        # ninguna condicion de pinch.
         engine = GestureEngine()
         engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        engine.process([Hand(flat(), "Right")], W, H, SCREEN_W, SCREEN_H)  # se suelta antes de tiempo
+        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE + 1):  # supera la tolerancia -> reinicia de verdad
+            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
         # Rehace el sello - el hold tiene que rearmarse desde 0, no heredar
         # ningun progreso del intento anterior.
         _, _, events = engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
         self.assertEqual(events, [])
+
+    def test_a_brief_flicker_within_the_miss_tolerance_does_not_reset_the_hold(self):
+        # Verificado en camara real (2026-08-27): incluso sosteniendo la
+        # forma correcta a proposito, la clasificacion parpadea a "ningun
+        # sello" por 1 frame suelto de vez en cuando (ruido, no un cambio de
+        # pose real) - sin esta tolerancia, el hold casi nunca llega a
+        # completarse en la practica.
+        engine = GestureEngine()
+        pts = naruto_tora_hand()
+        engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE):  # exactamente en el limite, no lo supera
+            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        engine._naruto_hold_start = time.time() - 1.0
+        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, ["NARUTO_TORA"])  # el progreso del hold sobrevivio al parpadeo
 
     def test_none_of_the_existing_gesture_fixtures_leak_a_naruto_event(self):
         existing_fixtures = {

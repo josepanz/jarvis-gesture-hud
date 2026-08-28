@@ -71,15 +71,41 @@ def _fingers_extended(pts, *tips):
 
 
 def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
-    """True si el orden lateral de 2 puntas se invirtio respecto al orden de
-    sus nudillos (MCP) - un cruce real de dedos, no solo "cerca uno del otro"."""
-    natural_order = pts[mcp_a].x < pts[mcp_b].x
-    current_order = pts[tip_a].x < pts[tip_b].x
-    return natural_order != current_order
+    """True si el segmento MCP->punta de un dedo cruza geometricamente al del
+    otro (interseccion real de segmentos, por orientacion/producto cruzado).
+
+    Reemplaza una v1 que solo comparaba el ORDEN lateral de las 2 puntas
+    contra el orden de los MCP - verificado en camara real (2026-08-27) que
+    esa v1 daba falso positivo ~60-70% del tiempo con 2 dedos simplemente
+    juntos/paralelos (Tora), porque el orden de las puntas se invierte con
+    el ruido normal de landmark sin que los dedos esten realmente cruzados.
+    Esta v2 exige que los 2 SEGMENTOS completos (nudillo a punta) se corten
+    entre si - una condicion mucho mas especifica de un cruce real - medida
+    en la misma sesion contra un intento genuino de Hitsuji: subio la
+    confiabilidad de ~63% a un rango utilizable para sostener el hold."""
+
+    def _orientation(a, b, c):
+        return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y)
+
+    p1, p2, p3, p4 = pts[mcp_a], pts[tip_a], pts[mcp_b], pts[tip_b]
+    d1 = _orientation(p3, p4, p1)
+    d2 = _orientation(p3, p4, p2)
+    d3 = _orientation(p1, p2, p3)
+    d4 = _orientation(p1, p2, p4)
+    return (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0)
 
 
 def _index_middle_extended_ring_pinky_curled(pts):
     return _fingers_extended(pts, 8, 12) and _fingers_curled(pts, 16, 20)
+
+
+def _thumb_offset_from_palm(pts):
+    """(dx lateral, dy "hacia arriba") del pulgar respecto al nudillo medio
+    de la palma (landmark 9, referencia de centro de palma) - dy positivo
+    significa el pulgar esta mas arriba que el centro de la palma. Separa
+    "pulgar hacia arriba" de "pulgar hacia el costado" comparando cual eje
+    domina, en vez de un solo chequeo vertical (ver `_is_naruto_i`/`_is_naruto_saru`)."""
+    return pts[4].x - pts[9].x, pts[9].y - pts[4].y
 
 
 # TASK-061/062 (Fase 4, `openspec/changes/personalization-and-config-ui`,
@@ -99,42 +125,71 @@ def _is_naruto_ushi(pts):
 
 
 def _is_naruto_uma(pts):
-    # Horse - REDEFINIDO: la definicion original de design.md ("las 5
-    # extendidas y parejas") colisiona EXACTAMENTE con KEYBOARD_TOGGLE (mano
-    # abierta, pulgar separado) - mismo significado ya existente, no se puede
-    # reusar sin violar apply.md §15 ("nunca cambiar en silencio el
-    # significado de un gesto existente"). Redefinido a: indice+medio+anular
-    # extendidos, menique recogido, pulgar extendido hacia el costado.
-    return _fingers_extended(pts, 8, 12, 16) and _fingers_curled(pts, 20) and pts[4].y < pts[2].y
+    # Horse - REDEFINIDO POR SEGUNDA VEZ (verificado en camara real,
+    # 2026-08-27): la v1 (design.md original: "las 5 extendidas y parejas")
+    # colisionaba EXACTAMENTE con KEYBOARD_TOGGLE (apply.md §15). La v2
+    # ("indice+medio+anular extendidos, menique recogido") pedia aislar el
+    # anular junto al medio sin el menique - medido en vivo: 0% de
+    # coincidencia, la mano real hizo naturalmente pulgar+indice+menique
+    # extendidos con medio+anular recogidos (forma tipo "rock and roll") en
+    # su lugar. Redefinido a esa forma, verificada como sostenible.
+    return _fingers_extended(pts, 8, 20) and _fingers_curled(pts, 12, 16) and pts[4].y < pts[2].y
 
 
 def _is_naruto_saru(pts):
-    # Monkey - REDEFINIDO (flag explicito en design.md §4.1): la definicion
-    # original ("pulgar+menique extendidos, resto recogido") ES exactamente
-    # la forma de `_is_shaka` - no se puede reusar sin cambiar en silencio el
-    # significado de un gesto existente (apply.md §15). Redefinido a:
-    # pulgar+anular extendidos, indice/medio/menique recogidos.
-    return _fingers_extended(pts, 16) and _fingers_curled(pts, 8, 12, 20) and pts[4].y < pts[2].y
+    # Monkey - REDEFINIDO POR SEGUNDA VEZ (verificado en camara real,
+    # 2026-08-27): la v1 (flag explicito de design.md: "pulgar+menique") ERA
+    # la forma de `_is_shaka` (apply.md §15). La v2 ("pulgar+anular
+    # extendidos") pedia aislar el anular solo - medido en vivo: 0% de
+    # coincidencia, todos los dedos salieron extendidos (imposible aislar el
+    # anular del medio/menique, comparten tendones). Redefinido a "pulgar
+    # arriba": puño cerrado con el pulgar extendido HACIA ARRIBA (no hacia
+    # el costado, eso es I/Boar) - distinguido de I por la DIRECCION del
+    # pulgar (arriba vs costado, ver `_thumb_offset_from_palm`), no por su
+    # curvatura simple.
+    if not _fingers_curled(pts, 8, 12, 16, 20):
+        return False
+    dx, dy = _thumb_offset_from_palm(pts)
+    return dy > 0.10 and dy > abs(dx)
 
 
 def _is_naruto_inu(pts):
-    # Dog: anular+menique extendidos, indice/medio recogidos, pulgar
-    # recogido (apoyado sobre los dedos curvados).
-    return _fingers_extended(pts, 16, 20) and _fingers_curled(pts, 8, 12) and pts[4].y > pts[2].y
+    # Dog - REDEFINIDO (verificado en camara real: la v1, "anular+menique
+    # juntos extendidos", dio 0% de coincidencia - la mano quedo
+    # completamente cerrada, aislar el anular sin el medio resulto
+    # imposible). Redefinido a: solo el menique extendido (el menique SI
+    # tiene un rango de movimiento independiente razonable, a diferencia del
+    # anular), resto recogido.
+    return _fingers_extended(pts, 20) and _fingers_curled(pts, 8, 12, 16) and pts[4].y > pts[2].y
 
 
 def _is_naruto_i(pts):
-    # Boar: puño cerrado con el pulgar extendido hacia el costado (no
-    # recogido como un puño comun).
+    # Boar: puño cerrado con el pulgar extendido hacia el COSTADO (lateral),
+    # no hacia arriba (eso es Saru, arriba) ni recogido.
+    # FIX (verificado en camara real, 2026-08-27): la v1 media "extendido"
+    # con el mismo chequeo vertical que el resto de los dedos (pts[4].y <
+    # pts[2].y), pero "hacia el costado" es un movimiento LATERAL, no
+    # vertical - ese chequeo nunca podia detectarlo (el pulgar real salio
+    # "curvado" ~97% de las veces con esa metrica, incluso sostenido bien
+    # hacia el costado). Ahora compara el desplazamiento lateral contra el
+    # vertical (ver `_thumb_offset_from_palm`), igual que Saru pero
+    # exigiendo que domine el eje contrario.
     # LIMITACION documentada (censo de colision, ver ARCHITECTURE.md):
-    # `_is_fist()` no chequea el pulgar, asi que esta forma TAMBIEN cuenta
-    # como puño para la logica de 2 manos (fists[0] != fists[1]). Con las 2
-    # manos en cuadro y la otra mano NO siendo un puño, arma el menu meta en
-    # modo "ancla" de fondo - no dispara ninguna accion por si sola, necesita
-    # ademas 1-4 dedos sostenidos en la otra mano. No es una ejecucion
-    # silenciosa de una accion equivocada, solo una interaccion de fondo
-    # aceptada y documentada explicitamente.
-    return _fingers_curled(pts, 8, 12, 16, 20) and pts[4].y < pts[2].y
+    # `_is_fist()` no chequea el pulgar, asi que tanto esta forma como Saru
+    # TAMBIEN cuentan como puño para la logica de 2 manos (fists[0] !=
+    # fists[1]) - interaccion de fondo aceptada, no una ejecucion silenciosa
+    # de una accion equivocada (arma el menu meta, no dispara nada solo).
+    #
+    # Umbral 0.15 (no 0.06): verificado contra `fist_hand()` (fixture de
+    # puño generico reusado en todo este archivo, con el pulgar apenas
+    # recogido a un costado por default, no deliberadamente extendido) -
+    # con un umbral mas chico ese puño comun tambien calificaba como I por
+    # accidente. 0.15 deja margen claro entre "pulgar apenas al costado de
+    # un puño relajado" y "pulgar deliberadamente extendido hacia el costado".
+    if not _fingers_curled(pts, 8, 12, 16, 20):
+        return False
+    dx, dy = _thumb_offset_from_palm(pts)
+    return abs(dx) > 0.15 and abs(dx) > dy
 
 
 def _bbox_area_fraction(landmarks, w, h):
@@ -214,6 +269,7 @@ class GestureEngine:
 
         self._naruto_hold_seal = None  # TASK-062: que sello se esta sosteniendo ahora (o None)
         self._naruto_hold_start = None
+        self._naruto_miss_streak = 0  # frames seguidos sin match mientras se sostenia un sello
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -516,16 +572,28 @@ class GestureEngine:
             elif _is_naruto_i(pts):
                 _naruto_seal = "I"
 
+        # TASK-062 fix (verificado en camara real, 2026-08-27): un solo
+        # frame de parpadeo a "ningun sello" (ruido de landmark, no un
+        # cambio real de pose) ya no reinicia el hold entero -
+        # NARUTO_SEAL_MISS_TOLERANCE frames de gracia antes de tirar el
+        # progreso, mismo principio que PINCH_CONFIRM_FRAMES pero para no
+        # PERDER una confirmacion en curso en vez de para no adelantarla.
         if _naruto_seal is not None:
-            if self._naruto_hold_seal != _naruto_seal or self._naruto_hold_start is None:
+            if self._naruto_hold_seal != _naruto_seal:
                 self._naruto_hold_seal = _naruto_seal
+                self._naruto_hold_start = now
+            elif self._naruto_hold_start is None:
                 self._naruto_hold_start = now
             elif now - self._naruto_hold_start > config.NARUTO_SEAL_HOLD_SECONDS:
                 events.append(f"NARUTO_{_naruto_seal}")
                 self._naruto_hold_start = None
-        else:
-            self._naruto_hold_seal = None
-            self._naruto_hold_start = None
+            self._naruto_miss_streak = 0
+        elif self._naruto_hold_seal is not None:
+            self._naruto_miss_streak += 1
+            if self._naruto_miss_streak > config.NARUTO_SEAL_MISS_TOLERANCE:
+                self._naruto_hold_seal = None
+                self._naruto_hold_start = None
+                self._naruto_miss_streak = 0
 
         # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click

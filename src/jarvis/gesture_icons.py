@@ -88,14 +88,20 @@ ICON_SPECS = {
     "naruto_ushi": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "pause"},
     "naruto_u": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": None},
     "naruto_uma": {
+        # Redefinido por segunda vez (verificado en camara real) - ver
+        # gestures.py::_is_naruto_uma.
         "hands": 1,
-        "extended": {"thumb", "index", "middle", "ring"},
+        "extended": {"thumb", "index", "pinky"},
         "pinch": None,
         "glyph": "zoom",
     },
     "naruto_hitsuji": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": "close"},
-    "naruto_saru": {"hands": 1, "extended": {"thumb", "ring"}, "pinch": None, "glyph": "keyboard"},
-    "naruto_inu": {"hands": 1, "extended": {"ring", "pinky"}, "pinch": None, "glyph": None},
+    # Saru/I: mismo set de dedos extendidos (solo el pulgar) - se
+    # distinguen entre si por el glyph (keyboard vs lock), la direccion real
+    # del pulgar (arriba vs costado) no es representable en este modelo
+    # simple de iconos.
+    "naruto_saru": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "keyboard"},
+    "naruto_inu": {"hands": 1, "extended": {"pinky"}, "pinch": None, "glyph": None},
     "naruto_i": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "lock"},
 }
 

@@ -39,6 +39,14 @@ VOLUME_DELTA_THRESHOLD = 0.03
 TWO_HAND_ZOOM_DELTA_PX = 15
 
 NARUTO_SEAL_HOLD_SECONDS = 0.6  # TASK-062: mismo orden que META_HOLD_SECONDS - deliberado pero rapido
+# Verificado en camara real (2026-08-27): incluso con la forma correcta
+# sostenida a proposito, la clasificacion parpadea a None por 1 frame suelto
+# de tanto en tanto (ruido de landmark/deteccion, no un cambio real de
+# pose). Sin tolerancia, CUALQUIER parpadeo reinicia el hold entero y hace
+# casi imposible acumular 0.6s seguidos en la practica. Mismo principio que
+# PINCH_CONFIRM_FRAMES (TASK-055/1.5), aplicado del lado de "no perder el
+# progreso" en vez de "no confirmar de mas".
+NARUTO_SEAL_MISS_TOLERANCE = 3  # frames seguidos sin match tolerados antes de reiniciar el hold
 
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.

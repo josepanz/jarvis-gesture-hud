@@ -139,11 +139,11 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Naruto seal Tora (index+middle together, thumb crossed close), held 0.6s | Screenshot (default binding, profile-overridable) |
 | Naruto seal Ushi (index only, thumb tucked), held 0.6s | Undo |
 | Naruto seal U/Hare (index+middle spread apart, thumb tucked), held 0.6s | Redo |
-| Naruto seal Uma/Horse — redefined (index+middle+ring extended, pinky curled, thumb out), held 0.6s | Zoom in |
-| Naruto seal Hitsuji/Ram (index+middle crossed), held 0.6s | Mute |
-| Naruto seal Saru/Monkey — redefined (thumb+ring extended), held 0.6s | Toggle on-screen keyboard |
-| Naruto seal Inu/Dog (ring+pinky extended together, thumb tucked), held 0.6s | Volume down |
-| Naruto seal I/Boar (fist, thumb extended to the side), held 0.6s | Lock session (`HOLD_REQUIRED` — the hold above already satisfies it) |
+| Naruto seal Uma/Horse — redefined a 3rd time, real-camera verified (thumb+index+pinky extended, middle+ring curled), held 0.6s | Zoom in |
+| Naruto seal Hitsuji/Ram (index+middle genuinely crossed — segment-intersection check), held 0.6s | Mute |
+| Naruto seal Saru/Monkey — redefined a 3rd time, real-camera verified (fist, thumb pointing up), held 0.6s | Toggle on-screen keyboard |
+| Naruto seal Inu/Dog — redefined, real-camera verified (pinky extended alone), held 0.6s | Volume down |
+| Naruto seal I/Boar (fist, thumb extended to the side — lateral offset check), held 0.6s | Lock session (`HOLD_REQUIRED` — the hold above already satisfies it) |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
@@ -864,15 +864,81 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     changed ONLY in padding width (a longer new line widened the shared
     `ljust`), never in their own text (verified, updated snapshot in
     `tests/test_legend.py`).
-  - **Honest limitation:** all 8 seal fixtures were verified against the
-    real `GestureEngine` (not hand-reasoned), but NOT against a real human
-    hand on camera — no hand was in frame during this task (same
-    environmental constraint as Phase 3B's positive-ownership path). The
-    synthetic fixtures are geometrically representative (explicit finger
-    curl states + measured thumb/index-middle pixel distances, same
-    fixture-verification discipline as every other gesture in this file),
-    but a real hand's natural variation in exactly how "crossed" or
-    "together" fingers look has not been confirmed live.
+  - **Update — real-camera verification session (2026-08-27), one seal at a
+    time, with the user's real hand.** Synthetic-fixture verification (above)
+    proved the code was internally consistent and collision-free; it did NOT
+    prove a real hand could actually produce these shapes the way the
+    fixtures assumed. It couldn't — of the 8 seals, only Hitsuji's base shape
+    came close on the first real attempt. Root-caused per seal (raw
+    per-finger tip/pip deltas and derived distances logged live, not
+    guessed):
+    - **`_fingers_crossed` (v1) false-positived ~60–70% of the time** on a
+      genuine Tora attempt (index+middle simply held together, not crossed)
+      — it only compared the LATERAL ORDER of the two tips against their
+      MCPs' order, which flips easily from ordinary landmark noise when tips
+      are close together. **Fixed (v2):** real 2D line-segment intersection
+      (orientation/cross-product test) between each finger's full MCP→tip
+      segment — a structurally stronger signal that a genuine cross requires.
+    - **Uma (v2: "index+middle+ring extended, pinky curled") and Saru (v2:
+      "thumb+ring extended") both scored 0% on a genuine attempt** — both
+      required isolating the ring finger independently of its neighbors,
+      which is physiologically hard (middle/ring/pinky share tendons; most
+      people cannot curl/extend the ring finger alone without dragging
+      adjacent fingers). The real hand naturally produced thumb+index+pinky
+      extended (middle+ring curled — an "I-love-you"/"rock-on"-style shape)
+      when attempting Uma, and a fully-open hand when attempting Saru.
+      **Redefined a 3rd time, informed by what the real hand could actually
+      do:** Uma → thumb+index+pinky extended, middle+ring curled (verified
+      achievable). Saru → closed fist with the thumb pointing UP (not
+      isolating any single finger — distinguished from `I` below by thumb
+      DIRECTION, not by which fingers curl).
+    - **Inu (v1: "ring+pinky extended together") also scored 0%** — same
+      ring-isolation problem; the real hand stayed fully closed. **Redefined:**
+      pinky extended alone (pinky has meaningfully more independent tendon
+      control than ring, confirmed by every capture where it moved
+      independently while ring did not).
+    - **`I` (Boar) scored ~0% on its own thumb condition** for a different
+      reason: the original check reused the same VERTICAL curl test as every
+      other finger (`tip.y < pip.y`), but "thumb extended outward to the
+      side" is a LATERAL motion — a vertical check structurally cannot see
+      it (thumb read as "curled" ~97% of the time even while held clearly
+      out to the side). **Fixed:** new `_thumb_offset_from_palm()` compares
+      the thumb tip's horizontal vs. vertical offset from the palm-center
+      landmark (9) and requires the lateral component to dominate — the same
+      helper now also drives Saru's "thumb up" (vertical component
+      dominates instead).
+    - **New shared mechanism: `config.NARUTO_SEAL_MISS_TOLERANCE=3`.** Even
+      holding a correct shape deliberately, live classification flickers to
+      "no seal" for an occasional single frame (landmark noise, not a real
+      pose change) — confirmed live. Without tolerance, ANY flicker fully
+      reset the 0.6s hold, making it near-impossible to complete in
+      practice. Same principle as `PINCH_CONFIRM_FRAMES` (TASK-055/1.5),
+      applied to the opposite side of the problem: not losing an in-progress
+      confirmation, rather than not granting one too early.
+    - **A real, subtler bug the fix for `I` surfaced and caught before
+      shipping:** the existing `fist_hand()` regression fixture (used
+      throughout this whole test file for two-hand scenarios) has its thumb
+      resting a plausible-but-arbitrary distance to the side — with `I`'s
+      original 0.06 lateral threshold, that ordinary fixture ALSO read as
+      `NARUTO_I` when passed as a single hand. Raised the threshold to 0.15
+      (verified against `fist_hand()`'s own offset) so a relaxed fist's
+      incidental thumb position can't be mistaken for a deliberate sideways
+      extension; `I`'s own fixture (built for a clearly deliberate lateral
+      thumb) still clears the new threshold comfortably.
+    - **Icons and legend updated to match** every redefinition (Uma/Saru/Inu
+      geometry, `I`'s clarified "costado" wording) — regenerated, re-verified
+      pairwise-distinct.
+    - **Scope of this pass:** re-verified via updated unit tests (496 total,
+      green) and the same root-cause-from-real-data discipline as every fix
+      in this project. The FIXED detectors were **not** re-run against the
+      camera a second time in this session (explicit user choice — "documenta
+      y sigue" — to move on rather than spend another live round); a
+      follow-up live check of Tora/Hitsuji/Uma/Saru/Inu/`I` specifically is
+      recommended before considering Phase 4 fully closed. Ushi and U were
+      not cleanly re-attempted live either (the session moved on before a
+      clean take) — their designs were left unchanged since the underlying
+      shapes (index alone; index+middle spread) are anatomically ordinary,
+      but they carry the same "not confirmed after this pass" caveat.
 
 ## Known limitations
 

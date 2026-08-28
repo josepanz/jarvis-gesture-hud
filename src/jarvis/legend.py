@@ -31,11 +31,11 @@ ENTRIES = [
     ("Sello Tora (índice+medio)", "Captura", "naruto_tora"),
     ("Sello Ushi (índice)", "Deshacer", "naruto_ushi"),
     ("Sello U (índice+medio separados)", "Rehacer", "naruto_u"),
-    ("Sello Uma (índice+medio+anular)", "Zoom +", "naruto_uma"),
+    ("Sello Uma (pulgar+índice+meñique)", "Zoom +", "naruto_uma"),
     ("Sello Hitsuji (índice+medio cruzados)", "Silenciar sistema", "naruto_hitsuji"),
-    ("Sello Saru (pulgar+anular)", "Teclado HUD", "naruto_saru"),
-    ("Sello Inu (anular+meñique)", "Volumen -", "naruto_inu"),
-    ("Sello I (puño, pulgar afuera)", "Bloquear sesión", "naruto_i"),
+    ("Sello Saru (puño, pulgar arriba)", "Teclado HUD", "naruto_saru"),
+    ("Sello Inu (solo meñique)", "Volumen -", "naruto_inu"),
+    ("Sello I (puño, pulgar al costado)", "Bloquear sesión", "naruto_i"),
 ]
 
 

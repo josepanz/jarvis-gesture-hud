@@ -36,11 +36,11 @@ _EXPECTED_TEXT = (
     "Sello Tora (índice+medio)              →  Captura\n"
     "Sello Ushi (índice)                    →  Deshacer\n"
     "Sello U (índice+medio separados)       →  Rehacer\n"
-    "Sello Uma (índice+medio+anular)        →  Zoom +\n"
+    "Sello Uma (pulgar+índice+meñique)      →  Zoom +\n"
     "Sello Hitsuji (índice+medio cruzados)  →  Silenciar sistema\n"
-    "Sello Saru (pulgar+anular)             →  Teclado HUD\n"
-    "Sello Inu (anular+meñique)             →  Volumen -\n"
-    "Sello I (puño, pulgar afuera)          →  Bloquear sesión"
+    "Sello Saru (puño, pulgar arriba)       →  Teclado HUD\n"
+    "Sello Inu (solo meñique)               →  Volumen -\n"
+    "Sello I (puño, pulgar al costado)      →  Bloquear sesión"
 )
 
 
