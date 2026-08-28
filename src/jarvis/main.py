@@ -120,7 +120,8 @@ from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
 from jarvis.hand_visualizer import draw_hand_overlay
 from jarvis.hud_keyboard import HUDKeyboard
-from jarvis.legend import build_legend_text
+from jarvis.legend import TITLE as LEGEND_TITLE
+from jarvis.legend import build_legend_entries
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
 from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
@@ -189,7 +190,7 @@ class JarvisApp:
         self.keyboard = HUDKeyboard()
         self.voice = VoiceJarvis()
         self.overlay = ScreenOverlay()
-        self.overlay.init_legend(build_legend_text())
+        self.overlay.init_legend(build_legend_entries(), title=LEGEND_TITLE)
 
         self.feedback = FeedbackManager(voice=self.voice, hud=self.overlay)
 

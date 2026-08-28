@@ -54,6 +54,7 @@ class ScreenOverlay:
         self._root.withdraw()
 
         self._legend_window = None
+        self._legend_icons = []
         self._legend_alpha = 0.75
         self._legend_visible = True
 
@@ -94,15 +95,39 @@ class ScreenOverlay:
 
     # --- Panel fijo de gestos ---------------------------------------------------
 
-    def init_legend(self, text, corner="top-right"):
+    def init_legend(self, entries, corner="top-right", title=None):
+        """TASK-060 (Fase 3, design.md §3): `entries` es una lista de
+        (gesture, action, icon_path) - ver `jarvis.legend.build_legend_entries()`.
+        Icono via `tk.PhotoImage(file=...)` (soporte PNG nativo desde Tk 8.6,
+        sin PIL.ImageTk - spec.md #3.1's Must NOT)."""
         self._legend_window = tk.Toplevel(self._root)
         self._legend_window.overrideredirect(True)
         self._legend_window.attributes("-topmost", True)
 
-        tk.Label(
-            self._legend_window, text=text, justify="left", anchor="w",
-            bg=LEGEND_BG, fg=LEGEND_FG, font=("Consolas", 10), padx=14, pady=10,
-        ).pack()
+        container = tk.Frame(self._legend_window, bg=LEGEND_BG)
+        container.pack(padx=14, pady=10)
+
+        row = 0
+        if title:
+            tk.Label(
+                container, text=title, bg=LEGEND_BG, fg=LEGEND_FG,
+                font=("Consolas", 10, "bold"), anchor="w",
+            ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+            row += 1
+
+        # Tk no retiene una referencia propia a PhotoImage - si no la guardamos
+        # aca, el garbage collector de Python las destruye y los iconos
+        # desaparecen del panel poco despues de crearlo.
+        self._legend_icons = []
+        for gesture, action, icon_path in entries:
+            photo = tk.PhotoImage(file=str(icon_path))
+            self._legend_icons.append(photo)
+            tk.Label(container, image=photo, bg=LEGEND_BG).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+            tk.Label(
+                container, text=f"{gesture}  →  {action}", bg=LEGEND_BG, fg=LEGEND_FG,
+                font=("Consolas", 10), anchor="w", justify="left",
+            ).grid(row=row, column=1, sticky="w", pady=2)
+            row += 1
 
         self._legend_window.update_idletasks()
         _make_click_through(self._legend_window)

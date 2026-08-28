@@ -727,10 +727,54 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   and the last-fired gesture name labeled next to the primary hand. New key
   **`l`** toggles it (off by default); reuses the existing `events[-1] if
   events else None` convention the debug HUD already uses for "current
-  gesture." Manually verified: toggles on/off over a real camera feed,
-  doesn't change any gesture-detection behavior (full regression suite green
-  with the toggle both on and off, since the draw call only runs after
-  `GestureEngine.process()` has already produced its result).
+  gesture." Doesn't change any gesture-detection behavior (full regression
+  suite green with the toggle both on and off, since the draw call only runs
+  after `GestureEngine.process()` has already produced its result). **Visual
+  correctness verified by actually rendering it**: a real camera session had
+  no hand in frame during this task (this environment's camera framing), so
+  correctness was confirmed by rendering `draw_hand_overlay()` onto a frame
+  with realistic synthetic 2-hand landmark data (proportioned like a real
+  open hand) and reading the resulting PNG back as an image — skeleton
+  connects correctly end-to-end (thumb/index/middle/ring/pinky + palm base),
+  primary hand renders green with its bounding quadrant and the
+  `PINCH_DOWN` label positioned above it, the other hand renders dim gray
+  with no label, exactly as designed.
+- **Phase 3 (TASK-058/059/060) — procedural reference-icon infrastructure.**
+  New `src/jarvis/gesture_icons.py`: `ICON_SPECS` (declarative — finger
+  extended/curled sets per hand, optional pinch-contact marker, optional
+  small action-glyph badge), `ensure_icon(key) -> Path` (lazy-generate-and-
+  cache under `assets_dir()/gesture_icons/`, same pattern as the MediaPipe
+  model downloads — gitignored, nothing hand-authored committed), and
+  `generate_all_icons()`. Drawn with `PIL.Image`/`PIL.ImageDraw` (new
+  dependency: Pillow, added to `requirements.txt`) — a stylized palm +
+  5-finger skeleton (bold/dark for extended, thin/gray for curled), a red dot
+  marking pinch contact when relevant, and a small geometric action badge
+  (arrow/lock/mute/zoom/camera/keyboard/pause/close — no text, to sidestep
+  the same accented-character font problem `cv2.putText` already has,
+  documented below). Keyboard-only legend entries (no hand involved) get a
+  plain keycap glyph with the literal key letter instead (ASCII only: Q/H/M/
+  +-, no accents needed there). All 17 existing legend entries covered; every
+  icon's raw PNG bytes verified pairwise-distinct (`tests/test_gesture_icons.py`).
+  - `jarvis.legend.ENTRIES` gained a 3rd tuple element (icon key) per entry;
+    new `build_legend_entries()` resolves it through `ensure_icon()`.
+    `build_legend_text()` kept unchanged — verified byte-identical output
+    before/after (`tests/test_legend.py`).
+  - `overlay.ScreenOverlay.init_legend()` signature changed from a single
+    pre-formatted `text` string to `(entries, corner, title=None)`: each
+    entry renders as an icon `Label` + a text `Label` in a grid row, native
+    `tk.PhotoImage(file=...)` (PNG support built into Tk 8.6+) — no
+    `PIL.ImageTk`, per spec.md #3.1's explicit Must NOT. `PhotoImage`
+    instances are kept alive in `self._legend_icons` (Tk does not hold its
+    own reference — without this, Python's GC would collect them and the
+    icons would blank out shortly after the panel is created, a known Tk
+    gotcha). Toggle/opacity/click-through bindings unchanged (`_toggle_legend_visible`/
+    `adjust_legend_alpha`/`_make_click_through` untouched).
+  - **Verified by actually rendering it**, same discipline as the hand
+    overlay above: constructed a real `ScreenOverlay`, called
+    `init_legend(build_legend_entries(), title=TITLE)` for real, screenshotted
+    the live screen region, and read the image back — icons, colors, and text
+    rows all render correctly against the translucent panel background, title
+    at top, exactly as designed.
 
 ## Known limitations
 

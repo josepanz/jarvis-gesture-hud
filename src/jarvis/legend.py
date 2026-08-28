@@ -1,30 +1,43 @@
 """Contenido del listado de gestos — fuente unica, consumida por el overlay nativo
-de escritorio (`overlay.py`). Ya no se dibuja dentro de la ventana de camara."""
+de escritorio (`overlay.py`). Ya no se dibuja dentro de la ventana de camara.
+
+TASK-059 (Fase 3, spec.md #3.3): cada entrada ahora tambien lleva una icon key,
+resuelta via `jarvis.gesture_icons.ensure_icon()` en `build_legend_entries()` -
+`build_legend_text()` se mantiene sin cambios en su salida (solo el unpacking
+de la tupla cambia de 2 a 3 elementos)."""
 
 TITLE = "JARVIS — Gestos"
 
 ENTRIES = [
-    ("Índice movido", "Puntero"),
-    ("Pulgar + Índice (pinch)", "Click / Drag"),
-    ("Pulgar + Medio (pinch)", "Click derecho"),
-    ("Índice + Medio arriba", "Scroll"),
-    ("Pulgar + Anular (pinch)", "Zoom"),
-    ("Palma abierta", "Teclado HUD"),
-    ("Pulgar + Meñique + mover", "Volumen"),
-    ("Pulgar + Anular cerrado", "Captura"),
-    ("Shaka 1.5s (1 mano)", "Bloquear sesión"),
-    ("Palma, pulgar a meñique", "Silenciar voz"),
-    ("2 puños juntos 1.2s", "Pausar / Reanudar"),
-    ("2 manos en Shaka 1.5s", "Cerrar Jarvis"),
-    ("Tecla q", "Salir"),
-    ("Tecla h", "Mostrar/ocultar lista"),
-    ("Tecla m", "Modo espejo on/off"),
-    ("Teclas +/-", "Transparencia"),
+    ("Índice movido", "Puntero", "pointer"),
+    ("Pulgar + Índice (pinch)", "Click / Drag", "pinch_click"),
+    ("Pulgar + Medio (pinch)", "Click derecho", "pinch_right_click"),
+    ("Índice + Medio arriba", "Scroll", "scroll"),
+    ("Pulgar + Anular (pinch)", "Zoom", "pinch_zoom"),
+    ("Palma abierta", "Teclado HUD", "open_palm_keyboard"),
+    ("Pulgar + Meñique + mover", "Volumen", "pinch_volume"),
+    ("Pulgar + Anular cerrado", "Captura", "pinch_screenshot"),
+    ("Shaka 1.5s (1 mano)", "Bloquear sesión", "shaka_lock"),
+    ("Palma, pulgar a meñique", "Silenciar voz", "silence"),
+    ("2 puños juntos 1.2s", "Pausar / Reanudar", "two_fist_pause"),
+    ("2 manos en Shaka 1.5s", "Cerrar Jarvis", "two_shaka_close"),
+    ("Tecla q", "Salir", "key_quit"),
+    ("Tecla h", "Mostrar/ocultar lista", "key_toggle_legend"),
+    ("Tecla m", "Modo espejo on/off", "key_mirror"),
+    ("Teclas +/-", "Transparencia", "key_legend_opacity"),
 ]
 
 
 def build_legend_text():
-    width = max(len(gesture) for gesture, _ in ENTRIES)
+    width = max(len(gesture) for gesture, _, _ in ENTRIES)
     lines = [TITLE, ""]
-    lines += [f"{gesture.ljust(width)}  →  {action}" for gesture, action in ENTRIES]
+    lines += [f"{gesture.ljust(width)}  →  {action}" for gesture, action, _ in ENTRIES]
     return "\n".join(lines)
+
+
+def build_legend_entries():
+    """(gesture, action, icon_path) por cada entrada - spec.md #3.3, consumido
+    por `overlay.ScreenOverlay.init_legend()`."""
+    from jarvis.gesture_icons import ensure_icon
+
+    return [(gesture, action, ensure_icon(icon_key)) for gesture, action, icon_key in ENTRIES]
