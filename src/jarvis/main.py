@@ -181,6 +181,14 @@ NARUTO_DEFAULT_BINDINGS = {
     "NARUTO_SARU": "KEYBOARD_TOGGLE",
     "NARUTO_INU": "VOLUME_DOWN",
     "NARUTO_I": "LOCK_SESSION",
+    # TASK-066 (Fase 5): sellos de 2 manos - mismo mecanismo, mismo camino de
+    # dispatch (_dispatch_naruto_seal ya distingue por prefijo "NARUTO_", sin
+    # importar si el evento vino de 1 o 2 manos).
+    "NARUTO_NE": "ZOOM_OUT",
+    "NARUTO_MI": "SCROLL_DOWN",
+    "NARUTO_TORI": "SCROLL_UP",
+    "NARUTO_KAI": "CLOSE_APP",  # "Release" - calza tematicamente con cerrar la app
+    "NARUTO_TATSU": "VOLUME_UP",
 }
 
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:

@@ -144,6 +144,11 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Naruto seal Saru/Monkey — redefined a 3rd time, real-camera verified (fist, thumb pointing up), held 0.6s | Toggle on-screen keyboard |
 | Naruto seal Inu/Dog — redefined, real-camera verified (pinky extended alone), held 0.6s | Volume down |
 | Naruto seal I/Boar (fist, thumb extended to the side — lateral offset check), held 0.6s | Lock session (`HOLD_REQUIRED` — the hold above already satisfies it) |
+| Naruto seal Ne/Rat — two-hand (hands clasped close, partially folded, pointing up), held 1.2s | Zoom out |
+| Naruto seal Mi/Snake — two-hand (same as Ne, pointing down), held 1.2s | Scroll down |
+| Naruto seal Tori/Bird — two-hand (hands fanned apart, both open), held 1.2s | Scroll up |
+| Naruto seal Kai/Release — two-hand (clasped, index+middle of both hands crossed), held 1.2s | Close Jarvis |
+| Naruto seal Tatsu/Dragon — two-hand (clasped, one fist + one open hand), held 1.2s | Volume up |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
@@ -939,6 +944,83 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
       clean take) — their designs were left unchanged since the underlying
       shapes (index alone; index+middle spread) are anatomically ordinary,
       but they carry the same "not confirmed after this pass" caveat.
+- **Phase 5 (TASK-064/065/066) — two-hand Naruto seals (Ne, Mi, Tori, Kai,
+  Tatsu).** The user provided a reference photo of the real traditional
+  seals (all genuinely two-hand, fine finger-interlacing) and explicitly
+  chose **"real geometry first, simplify only if it fails live"** over
+  starting from a simplified proxy. design.md §5.1 itself already flags
+  that MediaPipe's 21 landmarks per hand can't reliably resolve fine
+  inter-hand finger interlacing (occlusion) and explicitly permits a coarser
+  proxy (hand-center distance + average finger curl + relative orientation)
+  as long as it's documented and the seal stays visually recognizable — that
+  permission is what's implemented here, not an unprompted simplification.
+  - **Collision surface is larger than design.md described**, because it
+    was written before Phase 4 added 8 new single-hand checks: a new
+    two-hand gesture must now avoid colliding with **17** single-hand checks
+    (9 original + 8 Naruto one-hand seals) × 2 hands, plus the **4** existing
+    two-hand-specific checks (`both_shaka`/`both_fists`/`both_pinching`/meta-menu)
+    = 21 conditions total, not the 13 the original document counted.
+  - **New shared primitives** (`gestures.py`): `_segments_cross()` (factored
+    out of the one-hand `_fingers_crossed` fix so it can also compare
+    segments ACROSS the two hands, for Kai), `_curl_ratio()` (fraction of
+    the 4 non-thumb fingers reading extended — the "how folded/interlaced"
+    proxy), `_hand_center()`/`_hands_distance()`, `_hand_points_up()`/`_hand_points_down()`.
+  - **Geometric definitions** (all evaluated inside `_process_two_hand_gestures`,
+    excluded whenever `both_shaka`/`both_fists`/`both_pinching` already
+    matched — hierarchy, not overlap, per the user's own standing principle
+    for this project):
+    - `Kai` — both hands' centers clasped-close AND both hands' index+middle
+      extended AND a real segment-cross between the two hands' index or
+      middle fingers (reuses the same geometric intersection test as the
+      one-hand Hitsuji fix, applied cross-hand). Checked first (most
+      specific).
+    - `Tatsu` — clasped-close AND a large curl-count asymmetry between the
+      two hands (one much more curled than the other — a coarse proxy for
+      "one hand wraps/layers over the other").
+    - `Ne` — clasped-close AND both hands' curl ratio in a "partially
+      folded" middle band (neither a fist nor fully open — the interlacing
+      proxy) AND both hands' average fingertip position above the wrist
+      ("pointing up").
+    - `Mi` — identical to `Ne` except both hands point DOWN instead — the
+      ONLY difference between the two, matching the real seals (design.md
+      §5.1: "distinguish from Ne by orientation... not finger shape alone").
+    - `Tori` — hands at a MEDIUM distance (further apart than the clasped
+      seals, not as far as an unrelated two-hand gesture) AND both hands'
+      curl ratio high (open/spread, not folded) — "fanned open" per the
+      reference photo.
+  - **Same hold-then-confirm + miss-tolerance mechanism as Phase 4**, new
+    dedicated state (`self._twohand_seal_hold_name/_start/_miss_streak`) and
+    a longer `config.NARUTO_TWOHAND_HOLD_SECONDS=1.2` (matches the existing
+    `PAUSE_HOLD_SECONDS` two-hand precedent — longer than the one-hand
+    seals' 0.6s, since a two-hand pose is more complex/error-prone to hold
+    by accident).
+  - **Verified against the real `GestureEngine`** (synthetic fixtures, same
+    discipline as every seal in this project): each of the 5 fixtures fires
+    exactly its own `NARUTO_<NAME>` event and nothing else; none of the
+    existing two-hand fixtures (`both_fists`/`both_shaka`/meta-menu) leak a
+    seal event, and none of the 5 new fixtures leak an existing two-hand
+    event (`tests/test_gesture_engine_regression.py::NarutoTwoHandSealTests`).
+  - **Dispatch/icons/legend**, same TASK-063 mechanism reused as-is
+    (`_dispatch_naruto_seal` already dispatches by the `NARUTO_` prefix
+    regardless of 1- or 2-hand origin — no new dispatch code needed).
+    Defaults: Ne→ZoomOut, Mi→ScrollDown, Tori→ScrollUp, Kai→CloseApp
+    ("Release" — a deliberate thematic fit), Tatsu→VolumeUp. 5 new
+    `hands: 2` icons (Phase 3 infra already supported this), all pairwise
+    byte-distinct from the existing 25.
+  - **Honest limitation, explicitly not yet closed:** unlike Phase 4, **none
+    of these 5 seals have been verified against a real hand on camera yet**
+    — this pass ends at synthetic-fixture verification, by the user's own
+    explicit choice ("saltamos a la fase 5, luego realizaremos la prueba
+    integral nuevamente" — skip to Phase 5, do the real-camera pass together
+    afterward). All 5 geometric thresholds
+    (`NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION=0.20`,
+    `NARUTO_TWOHAND_FAN_MIN/MAX_DISTANCE_FRACTION=0.20/0.42`, the 0.2–0.8
+    curl-ratio "interlaced" band, the 0.75 "open" threshold for Tori, the
+    ≥2 curl-count asymmetry for Tatsu) are REASONED, not measured — given
+    Phase 4's experience (7 of 8 one-hand seals needed real correction
+    despite passing synthetic verification first), these should be treated
+    as a first draft pending the same live-camera correction cycle, not a
+    finished result.
 
 ## Known limitations
 

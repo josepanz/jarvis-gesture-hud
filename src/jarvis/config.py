@@ -48,6 +48,15 @@ NARUTO_SEAL_HOLD_SECONDS = 0.6  # TASK-062: mismo orden que META_HOLD_SECONDS - 
 # progreso" en vez de "no confirmar de mas".
 NARUTO_SEAL_MISS_TOLERANCE = 3  # frames seguidos sin match tolerados antes de reiniciar el hold
 
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos - umbrales RAZONADOS, no
+# medidos en camara real todavia (a diferencia de los de Fase 4, que fueron
+# recalibrados con datos reales despues de fallar en vivo). Pendiente de
+# verificacion real, ver ARCHITECTURE.md.
+NARUTO_TWOHAND_HOLD_SECONDS = 1.2  # igual que PAUSE_HOLD_SECONDS - un gesto de 2 manos mas complejo
+NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION = 0.20  # manos "juntas/pegadas" (Ne/Mi/Kai/Tatsu)
+NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION = 0.20  # manos "en abanico" (Tori), mas separadas que el clasp
+NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
+
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
 

@@ -70,9 +70,24 @@ def _fingers_extended(pts, *tips):
     return all(pts[t].y < pts[t - 2].y for t in tips)
 
 
+def _orientation(a, b, c):
+    return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y)
+
+
+def _segments_cross(p1, p2, p3, p4):
+    """True si el segmento p1->p2 cruza geometricamente al segmento p3->p4
+    (interseccion real, por orientacion/producto cruzado) - no solo si algun
+    par de puntos quedo en un orden lateral distinto al esperado."""
+    d1 = _orientation(p3, p4, p1)
+    d2 = _orientation(p3, p4, p2)
+    d3 = _orientation(p1, p2, p3)
+    d4 = _orientation(p1, p2, p4)
+    return (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0)
+
+
 def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
     """True si el segmento MCP->punta de un dedo cruza geometricamente al del
-    otro (interseccion real de segmentos, por orientacion/producto cruzado).
+    otro, DENTRO de una misma mano.
 
     Reemplaza una v1 que solo comparaba el ORDEN lateral de las 2 puntas
     contra el orden de los MCP - verificado en camara real (2026-08-27) que
@@ -83,16 +98,7 @@ def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
     entre si - una condicion mucho mas especifica de un cruce real - medida
     en la misma sesion contra un intento genuino de Hitsuji: subio la
     confiabilidad de ~63% a un rango utilizable para sostener el hold."""
-
-    def _orientation(a, b, c):
-        return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y)
-
-    p1, p2, p3, p4 = pts[mcp_a], pts[tip_a], pts[mcp_b], pts[tip_b]
-    d1 = _orientation(p3, p4, p1)
-    d2 = _orientation(p3, p4, p2)
-    d3 = _orientation(p1, p2, p3)
-    d4 = _orientation(p1, p2, p4)
-    return (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0)
+    return _segments_cross(pts[mcp_a], pts[tip_a], pts[mcp_b], pts[tip_b])
 
 
 def _index_middle_extended_ring_pinky_curled(pts):
@@ -192,6 +198,44 @@ def _is_naruto_i(pts):
     return abs(dx) > 0.15 and abs(dx) > dy
 
 
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos. design.md §5.1 advierte
+# que el entrelazado fino de dedos entre 2 manos NO es detectable de forma
+# confiable con los 21 puntos de MediaPipe (oclusion entre manos) y permite
+# explicitamente usar un proxy mas grueso (§5.1: "both hands' centers within
+# X distance, both hands' average finger curl above/below a threshold,
+# relative hand orientation") - eso es lo que se usa aca, no un intento de
+# replicar el entrelazado real punto por punto. Pendiente de verificar en
+# camara real (a diferencia de la Fase 4, donde la primera version fallo en
+# vivo la mayoria de las veces) - los umbrales son razonados, no medidos.
+def _curl_ratio(pts):
+    """Fraccion de los 4 dedos (no el pulgar) que leen como extendidos -
+    0.0 = puño, 1.0 = mano abierta, valores intermedios = proxy de "a medio
+    doblar/entrelazado"."""
+    return _extended_finger_count(pts) / 4.0
+
+
+def _hand_center(pts, w, h):
+    xs = [p.x for p in pts]
+    ys = [p.y for p in pts]
+    return (sum(xs) / len(xs)) * w, (sum(ys) / len(ys)) * h
+
+
+def _hands_distance(p1, p2, w, h):
+    c1x, c1y = _hand_center(p1, w, h)
+    c2x, c2y = _hand_center(p2, w, h)
+    return math.hypot(c2x - c1x, c2y - c1y)
+
+
+def _hand_points_up(pts):
+    avg_tip_y = sum(pts[t].y for t in (8, 12, 16, 20)) / 4
+    return avg_tip_y < pts[0].y - 0.05
+
+
+def _hand_points_down(pts):
+    avg_tip_y = sum(pts[t].y for t in (8, 12, 16, 20)) / 4
+    return avg_tip_y > pts[0].y + 0.05
+
+
 def _bbox_area_fraction(landmarks, w, h):
     xs = [p.x for p in landmarks]
     ys = [p.y for p in landmarks]
@@ -271,6 +315,10 @@ class GestureEngine:
         self._naruto_hold_start = None
         self._naruto_miss_streak = 0  # frames seguidos sin match mientras se sostenia un sello
 
+        self._twohand_seal_hold_name = None  # TASK-064/065: sello de 2 manos sostenido ahora (o None)
+        self._twohand_seal_hold_start = None
+        self._twohand_seal_miss_streak = 0
+
     @staticmethod
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
@@ -326,6 +374,9 @@ class GestureEngine:
             self.meta_pose = None
             self.meta_hold_start = None
             self.meta_consumed = False
+            self._twohand_seal_hold_name = None
+            self._twohand_seal_hold_start = None
+            self._twohand_seal_miss_streak = 0
             return events, False, False, False
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
@@ -394,7 +445,61 @@ class GestureEngine:
             self.meta_hold_start = None
             self.meta_consumed = False
 
-        two_hand_active = both_shaka or both_fists or both_pinching or (fists[0] != fists[1])
+        # TASK-064/065 (Fase 5): sellos Naruto de 2 manos. Excluidos si ya es
+        # otro gesto de 2 manos conocido (shaka/puños/pinch) - jerarquia, no
+        # solapamiento. Orden de chequeo: Kai (mas especifico, exige cruce
+        # real de dedos) -> Tatsu (asimetria de curvatura) -> Ne/Mi (mismo
+        # "entrelazado" proxy, distinguidos por orientacion) -> Tori
+        # (separadas y mas abiertas).
+        _twohand_seal = None
+        if not both_shaka and not both_fists and not both_pinching:
+            dist_frac = _hands_distance(p1, p2, w, h) / math.hypot(w, h)
+            ratio1, ratio2 = _curl_ratio(p1), _curl_ratio(p2)
+            clasped = dist_frac <= config.NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION
+            fanned = (
+                config.NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION
+                < dist_frac
+                <= config.NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION
+            )
+            interlaced = 0.2 <= ratio1 <= 0.8 and 0.2 <= ratio2 <= 0.8
+            asymmetric = abs(_extended_finger_count(p1) - _extended_finger_count(p2)) >= 2
+            kai_crossed = (
+                _fingers_extended(p1, 8, 12)
+                and _fingers_extended(p2, 8, 12)
+                and (_segments_cross(p1[5], p1[8], p2[5], p2[8]) or _segments_cross(p1[9], p1[12], p2[9], p2[12]))
+            )
+
+            if clasped and kai_crossed:
+                _twohand_seal = "KAI"
+            elif clasped and asymmetric:
+                _twohand_seal = "TATSU"
+            elif clasped and interlaced and _hand_points_up(p1) and _hand_points_up(p2):
+                _twohand_seal = "NE"
+            elif clasped and interlaced and _hand_points_down(p1) and _hand_points_down(p2):
+                _twohand_seal = "MI"
+            elif fanned and ratio1 >= 0.75 and ratio2 >= 0.75:
+                _twohand_seal = "TORI"
+
+        if _twohand_seal is not None:
+            if self._twohand_seal_hold_name != _twohand_seal:
+                self._twohand_seal_hold_name = _twohand_seal
+                self._twohand_seal_hold_start = now
+            elif self._twohand_seal_hold_start is None:
+                self._twohand_seal_hold_start = now
+            elif now - self._twohand_seal_hold_start > config.NARUTO_TWOHAND_HOLD_SECONDS:
+                events.append(f"NARUTO_{_twohand_seal}")
+                self._twohand_seal_hold_start = None
+            self._twohand_seal_miss_streak = 0
+        elif self._twohand_seal_hold_name is not None:
+            self._twohand_seal_miss_streak += 1
+            if self._twohand_seal_miss_streak > config.NARUTO_SEAL_MISS_TOLERANCE:
+                self._twohand_seal_hold_name = None
+                self._twohand_seal_hold_start = None
+                self._twohand_seal_miss_streak = 0
+
+        two_hand_active = (
+            both_shaka or both_fists or both_pinching or (fists[0] != fists[1]) or _twohand_seal is not None
+        )
         return events, both_pinching, both_shaka, two_hand_active
 
     def process(self, hands, w, h, screen_w, screen_h):

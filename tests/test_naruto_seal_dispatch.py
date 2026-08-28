@@ -57,6 +57,12 @@ class DefaultBindingTests(_AppTestCase):
         self.app._dispatch_naruto_seal("NARUTO_TORA")  # default: SCREENSHOT
         self.assertTrue(self.mock_os.take_screenshot.called)
 
+    def test_twohand_seal_default_binding_dispatches_the_right_command(self):
+        # TASK-066 (Fase 5): mismo _dispatch_naruto_seal, sin importar si el
+        # evento vino de 1 o 2 manos (distingue solo por el prefijo NARUTO_).
+        self.app._dispatch_naruto_seal("NARUTO_KAI")  # default: CLOSE_APP
+        self.assertTrue(self.app.should_quit)
+
     def test_every_default_binding_is_a_known_dispatchable_action(self):
         # Cada valor de NARUTO_DEFAULT_BINDINGS tiene que ser algo que
         # _dispatch_voice_action realmente sepa manejar - si no, el binding

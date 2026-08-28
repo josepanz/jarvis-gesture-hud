@@ -36,6 +36,13 @@ ENTRIES = [
     ("Sello Saru (puño, pulgar arriba)", "Teclado HUD", "naruto_saru"),
     ("Sello Inu (solo meñique)", "Volumen -", "naruto_inu"),
     ("Sello I (puño, pulgar al costado)", "Bloquear sesión", "naruto_i"),
+    # TASK-066 (Fase 5): sellos Naruto de 2 manos, sostenidos
+    # config.NARUTO_TWOHAND_HOLD_SECONDS.
+    ("Sello Ne (manos juntas, hacia arriba)", "Zoom -", "naruto_ne"),
+    ("Sello Mi (manos juntas, hacia abajo)", "Scroll abajo", "naruto_mi"),
+    ("Sello Tori (manos en abanico)", "Scroll arriba", "naruto_tori"),
+    ("Sello Kai (manos juntas, dedos cruzados)", "Cerrar Jarvis", "naruto_kai"),
+    ("Sello Tatsu (1 puño + 1 mano abierta)", "Volumen +", "naruto_tatsu"),
 ]
 
 

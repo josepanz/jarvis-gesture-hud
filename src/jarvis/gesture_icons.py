@@ -103,6 +103,29 @@ ICON_SPECS = {
     "naruto_saru": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "keyboard"},
     "naruto_inu": {"hands": 1, "extended": {"pinky"}, "pinch": None, "glyph": None},
     "naruto_i": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "lock"},
+    # TASK-066 (Fase 5): sellos de 2 manos - proxy grueso (design.md §5.1),
+    # el modelo de icono no representa distancia entre manos ni orientacion
+    # real, asi que Ne/Mi se distinguen solo por el glyph.
+    "naruto_ne": {"hands": 2, "extended": ({"index", "middle"}, {"index", "middle"}), "pinch": None, "glyph": None},
+    "naruto_mi": {
+        "hands": 2,
+        "extended": ({"index", "middle"}, {"index", "middle"}),
+        "pinch": None,
+        "glyph": "arrow_up_down",
+    },
+    "naruto_tori": {
+        "hands": 2,
+        "extended": ({"index", "middle", "ring", "pinky"}, {"index", "middle", "ring", "pinky"}),
+        "pinch": None,
+        "glyph": None,
+    },
+    "naruto_kai": {"hands": 2, "extended": ({"index", "middle"}, {"index", "middle"}), "pinch": None, "glyph": "close"},
+    "naruto_tatsu": {
+        "hands": 2,
+        "extended": (set(), {"index", "middle", "ring", "pinky"}),
+        "pinch": None,
+        "glyph": None,
+    },
 }
 
 

@@ -1040,5 +1040,174 @@ class NarutoOneHandSealTests(unittest.TestCase):
                     )
 
 
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos. design.md §5.1 permite
+# explicitamente un proxy grueso (distancia entre centros + curvatura
+# promedio + orientacion) en vez de intentar el entrelazado fino de dedos,
+# que MediaPipe no puede ver de forma confiable entre 2 manos. Cada fixture
+# fue verificado contra el GestureEngine real antes de aceptarse aca, igual
+# que los de 1 mano - dispara UNICAMENTE su propio NARUTO_<NOMBRE>, y ningun
+# fixture de 2 manos existente (both_fists/both_shaka/meta-menu) dispara
+# ninguno de estos. Umbrales de config.py RAZONADOS, no medidos en camara
+# real todavia (pendiente, ver ARCHITECTURE.md).
+def ne_hand(cx=0.48, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)  # muñeca abajo -> la mano "apunta" hacia arriba
+    pts[8] = Landmark(cx - 0.02, cy - 0.15, 0)
+    pts[6] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[12] = Landmark(cx + 0.02, cy - 0.15, 0)
+    pts[10] = Landmark(cx + 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.04, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.06, cy, 0)
+    pts[2] = Landmark(cx - 0.05, cy, 0)
+    return pts
+
+
+def mi_hand(cx=0.48, cy=0.5):
+    # Mismo "entrelazado" que Ne (2 de 4 dedos extendidos) - solo cambia la
+    # muñeca, para que la mano "apunte" hacia abajo en vez de hacia arriba.
+    pts = list(ne_hand(cx, cy))
+    pts[0] = Landmark(cx, cy - 0.2, 0)
+    return pts
+
+
+def tori_hand(cx, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy - 0.15, 0)
+        pts[pip] = Landmark(cx, cy - 0.03, 0)
+    pts[4] = Landmark(cx - 0.1, cy, 0)
+    pts[2] = Landmark(cx - 0.08, cy, 0)
+    return pts
+
+
+def kai_hand_1(cx=0.46, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx - 0.02, cy, 0)
+    pts[9] = Landmark(cx + 0.01, cy, 0)
+    pts[8] = Landmark(cx + 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 2
+    pts[6] = Landmark(cx, cy - 0.05, 0)
+    pts[12] = Landmark(cx + 0.12, cy - 0.18, 0)
+    pts[10] = Landmark(cx + 0.01, cy - 0.05, 0)
+    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.04, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy, 0)
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def kai_hand_2(cx=0.54, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx + 0.02, cy, 0)
+    pts[9] = Landmark(cx - 0.01, cy, 0)
+    pts[8] = Landmark(cx - 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 1
+    pts[6] = Landmark(cx, cy - 0.05, 0)
+    pts[12] = Landmark(cx - 0.12, cy - 0.18, 0)
+    pts[10] = Landmark(cx - 0.01, cy - 0.05, 0)
+    pts[16] = Landmark(cx - 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx - 0.04, cy, 0)
+    pts[20] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx - 0.06, cy, 0)
+    pts[4] = Landmark(cx + 0.08, cy, 0)
+    pts[2] = Landmark(cx + 0.07, cy, 0)
+    return pts
+
+
+def tatsu_hand_1(cx=0.48, cy=0.5):
+    # Una mano bien cerrada (puño)...
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy + 0.05, 0)
+        pts[pip] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy, 0)
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def tatsu_hand_2(cx=0.52, cy=0.5):
+    # ...la otra bien abierta - la asimetria de curvatura es la señal de Tatsu.
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy - 0.15, 0)
+        pts[pip] = Landmark(cx, cy - 0.03, 0)
+    pts[4] = Landmark(cx + 0.08, cy, 0)
+    pts[2] = Landmark(cx + 0.07, cy, 0)
+    return pts
+
+
+TWOHAND_SEAL_FIXTURES = {
+    "NE": (ne_hand, ne_hand),
+    "MI": (mi_hand, mi_hand),
+    "TORI": (lambda: tori_hand(0.35), lambda: tori_hand(0.65)),
+    "KAI": (kai_hand_1, kai_hand_2),
+    "TATSU": (tatsu_hand_1, tatsu_hand_2),
+}
+
+
+def hold_twohand_seal(engine, p1, p2):
+    hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+    engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+    engine._twohand_seal_hold_start = time.time() - 2.0
+    return engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+
+
+class NarutoTwoHandSealTests(unittest.TestCase):
+    def test_each_seal_fires_only_its_own_event_after_the_hold(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                _, _, events = hold_twohand_seal(engine, fn1(), fn2())
+                self.assertEqual(events, [f"NARUTO_{name}"])
+
+    def test_no_seal_fires_before_the_hold_completes(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertEqual(events, [])
+
+    def test_existing_two_hand_fixtures_do_not_leak_a_naruto_twohand_event(self):
+        existing_pairs = {
+            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
+            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
+            "meta_menu": (fist_hand(0.3, 0.5), open_hand_n_fingers(1, 0.7, 0.5)),
+        }
+        for name, (p1, p2) in existing_pairs.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("NARUTO_")],
+                    f"{name} unexpectedly produced a NARUTO_* two-hand event: {events}",
+                )
+
+    def test_no_twohand_seal_fixture_triggers_an_existing_two_hand_event(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine.pause_hold_start = time.time() - 2.0
+                engine.close_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if not e.startswith("NARUTO_")],
+                    f"{name} unexpectedly produced a non-Naruto event: {events}",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
