@@ -62,6 +62,81 @@ def _extended_finger_count(pts):
     return sum(1 for i in (8, 12, 16, 20) if pts[i].y < pts[i - 2].y)
 
 
+def _fingers_curled(pts, *tips):
+    return all(pts[t].y > pts[t - 2].y for t in tips)
+
+
+def _fingers_extended(pts, *tips):
+    return all(pts[t].y < pts[t - 2].y for t in tips)
+
+
+def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
+    """True si el orden lateral de 2 puntas se invirtio respecto al orden de
+    sus nudillos (MCP) - un cruce real de dedos, no solo "cerca uno del otro"."""
+    natural_order = pts[mcp_a].x < pts[mcp_b].x
+    current_order = pts[tip_a].x < pts[tip_b].x
+    return natural_order != current_order
+
+
+def _index_middle_extended_ring_pinky_curled(pts):
+    return _fingers_extended(pts, 8, 12) and _fingers_curled(pts, 16, 20)
+
+
+# TASK-061/062 (Fase 4, `openspec/changes/personalization-and-config-ui`,
+# design.md §4.1/§4.2): sellos Naruto de 1 mano. Censo de colision completo -
+# incluyendo las 2 redefiniciones explicitas (Uma, Saru) - documentado en
+# ARCHITECTURE.md. Tora/U/Hitsuji comparten la forma base "indice+medio
+# extendidos, anular+menique recogidos" (identica a SCROLL) - se distinguen
+# entre si y de SCROLL en `process()`, donde ya estan disponibles las
+# distancias precalculadas (d_thumb_index, distancia indice-medio) y el
+# chequeo de cruce de dedos; el resto de los sellos son formas propias sin
+# ambiguedad, verificadas pura y unicamente por curvatura de dedos.
+def _is_naruto_ushi(pts):
+    # Ox: solo el indice extendido, pulgar recogido junto a los dedos (no
+    # separado como en SCROLL - el pointer continuo tampoco es un chequeo
+    # discreto, asi que no hay colision posible ahi, per design.md §4.1).
+    return _fingers_extended(pts, 8) and _fingers_curled(pts, 12, 16, 20) and pts[4].y > pts[2].y
+
+
+def _is_naruto_uma(pts):
+    # Horse - REDEFINIDO: la definicion original de design.md ("las 5
+    # extendidas y parejas") colisiona EXACTAMENTE con KEYBOARD_TOGGLE (mano
+    # abierta, pulgar separado) - mismo significado ya existente, no se puede
+    # reusar sin violar apply.md §15 ("nunca cambiar en silencio el
+    # significado de un gesto existente"). Redefinido a: indice+medio+anular
+    # extendidos, menique recogido, pulgar extendido hacia el costado.
+    return _fingers_extended(pts, 8, 12, 16) and _fingers_curled(pts, 20) and pts[4].y < pts[2].y
+
+
+def _is_naruto_saru(pts):
+    # Monkey - REDEFINIDO (flag explicito en design.md §4.1): la definicion
+    # original ("pulgar+menique extendidos, resto recogido") ES exactamente
+    # la forma de `_is_shaka` - no se puede reusar sin cambiar en silencio el
+    # significado de un gesto existente (apply.md §15). Redefinido a:
+    # pulgar+anular extendidos, indice/medio/menique recogidos.
+    return _fingers_extended(pts, 16) and _fingers_curled(pts, 8, 12, 20) and pts[4].y < pts[2].y
+
+
+def _is_naruto_inu(pts):
+    # Dog: anular+menique extendidos, indice/medio recogidos, pulgar
+    # recogido (apoyado sobre los dedos curvados).
+    return _fingers_extended(pts, 16, 20) and _fingers_curled(pts, 8, 12) and pts[4].y > pts[2].y
+
+
+def _is_naruto_i(pts):
+    # Boar: puño cerrado con el pulgar extendido hacia el costado (no
+    # recogido como un puño comun).
+    # LIMITACION documentada (censo de colision, ver ARCHITECTURE.md):
+    # `_is_fist()` no chequea el pulgar, asi que esta forma TAMBIEN cuenta
+    # como puño para la logica de 2 manos (fists[0] != fists[1]). Con las 2
+    # manos en cuadro y la otra mano NO siendo un puño, arma el menu meta en
+    # modo "ancla" de fondo - no dispara ninguna accion por si sola, necesita
+    # ademas 1-4 dedos sostenidos en la otra mano. No es una ejecucion
+    # silenciosa de una accion equivocada, solo una interaccion de fondo
+    # aceptada y documentada explicitamente.
+    return _fingers_curled(pts, 8, 12, 16, 20) and pts[4].y < pts[2].y
+
+
 def _bbox_area_fraction(landmarks, w, h):
     xs = [p.x for p in landmarks]
     ys = [p.y for p in landmarks]
@@ -136,6 +211,9 @@ class GestureEngine:
 
         self._primary_pos = None  # (x, y) normalizado del indice de la ultima mano "activa"
         self.last_primary_landmarks = None  # TASK-057: para que hand_visualizer distinga mano primaria
+
+        self._naruto_hold_seal = None  # TASK-062: que sello se esta sosteniendo ahora (o None)
+        self._naruto_hold_start = None
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -402,6 +480,52 @@ class GestureEngine:
             self.prev_scroll_y = index.y
         else:
             self.prev_scroll_y = None
+
+        # TASK-062 (Fase 4): sellos Naruto de 1 mano. Todos exigen ningun
+        # pinch activo (pinch_winner is None - asi cualquier forma que
+        # accidentalmente quede lo bastante cerca de un dedo como para
+        # pellizcar pierde contra el pinch, nunca dispara ambos) y that no
+        # haya un gesto de 2 manos en curso - ver censo de colision completo
+        # en ARCHITECTURE.md.
+        _naruto_gate = pinch_winner is None and not two_hand_active
+        _naruto_seal = None
+        if _naruto_gate:
+            if _index_middle_extended_ring_pinky_curled(pts):
+                # Tora/U/Hitsuji comparten esta base (identica a SCROLL) -
+                # se distinguen por cruce de dedos, separacion indice-medio,
+                # y posicion del pulgar (igual o menor a 40px = "junto a la
+                # mano", el complemento exacto del ">40" que ya exige SCROLL
+                # - sin tocar la condicion de SCROLL en absoluto).
+                d_index_middle = self._dist3(index, middle, w, h)
+                crossed = _fingers_crossed(pts, 8, 5, 12, 9)
+                if d_thumb_index <= 40:
+                    if crossed:
+                        _naruto_seal = "HITSUJI"
+                    elif d_index_middle < 30:
+                        _naruto_seal = "TORA"
+                    elif d_index_middle > 50:
+                        _naruto_seal = "U"
+            elif _is_naruto_ushi(pts):
+                _naruto_seal = "USHI"
+            elif _is_naruto_uma(pts):
+                _naruto_seal = "UMA"
+            elif _is_naruto_saru(pts):
+                _naruto_seal = "SARU"
+            elif _is_naruto_inu(pts):
+                _naruto_seal = "INU"
+            elif _is_naruto_i(pts):
+                _naruto_seal = "I"
+
+        if _naruto_seal is not None:
+            if self._naruto_hold_seal != _naruto_seal or self._naruto_hold_start is None:
+                self._naruto_hold_seal = _naruto_seal
+                self._naruto_hold_start = now
+            elif now - self._naruto_hold_start > config.NARUTO_SEAL_HOLD_SECONDS:
+                events.append(f"NARUTO_{_naruto_seal}")
+                self._naruto_hold_start = None
+        else:
+            self._naruto_hold_seal = None
+            self._naruto_hold_start = None
 
         # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click

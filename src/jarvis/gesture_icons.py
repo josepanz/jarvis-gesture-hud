@@ -83,6 +83,20 @@ ICON_SPECS = {
     "key_toggle_legend": {"hands": 0, "key_label": "H"},
     "key_mirror": {"hands": 0, "key_label": "M"},
     "key_legend_opacity": {"hands": 0, "key_label": "+/-"},
+    # TASK-063 (Fase 4): un icono por sello Naruto de 1 mano - spec.md #3.4.
+    "naruto_tora": {"hands": 1, "extended": {"index", "middle"}, "pinch": ("index", "middle"), "glyph": "camera"},
+    "naruto_ushi": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "pause"},
+    "naruto_u": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": None},
+    "naruto_uma": {
+        "hands": 1,
+        "extended": {"thumb", "index", "middle", "ring"},
+        "pinch": None,
+        "glyph": "zoom",
+    },
+    "naruto_hitsuji": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": "close"},
+    "naruto_saru": {"hands": 1, "extended": {"thumb", "ring"}, "pinch": None, "glyph": "keyboard"},
+    "naruto_inu": {"hands": 1, "extended": {"ring", "pinky"}, "pinch": None, "glyph": None},
+    "naruto_i": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "lock"},
 }
 
 

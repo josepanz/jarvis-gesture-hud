@@ -9,32 +9,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jarvis.gesture_icons import ICON_SPECS  # noqa: E402
 from jarvis.legend import ENTRIES, build_legend_entries, build_legend_text  # noqa: E402
 
-# Snapshot tomado ANTES de TASK-059 (ver reporte de la task) - build_legend_text()
-# no debe cambiar ni un caracter al agregar la icon key a cada entrada.
+# Snapshot actualizado en TASK-063 (Fase 4) para incluir los 8 sellos Naruto
+# de 1 mano - las 16 lineas originales (TASK-059) no cambiaron ni un
+# caracter en su texto, solo el padding (ljust) crecio porque una de las
+# lineas nuevas es mas larga que "Pulgar + Meñique + mover" (la mas larga
+# anterior).
 _EXPECTED_TEXT = (
     "JARVIS — Gestos\n"
     "\n"
-    "Índice movido             →  Puntero\n"
-    "Pulgar + Índice (pinch)   →  Click / Drag\n"
-    "Pulgar + Medio (pinch)    →  Click derecho\n"
-    "Índice + Medio arriba     →  Scroll\n"
-    "Pulgar + Anular (pinch)   →  Zoom\n"
-    "Palma abierta             →  Teclado HUD\n"
-    "Pulgar + Meñique + mover  →  Volumen\n"
-    "Pulgar + Anular cerrado   →  Captura\n"
-    "Shaka 1.5s (1 mano)       →  Bloquear sesión\n"
-    "Palma, pulgar a meñique   →  Silenciar voz\n"
-    "2 puños juntos 1.2s       →  Pausar / Reanudar\n"
-    "2 manos en Shaka 1.5s     →  Cerrar Jarvis\n"
-    "Tecla q                   →  Salir\n"
-    "Tecla h                   →  Mostrar/ocultar lista\n"
-    "Tecla m                   →  Modo espejo on/off\n"
-    "Teclas +/-                →  Transparencia"
+    "Índice movido                          →  Puntero\n"
+    "Pulgar + Índice (pinch)                →  Click / Drag\n"
+    "Pulgar + Medio (pinch)                 →  Click derecho\n"
+    "Índice + Medio arriba                  →  Scroll\n"
+    "Pulgar + Anular (pinch)                →  Zoom\n"
+    "Palma abierta                          →  Teclado HUD\n"
+    "Pulgar + Meñique + mover               →  Volumen\n"
+    "Pulgar + Anular cerrado                →  Captura\n"
+    "Shaka 1.5s (1 mano)                    →  Bloquear sesión\n"
+    "Palma, pulgar a meñique                →  Silenciar voz\n"
+    "2 puños juntos 1.2s                    →  Pausar / Reanudar\n"
+    "2 manos en Shaka 1.5s                  →  Cerrar Jarvis\n"
+    "Tecla q                                →  Salir\n"
+    "Tecla h                                →  Mostrar/ocultar lista\n"
+    "Tecla m                                →  Modo espejo on/off\n"
+    "Teclas +/-                             →  Transparencia\n"
+    "Sello Tora (índice+medio)              →  Captura\n"
+    "Sello Ushi (índice)                    →  Deshacer\n"
+    "Sello U (índice+medio separados)       →  Rehacer\n"
+    "Sello Uma (índice+medio+anular)        →  Zoom +\n"
+    "Sello Hitsuji (índice+medio cruzados)  →  Silenciar sistema\n"
+    "Sello Saru (pulgar+anular)             →  Teclado HUD\n"
+    "Sello Inu (anular+meñique)             →  Volumen -\n"
+    "Sello I (puño, pulgar afuera)          →  Bloquear sesión"
 )
 
 
 class BuildLegendTextTests(unittest.TestCase):
-    def test_output_is_byte_identical_to_before_task_059(self):
+    def test_output_matches_current_entries(self):
         self.assertEqual(build_legend_text(), _EXPECTED_TEXT)
 
 

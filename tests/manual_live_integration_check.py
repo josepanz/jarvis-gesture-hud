@@ -126,10 +126,31 @@ def main():
                 app._handle_voice_result(("text", "hazme el favor de silenciar todo", 0.95))
                 assert mock_os.volume_mute.called, "LLM-resolved MUTE should dispatch MuteCommand"
 
+            # --- TASK-063 (Fase 4): un sello Naruto de 1 mano, de punta a
+            # punta - deteccion real (GestureEngine + hold) -> dispatch real
+            # (binding por default) -> Command real.
+            import test_gesture_engine_regression as regr
+
+            pts = regr.naruto_i_hand()  # default: NARUTO_I -> LOCK_SESSION
+            hands = [regr.Hand(pts, "Right")]
+            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
+            for event in events:
+                if event.startswith("NARUTO_"):
+                    app._dispatch_naruto_seal(event)
+            assert not mock_os.lock_session.called, "no debe disparar antes de cumplirse el hold"
+
+            app.gestures._naruto_hold_start = time.time() - 1.0
+            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
+            assert "NARUTO_I" in events
+            for event in events:
+                if event.startswith("NARUTO_"):
+                    app._dispatch_naruto_seal(event)
+            assert mock_os.lock_session.called, "NARUTO_I deberia disparar LockSession (binding por default)"
+
             time.sleep(0.2)
             print(
                 "LIVE INTEGRATION OK: telemetry, history, undo/redo, profiles, debug HUD, "
-                "context, voice dispatch all verified"
+                "context, voice dispatch, Naruto seal dispatch all verified"
             )
         finally:
             app.overlay.close()

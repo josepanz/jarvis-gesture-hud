@@ -163,6 +163,26 @@ _MIGRATED_GESTURES = frozenset(
     }
 )
 
+# TASK-063 (Fase 4, design.md §4.3): binding por default de cada sello Naruto
+# de 1 mano a una accion del vocabulario fijo que `_dispatch_voice_action` ya
+# entiende (mismo camino que usa la voz) - `ProfileManager.get_gesture_binding()`
+# ya resuelve "override del perfil activo > este default > None" (TASK-024,
+# reusado tal cual, sin tocarlo). NARUTO_I -> LOCK_SESSION es intencional:
+# LOCK_SESSION es HOLD_REQUIRED, y el propio sello ya exige
+# config.NARUTO_SEAL_HOLD_SECONDS sostenido en GestureEngine antes de emitir
+# el evento - el binding nunca puede saltarse ese requisito porque el evento
+# mismo no existe hasta que el hold ya se cumplio.
+NARUTO_DEFAULT_BINDINGS = {
+    "NARUTO_TORA": "SCREENSHOT",
+    "NARUTO_USHI": "UNDO",
+    "NARUTO_U": "REDO",
+    "NARUTO_UMA": "ZOOM_IN",
+    "NARUTO_HITSUJI": "MUTE",
+    "NARUTO_SARU": "KEYBOARD_TOGGLE",
+    "NARUTO_INU": "VOLUME_DOWN",
+    "NARUTO_I": "LOCK_SESSION",
+}
+
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:
 # MouseMove dispara ~30-60 veces por segundo).
 _CONTINUOUS_COMMANDS = frozenset({"MouseMove"})
@@ -455,6 +475,16 @@ class JarvisApp:
         elif action_name in _MIGRATED_GESTURES:
             self._dispatch_migrated(action_name, None)
 
+    def _dispatch_naruto_seal(self, event):
+        """TASK-063 (Fase 4): resuelve el binding (override del perfil activo
+        > NARUTO_DEFAULT_BINDINGS > None, via ProfileManager.get_gesture_binding()
+        ya existente) y reusa _dispatch_voice_action - mismo camino que la voz,
+        mismo feedback. Un sello sin binding (ni de perfil ni default) es un
+        no-op seguro, no un error."""
+        action_name = self.profiles.get_gesture_binding(event, global_bindings=NARUTO_DEFAULT_BINDINGS)
+        if action_name is not None:
+            self._dispatch_voice_action(action_name)
+
     def _handle_key(self, key):
         if key == ord("q"):
             self.should_quit = True
@@ -510,7 +540,10 @@ class JarvisApp:
             self._last_screen_xy = screen_xy
 
             for event in events:
-                self._dispatch(event, cam_xy, screen_xy)
+                if event.startswith("NARUTO_"):
+                    self._dispatch_naruto_seal(event)
+                else:
+                    self._dispatch(event, cam_xy, screen_xy)
 
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)

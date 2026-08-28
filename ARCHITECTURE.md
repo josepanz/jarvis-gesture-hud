@@ -136,6 +136,14 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Both hands in Shaka, held 1.5s | **Close Jarvis** (works even while paused) |
 | Both hands pinching (thumb+index), spread apart / brought together | **Canvas zoom** (Ctrl+Scroll) — same action as the single-hand zoom, just a more natural two-hand trigger. Does **not** scale the selected object in a design app; that already works today via a normal single-hand drag on the app's own resize handle. |
 | One hand closed fist (anchor, either hand) + the other showing 1/2/3/4 fingers, held 0.6s | Secondary menu: 1 = toggle gesture legend, 2 = toggle mirror mode, 3 = legend more opaque, 4 = legend more transparent — the same four actions already bound to `h`/`m`/`+`/`-`, now also reachable without touching the keyboard. Debounced: won't repeat while the pose is held, needs to be released and re-formed. |
+| Naruto seal Tora (index+middle together, thumb crossed close), held 0.6s | Screenshot (default binding, profile-overridable) |
+| Naruto seal Ushi (index only, thumb tucked), held 0.6s | Undo |
+| Naruto seal U/Hare (index+middle spread apart, thumb tucked), held 0.6s | Redo |
+| Naruto seal Uma/Horse — redefined (index+middle+ring extended, pinky curled, thumb out), held 0.6s | Zoom in |
+| Naruto seal Hitsuji/Ram (index+middle crossed), held 0.6s | Mute |
+| Naruto seal Saru/Monkey — redefined (thumb+ring extended), held 0.6s | Toggle on-screen keyboard |
+| Naruto seal Inu/Dog (ring+pinky extended together, thumb tucked), held 0.6s | Volume down |
+| Naruto seal I/Boar (fist, thumb extended to the side), held 0.6s | Lock session (`HOLD_REQUIRED` — the hold above already satisfies it) |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
@@ -775,6 +783,96 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     the live screen region, and read the image back — icons, colors, and text
     rows all render correctly against the translucent panel background, title
     at top, exactly as designed.
+- **Phase 4 (TASK-061/062/063) — one-hand Naruto seals.** Full collision
+  census against the complete 9-check single-hand surface (`design.md` §1.4)
+  plus every other new seal, verified against the REAL `GestureEngine` (not
+  just reasoned about) — every one of the 8 seal fixtures produces
+  `[f"NARUTO_{name}"]` and nothing else after its hold, and every existing
+  fixture (pinch/scroll/zoom/volume/screenshot/shaka/fist/silence/open-palm,
+  including the fist-opening-transition regression from the earlier
+  Shaka fix) produces zero `NARUTO_*` events (`tests/test_gesture_engine_regression.py::NarutoOneHandSealTests`).
+  - **`Saru` (Monkey) — REDEFINED, per design.md's own explicit flag.** The
+    original definition ("thumb+pinky extended, rest curled") is EXACTLY
+    `_is_shaka`'s shape — reusing it would silently change what an existing
+    gesture (`LOCK_SESSION`/`CLOSE_APP`) means, forbidden by `apply.md` §15.
+    Redefined to thumb+ring extended, index/middle/pinky curled — unused by
+    anything else, verified.
+  - **`Uma` (Horse) — REDEFINED, a collision design.md itself did NOT flag,
+    found during this task's own census (same kind of gap-catching this
+    project has done before — see the earlier collision-surface undercount
+    and the shared-cooldown bug).** The original definition ("all 5 fingers
+    extended and spread, thumb out") is a STRICT SUBSET of `KEYBOARD_TOGGLE`'s
+    existing condition (open palm + thumb spread >60px) — any hand shaped
+    like the original Uma would ALSO satisfy `KEYBOARD_TOGGLE`, firing both.
+    Redefined to index+middle+ring extended, pinky curled, thumb extended to
+    the side — distinct curl signature, verified.
+  - **Tora/U/Hitsuji share the same base finger-curl shape as SCROLL**
+    (index+middle extended, ring+pinky curled) — per design.md's own
+    description of Tora. Distinguished from SCROLL and from each other
+    entirely via conditions ALREADY computed in `process()`, without
+    touching SCROLL's existing condition at all: thumb distance to index
+    `<=40px` (Tora/U/Hitsuji) vs. SCROLL's existing, unchanged `>40px`
+    (mutually exclusive, no dead zone, no shared code path); index-middle
+    tip distance `<30px` ("together" → Tora) vs. `>50px` ("spread/peace-sign"
+    → U); a genuine finger-crossing check (`_fingers_crossed` — compares tip
+    x-order against MCP x-order, not just "close together") → Hitsuji. A
+    30–50px index-middle gap is a deliberate dead zone: fires neither, safer
+    than guessing.
+  - **All 8 seals additionally gated on `pinch_winner is None`** (no
+    pinch-family condition currently winning) **and `not two_hand_active`.**
+    This is a blanket rule, not per-seal tuning — it structurally rules out
+    any collision with the 5 pinch-family gestures regardless of a specific
+    seal's exact thumb geometry (if a seal's thumb ever gets close enough to
+    a fingertip to register as a pinch, the pinch wins that frame and the
+    seal simply doesn't fire — never both).
+  - **`I` (Boar) — accepted, documented limitation, not a collision to
+    resolve.** `_is_fist()` doesn't check the thumb, so `I`'s shape (fist +
+    thumb out) also reads as `_is_fist()==True` for the two-hand
+    `fists[0] != fists[1]` meta-menu discrimination. With 2 hands in frame
+    and the other hand NOT a fist, this arms the meta-menu's anchor mode in
+    the background — it does not fire any action by itself (still needs a
+    separate, deliberate 1–4-finger hold on the other hand). Judged
+    acceptable: a dormant background state, not a silently-wrong executed
+    action — the exact line `apply.md`/this project's collision policy
+    actually cares about.
+  - **Hold-then-confirm timing, same pattern as `LOCK_SESSION`/`_is_shaka`:**
+    a new `config.NARUTO_SEAL_HOLD_SECONDS=0.6` (same order as
+    `META_HOLD_SECONDS`) — a seal must be held continuously before its event
+    fires; releasing it (even to a shape that matches no seal) resets the
+    timer from zero, verified (`test_releasing_the_seal_before_the_hold_resets_it`).
+    **This is what satisfies "a seal bound to a `HOLD_REQUIRED` command
+    doesn't bypass its gating" (TASK-063):** the gating lives entirely
+    upstream, inside `GestureEngine` — a `NARUTO_*` event is structurally
+    incapable of existing before its hold completes, so no dispatch-layer
+    code could ever bypass it even if it tried. Verified end-to-end
+    (`tests/test_naruto_seal_dispatch.py::HoldRequiredGatingTests` +
+    `manual_live_integration_check.py`, both using the real default binding
+    `NARUTO_I` → `LockSession`, which is genuinely `HOLD_REQUIRED`).
+  - **Dispatch (TASK-063):** `main.py`'s `NARUTO_DEFAULT_BINDINGS` dict +
+    `JarvisApp._dispatch_naruto_seal()`, reusing `ProfileManager.get_gesture_binding()`
+    (already built for TASK-024, untouched) for "profile override > default
+    > None" precedence, and reusing `_dispatch_voice_action()` (the same
+    fixed-vocabulary path voice already uses) for the actual dispatch — a
+    seal and the equivalent voice command produce identical feedback/history
+    behavior by construction, not by parallel implementation. An unbound
+    seal (`get_gesture_binding` returns `None`) is a safe no-op, verified.
+    Default bindings: Tora→Screenshot, Ushi→Undo, U→Redo, Uma→ZoomIn,
+    Hitsuji→Mute, Saru→KeyboardToggle, Inu→VolumeDown, I→LockSession.
+  - **Icons:** 8 new `ICON_SPECS` entries (Phase 3 infra), all pairwise
+    byte-distinct from each other and from the 17 existing icons (verified),
+    plus one new legend row per seal — the 16 pre-existing legend lines
+    changed ONLY in padding width (a longer new line widened the shared
+    `ljust`), never in their own text (verified, updated snapshot in
+    `tests/test_legend.py`).
+  - **Honest limitation:** all 8 seal fixtures were verified against the
+    real `GestureEngine` (not hand-reasoned), but NOT against a real human
+    hand on camera — no hand was in frame during this task (same
+    environmental constraint as Phase 3B's positive-ownership path). The
+    synthetic fixtures are geometrically representative (explicit finger
+    curl states + measured thumb/index-middle pixel distances, same
+    fixture-verification discipline as every other gesture in this file),
+    but a real hand's natural variation in exactly how "crossed" or
+    "together" fingers look has not been confirmed live.
 
 ## Known limitations
 

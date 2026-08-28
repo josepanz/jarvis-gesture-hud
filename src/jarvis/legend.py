@@ -25,6 +25,17 @@ ENTRIES = [
     ("Tecla h", "Mostrar/ocultar lista", "key_toggle_legend"),
     ("Tecla m", "Modo espejo on/off", "key_mirror"),
     ("Teclas +/-", "Transparencia", "key_legend_opacity"),
+    # TASK-063 (Fase 4): sellos Naruto de 1 mano, sostenidos
+    # config.NARUTO_SEAL_HOLD_SECONDS - accion segun el binding por default
+    # (o el override del perfil activo, ver main.py NARUTO_DEFAULT_BINDINGS).
+    ("Sello Tora (índice+medio)", "Captura", "naruto_tora"),
+    ("Sello Ushi (índice)", "Deshacer", "naruto_ushi"),
+    ("Sello U (índice+medio separados)", "Rehacer", "naruto_u"),
+    ("Sello Uma (índice+medio+anular)", "Zoom +", "naruto_uma"),
+    ("Sello Hitsuji (índice+medio cruzados)", "Silenciar sistema", "naruto_hitsuji"),
+    ("Sello Saru (pulgar+anular)", "Teclado HUD", "naruto_saru"),
+    ("Sello Inu (anular+meñique)", "Volumen -", "naruto_inu"),
+    ("Sello I (puño, pulgar afuera)", "Bloquear sesión", "naruto_i"),
 ]
 
 
