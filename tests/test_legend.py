@@ -9,11 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jarvis.gesture_icons import ICON_SPECS  # noqa: E402
 from jarvis.legend import ENTRIES, build_legend_entries, build_legend_text  # noqa: E402
 
-# Snapshot actualizado en TASK-063 (Fase 4) para incluir los 8 sellos Naruto
-# de 1 mano - las 16 lineas originales (TASK-059) no cambiaron ni un
-# caracter en su texto, solo el padding (ljust) crecio porque una de las
-# lineas nuevas es mas larga que "Pulgar + Meñique + mover" (la mas larga
-# anterior).
+# Snapshot actualizado en TASK-070 (Fase 6) para incluir los 3 sellos JJK
+# (Gojo/Sukuna/Megumi) - el resto de las lineas no cambio ni un caracter, el
+# padding (ljust) tampoco crecio (ninguna linea nueva supera el largo de
+# "Sello Kai (manos juntas, dedos cruzados)", que sigue siendo la mas larga).
 _EXPECTED_TEXT = (
     "JARVIS — Gestos\n"
     "\n"
@@ -45,7 +44,10 @@ _EXPECTED_TEXT = (
     "Sello Mi (manos juntas, hacia abajo)      →  Scroll abajo\n"
     "Sello Tori (manos en abanico)             →  Scroll arriba\n"
     "Sello Kai (manos juntas, dedos cruzados)  →  Cerrar Jarvis\n"
-    "Sello Tatsu (1 puño + 1 mano abierta)     →  Volumen +"
+    "Sello Tatsu (1 puño + 1 mano abierta)     →  Volumen +\n"
+    "Sello Gojo (marco en L, 2 manos arriba)   →  Click derecho\n"
+    "Sello Sukuna (chasquido pulgar-medio)     →  Captura\n"
+    "Sello Megumi (índice+medio+anular)        →  Silenciar sistema"
 )
 
 

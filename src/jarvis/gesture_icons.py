@@ -9,6 +9,8 @@ a requirements.txt) - se muestra despues via `tkinter.PhotoImage(file=...)`,
 sin necesitar `PIL.ImageTk`.
 """
 
+import math
+
 from PIL import Image, ImageDraw, ImageFont
 
 from jarvis.paths import assets_dir
@@ -126,6 +128,34 @@ ICON_SPECS = {
         "pinch": None,
         "glyph": None,
     },
+    # TASK-070 (Fase 6): sellos JJK.
+    "jjk_gojo_domain": {
+        # Marco en L (pulgar+indice) de ambas manos - set de dedos extendidos
+        # nuevo entre los gestos de 2 manos, ya distinto sin necesitar glyph.
+        "hands": 2,
+        "extended": ({"thumb", "index"}, {"thumb", "index"}),
+        "pinch": None,
+        "glyph": None,
+    },
+    "jjk_sukuna": {
+        # Misma forma de mano que pinch_right_click (pulgar+medio tocandose)
+        # a proposito - Sukuna ES ese pellizco, solo que rapido - se
+        # distingue por el glyph "snap" (lineas de movimiento), pedido
+        # explicitamente para comunicar que es temporal, no una pose estatica.
+        "hands": 1,
+        "extended": {"thumb", "middle"},
+        "pinch": ("thumb", "middle"),
+        "glyph": "snap",
+    },
+    "jjk_megumi": {
+        # indice+medio+anular extendidos - combinacion de 3 dedos nueva entre
+        # los gestos de 1 mano, ya distinta sin necesitar glyph (design.md
+        # §6.3: anular EXTENDIDO es justamente lo que la distingue de Hitsuji).
+        "hands": 1,
+        "extended": {"index", "middle", "ring"},
+        "pinch": None,
+        "glyph": None,
+    },
 }
 
 
@@ -216,6 +246,23 @@ def _draw_close(draw, box):
     draw.line([x0, y1, x1, y0], fill=_GLYPH_COLOR, width=3)
 
 
+def _draw_snap(draw, box):
+    # TASK-070 (Fase 6): pequeñas lineas de "chispa"/movimiento radiando
+    # desde el centro - comunica que Sukuna es temporal (un impulso), no una
+    # pose estatica sostenida como el resto de los glifos de mano sola.
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    r_in, r_out = (x1 - x0) * 0.2, (x1 - x0) * 0.55
+    for angle in (0, 90, 180, 270):
+        rad = math.radians(angle)
+        dx, dy = math.cos(rad), math.sin(rad)
+        draw.line(
+            [cx + dx * r_in, cy + dy * r_in, cx + dx * r_out, cy + dy * r_out],
+            fill=_GLYPH_COLOR,
+            width=2,
+        )
+
+
 GLYPH_DRAWERS = {
     "arrow_up_down": _draw_arrow_up_down,
     "zoom": _draw_zoom,
@@ -225,6 +272,7 @@ GLYPH_DRAWERS = {
     "mute": _draw_mute,
     "pause": _draw_pause,
     "close": _draw_close,
+    "snap": _draw_snap,
 }
 
 _GLYPH_BOX = (ICON_SIZE - 15, 2, ICON_SIZE - 2, 15)  # esquina superior derecha

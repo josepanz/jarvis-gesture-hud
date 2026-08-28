@@ -1209,5 +1209,169 @@ class NarutoTwoHandSealTests(unittest.TestCase):
                 )
 
 
+# TASK-068/069/070 (Fase 6): gestos JJK. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo -
+# incluye el censo de colision pedido explicitamente por design.md §6.4
+# (contra las fases 1/4/5 y entre si), aunque la verificacion en CAMARA REAL
+# (a diferencia de la Fase 4) queda pospuesta a la prueba integral final,
+# pedida explicitamente por el usuario.
+def jjk_megumi_hand(cx=0.5, cy=0.5):
+    # Identica a naruto_hitsuji_hand salvo el anular (16/14): EXTENDIDO aca,
+    # RECOGIDO en Hitsuji - esa es la unica diferencia entre las 2 fixtures,
+    # a proposito, para que el discriminador quede aislado (design.md §6.3).
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.02, cy - 0.08, 0)  # indice cruza a la derecha
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.09, cy - 0.08, 0)  # medio cruza a la izquierda
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)  # anular EXTENDIDO
+    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)  # menique recogido
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.04, cy - 0.04, 0)
+    pts[2] = Landmark(cx - 0.05, cy - 0.01, 0)
+    return pts
+
+
+def jjk_gojo_hand(cx=0.5, cy=0.3):
+    # Marco en L: pulgar recto hacia arriba (vector vertical puro desde su
+    # mcp), indice recto hacia el costado (vector horizontal puro desde su
+    # mcp) - perpendiculares por construccion. Resto de los dedos sin
+    # overridear (curl ambiguo, no importa para este chequeo).
+    pts = flat(cx, cy)
+    pts[2] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.15, 0)
+    pts[5] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.15, cy, 0)
+    return pts
+
+
+def sukuna_contact_hand(cx=0.5, cy=0.5):
+    # Misma forma que right_click_hand a proposito (design.md §6.2: Sukuna
+    # reusa d_thumb_middle, el snap ES ese pellizco, solo que rapido).
+    return right_click_hand(cx, cy)
+
+
+def sukuna_release_hand(cx=0.5, cy=0.5):
+    pts = list(right_click_hand(cx, cy))
+    pts[12] = Landmark(cx + 0.15, cy, 0)  # medio bien separado del pulgar
+    return pts
+
+
+class JJKGestureTests(unittest.TestCase):
+    def test_megumi_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_naruto(engine, jjk_megumi_hand())
+        self.assertEqual(events, ["JJK_MEGUMI"])
+
+    def test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger(self):
+        # design.md §6.3: la unica diferencia entre las 2 fixtures es la
+        # posicion del anular - confirma que ESE es el discriminador real.
+        engine = GestureEngine()
+        _, _, hitsuji_events = hold_naruto(engine, naruto_hitsuji_hand())
+        self.assertEqual(hitsuji_events, ["NARUTO_HITSUJI"])
+
+        engine2 = GestureEngine()
+        _, _, megumi_events = hold_naruto(engine2, jjk_megumi_hand())
+        self.assertEqual(megumi_events, ["JJK_MEGUMI"])
+
+    def test_gojo_domain_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.25), jjk_gojo_hand(0.52, 0.25))
+        self.assertEqual(events, ["JJK_GOJO_DOMAIN"])
+
+    def test_gojo_domain_does_not_fire_before_the_hold_completes(self):
+        engine = GestureEngine()
+        hands = [Hand(jjk_gojo_hand(0.42, 0.25), "Left"), Hand(jjk_gojo_hand(0.52, 0.25), "Right")]
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+
+    def test_gojo_domain_does_not_fire_when_hands_are_low_in_frame(self):
+        # Mismas 2 manos, mas abajo en el cuadro - JJK_GOJO_MAX_AVG_WRIST_Y
+        # (mitad superior) deberia excluirlo.
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.75), jjk_gojo_hand(0.52, 0.75))
+        self.assertEqual(events, [])
+
+    def test_a_fast_snap_fires_sukuna_not_right_click(self):
+        engine = GestureEngine()
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("JJK_SUKUNA", events)
+        self.assertNotIn("RIGHT_CLICK", events)
+
+    def test_a_sustained_pinch_fires_right_click_not_sukuna(self):
+        engine = GestureEngine()
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("RIGHT_CLICK", events)  # confirmado tras 2 frames seguidos en contacto (PINCH_CONFIRM_FRAMES)
+
+        # Sostenido mucho mas alla de la ventana de Sukuna (JJK_SUKUNA_MAX_WINDOW_SECONDS) -
+        # mismo truco de rebobinar el reloj interno que el resto del archivo.
+        engine._sukuna_detector._contact_time = time.time() - 1.0
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("JJK_SUKUNA", events)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_jjk_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                engine._naruto_hold_start = time.time() - 1.0
+                _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("JJK_")],
+                    f"{name} unexpectedly produced a JJK_* event: {events}",
+                )
+
+    def test_no_naruto_seal_fixture_triggers_a_jjk_event(self):
+        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                pts = fixture_fn()
+                for _ in range(3):
+                    _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                    self.assertFalse([e for e in events if e.startswith("JJK_")])
+
+    def test_no_existing_two_hand_fixture_leaks_gojo_domain(self):
+        existing_pairs = {
+            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
+            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
+        }
+        for name, (p1, p2) in existing_pairs.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+
+    def test_no_twohand_naruto_seal_fixture_leaks_gojo_domain(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+
+
 if __name__ == "__main__":
     unittest.main()

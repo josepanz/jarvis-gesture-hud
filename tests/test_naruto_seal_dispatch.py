@@ -63,6 +63,13 @@ class DefaultBindingTests(_AppTestCase):
         self.app._dispatch_naruto_seal("NARUTO_KAI")  # default: CLOSE_APP
         self.assertTrue(self.app.should_quit)
 
+    def test_jjk_seal_default_binding_dispatches_the_right_command(self):
+        # TASK-070 (Fase 6): mismo _dispatch_naruto_seal, extendido al
+        # prefijo JJK_ en run() - la resolucion del binding en si nunca miro
+        # el prefijo, asi que este test alcanza para cubrir los 3 sellos JJK.
+        self.app._dispatch_naruto_seal("JJK_GOJO_DOMAIN")  # default: RIGHT_CLICK
+        self.mock_mouse_pyautogui.rightClick.assert_called_once()
+
     def test_every_default_binding_is_a_known_dispatchable_action(self):
         # Cada valor de NARUTO_DEFAULT_BINDINGS tiene que ser algo que
         # _dispatch_voice_action realmente sepa manejar - si no, el binding

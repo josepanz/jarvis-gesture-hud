@@ -43,6 +43,12 @@ ENTRIES = [
     ("Sello Tori (manos en abanico)", "Scroll arriba", "naruto_tori"),
     ("Sello Kai (manos juntas, dedos cruzados)", "Cerrar Jarvis", "naruto_kai"),
     ("Sello Tatsu (1 puño + 1 mano abierta)", "Volumen +", "naruto_tatsu"),
+    # TASK-070 (Fase 6): sellos JJK, sostenidos config.NARUTO_TWOHAND_HOLD_SECONDS
+    # (Gojo) o config.NARUTO_SEAL_HOLD_SECONDS (Megumi) - Sukuna es temporal
+    # (ImpulseDetector), sin hold.
+    ("Sello Gojo (marco en L, 2 manos arriba)", "Click derecho", "jjk_gojo_domain"),
+    ("Sello Sukuna (chasquido pulgar-medio)", "Captura", "jjk_sukuna"),
+    ("Sello Megumi (índice+medio+anular)", "Silenciar sistema", "jjk_megumi"),
 ]
 
 

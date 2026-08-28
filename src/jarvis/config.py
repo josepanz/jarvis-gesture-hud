@@ -57,6 +57,18 @@ NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION = 0.20  # manos "juntas/pegadas" (Ne/
 NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION = 0.20  # manos "en abanico" (Tori), mas separadas que el clasp
 NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
 
+# TASK-068/069 (Fase 6): gestos Jujutsu Kaisen. Umbrales RAZONADOS, no
+# medidos en camara real todavia - misma salvedad que la Fase 5 (Naruto de 2
+# manos), pendiente de la prueba integral final (José pidio explicitamente
+# posponer TODA verificacion en camara a esa fase, en vez de una por fase
+# como en Fase 4).
+JJK_SUKUNA_CONTACT_THRESHOLD = 15  # mas ajustado que PINCH_RIGHT_CLICK (20): un snap es un toque decidido, no un roce casual
+JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~51px en menique)
+JJK_SUKUNA_MAX_WINDOW_SECONDS = 0.35  # un snap es rapido; una pinza sostenida (RIGHT_CLICK) excede esta ventana sin esfuerzo
+JJK_GOJO_ANGLE_TOLERANCE_DEGREES = 35  # tolerancia sobre el angulo objetivo de 90 grados entre pulgar e indice
+JJK_GOJO_MAX_DISTANCE_FRACTION = 0.30  # manos "juntas" para el marco, mas laxo que el clasp de NARUTO (0.20) - no exige contacto
+JJK_GOJO_MAX_AVG_WRIST_Y = 0.55  # ambas munecas en la mitad superior del frame (aprox. altura de pecho/cara)
+
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
 

@@ -149,6 +149,9 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Naruto seal Tori/Bird — two-hand (hands fanned apart, both open), held 1.2s | Scroll up |
 | Naruto seal Kai/Release — two-hand (clasped, index+middle of both hands crossed), held 1.2s | Close Jarvis |
 | Naruto seal Tatsu/Dragon — two-hand (clasped, one fist + one open hand), held 1.2s | Volume up |
+| JJK Gojo — Domain Expansion — two-hand (both hands' thumb→index vectors ~90° apart, hands close together, held up in the upper frame), held 1.2s | Right click |
+| JJK Sukuna — finger snap (thumb+middle drop below contact then rise above release within 0.35s — `ImpulseDetector`, TEMPORAL, no hold) | Screenshot |
+| JJK Megumi — shadow summon (index+middle crossed, **ring extended** — the explicit discriminator vs. Hitsuji, which requires ring curled), held 0.6s | Mute |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
@@ -1021,6 +1024,118 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     despite passing synthetic verification first), these should be treated
     as a first draft pending the same live-camera correction cycle, not a
     finished result.
+- **Phase 6 (TASK-067/068/069/070) — Jujutsu Kaisen gestures (Gojo Domain
+  Expansion, Sukuna's snap, Megumi).** First phase in the project where the
+  user opted OUT of the per-phase live-camera correction cycle used for
+  Phases 4/5 — explicit instruction was to defer ALL remaining verification
+  to one combined "prueba integral" pass covering Phases 4/5/6 together, and
+  to keep implementing code in the meantime. Everything below is REASONED
+  and synthetic-fixture-verified only; nothing here has touched a real
+  camera yet.
+  - **`temporal_gesture.py` (new module) — `ImpulseDetector`**, the first
+    TEMPORAL/multi-frame primitive in this codebase (every existing gesture
+    is either single-frame state or a simple hold-timer). A 3-state machine
+    (`idle` → `armed` → fires and returns to `idle`, OR `armed` → `expired`
+    if the window elapses while still in contact → `idle` only once the
+    tracked distance finally rises above `release_threshold`, WITHOUT
+    firing). The 3rd state is what makes a long sustained pinch that
+    eventually releases NOT count as an impulse — a naive 2-state version
+    (armed/idle only) was drafted first and found, by reasoning through the
+    exact sequence, to spuriously refire once the sustained hold finally
+    let go; the 3-state version was written specifically to close that hole,
+    and `tests/test_temporal_gesture.py` pins all 4 of TASK-067's acceptance
+    criteria including that exact scenario. Reused as-is for Sukuna here and
+    intended for Clap in Phase 7 (design.md explicitly forbids a second,
+    parallel implementation).
+  - **`JJK_SUKUNA` (one-hand, temporal)** — `ImpulseDetector` tracking
+    `d_thumb_middle` (the same distance `RIGHT_CLICK` already computes),
+    contact/release/window reasoned at 15px/55px/0.35s (tighter contact than
+    `PINCH_RIGHT_CLICK`'s 20px — a snap is a decisive full touch, not a
+    casual pinch; release comfortably above the ~51px relaxed-hand noise
+    ceiling measured for Phase 4/TASK-056). Fed unconditionally every frame
+    (not gated behind `pinch_winner`/`two_hand_active` like the static
+    seals) because the detector needs the real distance every frame to track
+    its own state machine correctly — gating it would starve it of frames
+    mid-gesture. **Known, deliberately UNRESOLVED collision risk:** because
+    Sukuna's contact threshold (15px) is tighter than `RIGHT_CLICK`'s
+    (20px), a real snap's approach necessarily crosses `RIGHT_CLICK`'s
+    looser threshold first — if held there for `PINCH_CONFIRM_FRAMES`
+    consecutive frames, `RIGHT_CLICK` could fire on the same physical
+    motion that later completes as `JJK_SUKUNA`. This is flagged in code
+    (`gestures.py`, next to the `update()` call) rather than silently
+    "solved" by an unverified threshold tweak — it's exactly the kind of
+    thing Phase 4's real-camera pass caught and this one explicitly can't,
+    yet. `tests/test_gesture_engine_regression.py::JJKGestureTests` does
+    confirm the synthetic discrimination TASK-069 asks for (a fast
+    contact→release sequence fires `JJK_SUKUNA` not `RIGHT_CLICK`; a
+    2-frame-confirmed sustained pinch fires `RIGHT_CLICK` and, even after
+    being rewound past Sukuna's window and finally released, never fires
+    `JJK_SUKUNA`) — synthetic fixtures necessarily can't exercise the timing
+    ambiguity of a *real*, noisy, human snap.
+  - **`JJK_GOJO_DOMAIN` (two-hand, static, taxonomy Pattern B per design.md
+    §1.5)** — new `_thumb_index_angle_deg()` primitive (dot product between
+    each hand's thumb MCP→tip and index MCP→tip vectors) checked against
+    ~90°±35° for BOTH hands, AND the two hands' centers within
+    `JJK_GOJO_MAX_DISTANCE_FRACTION=0.30` of the frame diagonal (looser than
+    the Naruto seals' 0.20 "clasped" threshold — Gojo's frame doesn't
+    require the hands to actually touch), AND both wrists' average y above
+    (numerically below, image coordinates) `JJK_GOJO_MAX_AVG_WRIST_Y=0.55`
+    (upper half of frame, approximating "held up near the face"). The
+    condition is genuinely BETWEEN the two hands (relative angle + relative
+    position), never two independently-classified single-hand shapes —
+    confirmed staying Pattern B per TASK-068's explicit ask. Checked LAST in
+    the two-hand elif chain (after Kai/Tatsu/Ne/Mi/Tori) since it's a
+    structurally distinct geometric family (vector angle, not
+    distance/curl-ratio) and doesn't need to compete for priority with them.
+  - **`JJK_MEGUMI` (one-hand, static)** — same visual family as Hitsuji
+    (index+middle genuinely crossed, via the existing `_segments_cross`
+    primitive) but with the ring finger EXTENDED instead of curled — the
+    exact discriminator design.md §6.3 asked for, made structurally
+    impossible to collide with Hitsuji (Hitsuji's own base-shape check
+    requires ring curled) rather than relying on a threshold.
+    `tests/test_gesture_engine_regression.py::JJKGestureTests::test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger`
+    builds both fixtures from the literal same coordinates except that one
+    finger, to pin exactly that.
+  - **Event naming refactor (no behavior change):** `_naruto_seal` and
+    `_twohand_seal` now hold the FULL event string (`"NARUTO_KAI"`,
+    `"JJK_MEGUMI"`, `"JJK_GOJO_DOMAIN"`) instead of a bare name later
+    f-string-prefixed with `NARUTO_` — needed so the same
+    hold-then-confirm-then-miss-tolerance state machine could serve both the
+    `NARUTO_` and `JJK_` namespaces without duplicating it. `main.py`'s
+    dispatch loop now checks `event.startswith("NARUTO_") or
+    event.startswith("JJK_")` before routing to `_dispatch_naruto_seal`
+    (kept that name — it already only ever cared about the prefix
+    generically, never NARUTO-specific logic).
+  - **Dispatch defaults exhaust the fixed action vocabulary.**
+    `llm_intent.VALID_ACTIONS` has exactly 14 actions, and the 13 Naruto
+    seals from Phases 4/5 already claim 13 of them — only `RIGHT_CLICK`
+    remained free. `JJK_GOJO_DOMAIN` takes it (Gojo, the most prominent of
+    the 3, gets the one genuinely free slot); `JJK_SUKUNA`→`SCREENSHOT`
+    (reused from Tora — "snap" a picture) and `JJK_MEGUMI`→`MUTE` (reused
+    from Hitsuji — shadow/stealth theme) deliberately REUSE an already-bound
+    action. This isn't a bug: `ProfileManager.get_gesture_binding()` already
+    treats every binding as independently overridable per profile, so two
+    physical gestures defaulting to the same command is equivalent to two
+    keyboard shortcuts for the same action, not a collision.
+  - **Icons**: `jjk_sukuna` is the first icon to use a NEW glyph (`snap` —
+    four short radiating lines, a small motion/spark cue) instead of a
+    static pose glyph, per TASK-070's explicit ask that Sukuna's icon
+    communicate motion, not just shape (it reuses `pinch_right_click`'s
+    exact hand shape — thumb+middle touching — and is differentiated
+    ONLY by that glyph, intentionally, since Sukuna genuinely IS that
+    pinch, just fast). `jjk_gojo_domain`/`jjk_megumi` are visually distinct
+    by extended-finger-set alone (new combinations not used by any prior
+    icon), no glyph needed. All 32 icons confirmed pairwise byte-distinct
+    (`tests/test_gesture_icons.py`).
+  - **Honest limitation, explicitly not yet closed:** none of Gojo/Sukuna/
+    Megumi have touched a real camera. Beyond the usual "thresholds are
+    reasoned not measured" caveat already carried over from Phase 5, Sukuna
+    specifically carries a KNOWN, undiagnosed collision risk against
+    `RIGHT_CLICK` (see above) that can only really be resolved by watching
+    what a real snap's landmark sequence actually does frame-by-frame —
+    exactly the kind of failure Phase 4's real-camera pass caught 7 times
+    out of 8 and this phase, by explicit user choice, hasn't attempted yet.
+    Deferred to the combined Phase 4+5+6 "prueba integral" live-camera pass.
 
 ## Known limitations
 

@@ -21,6 +21,7 @@ import math
 import time
 
 from jarvis import config
+from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
     1: "TOGGLE_LEGEND",
@@ -236,6 +237,47 @@ def _hand_points_down(pts):
     return avg_tip_y > pts[0].y + 0.05
 
 
+# TASK-068 (Fase 6): JJK_GOJO_DOMAIN (2 manos, estatico, Pattern B per
+# design.md §1.5 - la condicion es el angulo/posicion ENTRE las 2 manos, no
+# 2 formas de una sola mano clasificadas por separado) y JJK_MEGUMI (1 mano,
+# estatico). Umbrales razonados, no medidos - misma salvedad que Fase 5,
+# pendiente de la prueba integral final (posposicion pedida explicitamente).
+def _thumb_index_angle_deg(pts):
+    """Angulo (0-180) entre el vector pulgar (MCP->punta) y el vector indice
+    (MCP->punta) de una mano - la 'L' del marco de Gojo es ~90 grados."""
+    tx, ty = pts[4].x - pts[2].x, pts[4].y - pts[2].y
+    ix, iy = pts[8].x - pts[5].x, pts[8].y - pts[5].y
+    mag_t, mag_i = math.hypot(tx, ty), math.hypot(ix, iy)
+    if mag_t == 0 or mag_i == 0:
+        return 0.0
+    cos_angle = max(-1.0, min(1.0, (tx * ix + ty * iy) / (mag_t * mag_i)))
+    return math.degrees(math.acos(cos_angle))
+
+
+def _is_jjk_gojo_domain(p1, p2, w, h):
+    angle1 = _thumb_index_angle_deg(p1)
+    angle2 = _thumb_index_angle_deg(p2)
+    l_shaped = (
+        abs(angle1 - 90) <= config.JJK_GOJO_ANGLE_TOLERANCE_DEGREES
+        and abs(angle2 - 90) <= config.JJK_GOJO_ANGLE_TOLERANCE_DEGREES
+    )
+    if not l_shaped:
+        return False
+    close = (_hands_distance(p1, p2, w, h) / math.hypot(w, h)) <= config.JJK_GOJO_MAX_DISTANCE_FRACTION
+    raised = (p1[0].y + p2[0].y) / 2 < config.JJK_GOJO_MAX_AVG_WRIST_Y
+    return close and raised
+
+
+def _is_jjk_megumi(pts):
+    # Invocacion de las sombras - familia visual de Hitsuji (indice+medio
+    # cruzados) pero distinguida EXPLICITAMENTE por la posicion del anular
+    # (extendido, no recogido) per design.md §6.3 - no puede colisionar con
+    # la forma base de Tora/U/Hitsuji, que exige el anular recogido.
+    if not (_fingers_extended(pts, 8, 12, 16) and _fingers_curled(pts, 20)):
+        return False
+    return _fingers_crossed(pts, 8, 5, 12, 9)
+
+
 def _bbox_area_fraction(landmarks, w, h):
     xs = [p.x for p in landmarks]
     ys = [p.y for p in landmarks]
@@ -318,6 +360,17 @@ class GestureEngine:
         self._twohand_seal_hold_name = None  # TASK-064/065: sello de 2 manos sostenido ahora (o None)
         self._twohand_seal_hold_start = None
         self._twohand_seal_miss_streak = 0
+
+        # TASK-069 (Fase 6): snap de Sukuna - primer uso de ImpulseDetector,
+        # alimentado con d_thumb_middle SIN el gate de pinch_winner (necesita
+        # ver la distancia real cuadro a cuadro para reconocer el patron
+        # baja-sube; el propio detector ya distingue un snap de un hold
+        # sostenido, ver temporal_gesture.py).
+        self._sukuna_detector = ImpulseDetector(
+            config.JJK_SUKUNA_CONTACT_THRESHOLD,
+            config.JJK_SUKUNA_RELEASE_THRESHOLD,
+            config.JJK_SUKUNA_MAX_WINDOW_SECONDS,
+        )
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -445,12 +498,17 @@ class GestureEngine:
             self.meta_hold_start = None
             self.meta_consumed = False
 
-        # TASK-064/065 (Fase 5): sellos Naruto de 2 manos. Excluidos si ya es
-        # otro gesto de 2 manos conocido (shaka/puños/pinch) - jerarquia, no
-        # solapamiento. Orden de chequeo: Kai (mas especifico, exige cruce
-        # real de dedos) -> Tatsu (asimetria de curvatura) -> Ne/Mi (mismo
-        # "entrelazado" proxy, distinguidos por orientacion) -> Tori
-        # (separadas y mas abiertas).
+        # TASK-064/065 (Fase 5) + TASK-068 (Fase 6): sellos de 2 manos.
+        # Excluidos si ya es otro gesto de 2 manos conocido (shaka/puños/
+        # pinch) - jerarquia, no solapamiento. Orden de chequeo: Kai (mas
+        # especifico, exige cruce real de dedos) -> Tatsu (asimetria de
+        # curvatura) -> Ne/Mi (mismo "entrelazado" proxy, distinguidos por
+        # orientacion) -> Tori (separadas y mas abiertas) -> Gojo (unica
+        # familia geometrica distinta: angulo pulgar-indice, no
+        # distancia/curvatura, chequeada al final para no competir con las
+        # anteriores). `_twohand_seal` guarda el EVENTO completo (con
+        # prefijo) para que el mismo hold-state-machine sirva para ambos
+        # namespaces sin duplicar logica.
         _twohand_seal = None
         if not both_shaka and not both_fists and not both_pinching:
             dist_frac = _hands_distance(p1, p2, w, h) / math.hypot(w, h)
@@ -470,15 +528,17 @@ class GestureEngine:
             )
 
             if clasped and kai_crossed:
-                _twohand_seal = "KAI"
+                _twohand_seal = "NARUTO_KAI"
             elif clasped and asymmetric:
-                _twohand_seal = "TATSU"
+                _twohand_seal = "NARUTO_TATSU"
             elif clasped and interlaced and _hand_points_up(p1) and _hand_points_up(p2):
-                _twohand_seal = "NE"
+                _twohand_seal = "NARUTO_NE"
             elif clasped and interlaced and _hand_points_down(p1) and _hand_points_down(p2):
-                _twohand_seal = "MI"
+                _twohand_seal = "NARUTO_MI"
             elif fanned and ratio1 >= 0.75 and ratio2 >= 0.75:
-                _twohand_seal = "TORI"
+                _twohand_seal = "NARUTO_TORI"
+            elif _is_jjk_gojo_domain(p1, p2, w, h):
+                _twohand_seal = "JJK_GOJO_DOMAIN"
 
         if _twohand_seal is not None:
             if self._twohand_seal_hold_name != _twohand_seal:
@@ -487,7 +547,7 @@ class GestureEngine:
             elif self._twohand_seal_hold_start is None:
                 self._twohand_seal_hold_start = now
             elif now - self._twohand_seal_hold_start > config.NARUTO_TWOHAND_HOLD_SECONDS:
-                events.append(f"NARUTO_{_twohand_seal}")
+                events.append(_twohand_seal)
                 self._twohand_seal_hold_start = None
             self._twohand_seal_miss_streak = 0
         elif self._twohand_seal_hold_name is not None:
@@ -530,6 +590,19 @@ class GestureEngine:
         d_thumb_ring = self._dist3(thumb, ring, w, h)
         d_thumb_pinky = self._dist3(thumb, pinky, w, h)
         d_thumb_pinky_mcp = self._dist(thumb, pts[17], w, h)  # SILENCE - no es pinch-family, queda 2D
+
+        # TASK-069 (Fase 6): snap de Sukuna. Se alimenta con d_thumb_middle
+        # SIN el gate de pinch_winner/two_hand_active (el detector necesita
+        # la distancia real cuadro a cuadro para reconocer el patron
+        # baja-sube; alimentarlo a medias romperia su maquina de estados).
+        # Riesgo de colision CONOCIDO Y NO VERIFICADO (documentado, no
+        # resuelto): un snap real pasa primero por PINCH_RIGHT_CLICK (20px,
+        # mas laxo que el umbral de contacto de Sukuna, 15px) camino al
+        # contacto mas ajustado - RIGHT_CLICK podria disparar en el mismo
+        # gesto fisico. Pendiente de la prueba integral final (posposicion
+        # pedida explicitamente, ver ARCHITECTURE.md).
+        if self._sukuna_detector.update(d_thumb_middle, now) and not two_hand_active:
+            events.append("JJK_SUKUNA")
 
         # TASK-055: resolucion de prioridad entre gestos de pinch. En un puno con
         # solo pulgar+indice desplegados y pellizcando, las puntas de los demas
@@ -642,12 +715,15 @@ class GestureEngine:
         else:
             self.prev_scroll_y = None
 
-        # TASK-062 (Fase 4): sellos Naruto de 1 mano. Todos exigen ningun
-        # pinch activo (pinch_winner is None - asi cualquier forma que
-        # accidentalmente quede lo bastante cerca de un dedo como para
-        # pellizcar pierde contra el pinch, nunca dispara ambos) y that no
-        # haya un gesto de 2 manos en curso - ver censo de colision completo
-        # en ARCHITECTURE.md.
+        # TASK-062 (Fase 4) + TASK-068 (Fase 6): sellos de 1 mano. Todos
+        # exigen ningun pinch activo (pinch_winner is None - asi cualquier
+        # forma que accidentalmente quede lo bastante cerca de un dedo como
+        # para pellizcar pierde contra el pinch, nunca dispara ambos) y que
+        # no haya un gesto de 2 manos en curso - ver censo de colision
+        # completo en ARCHITECTURE.md. `_naruto_seal` guarda el EVENTO
+        # completo (con prefijo NARUTO_/JJK_) para que el mismo
+        # hold-state-machine sirva para ambos namespaces sin duplicar logica
+        # (mismo truco que el bloque de 2 manos, ver arriba).
         _naruto_gate = pinch_winner is None and not two_hand_active
         _naruto_seal = None
         if _naruto_gate:
@@ -661,21 +737,23 @@ class GestureEngine:
                 crossed = _fingers_crossed(pts, 8, 5, 12, 9)
                 if d_thumb_index <= 40:
                     if crossed:
-                        _naruto_seal = "HITSUJI"
+                        _naruto_seal = "NARUTO_HITSUJI"
                     elif d_index_middle < 30:
-                        _naruto_seal = "TORA"
+                        _naruto_seal = "NARUTO_TORA"
                     elif d_index_middle > 50:
-                        _naruto_seal = "U"
+                        _naruto_seal = "NARUTO_U"
             elif _is_naruto_ushi(pts):
-                _naruto_seal = "USHI"
+                _naruto_seal = "NARUTO_USHI"
             elif _is_naruto_uma(pts):
-                _naruto_seal = "UMA"
+                _naruto_seal = "NARUTO_UMA"
             elif _is_naruto_saru(pts):
-                _naruto_seal = "SARU"
+                _naruto_seal = "NARUTO_SARU"
             elif _is_naruto_inu(pts):
-                _naruto_seal = "INU"
+                _naruto_seal = "NARUTO_INU"
             elif _is_naruto_i(pts):
-                _naruto_seal = "I"
+                _naruto_seal = "NARUTO_I"
+            elif _is_jjk_megumi(pts):
+                _naruto_seal = "JJK_MEGUMI"
 
         # TASK-062 fix (verificado en camara real, 2026-08-27): un solo
         # frame de parpadeo a "ningun sello" (ruido de landmark, no un
@@ -690,7 +768,7 @@ class GestureEngine:
             elif self._naruto_hold_start is None:
                 self._naruto_hold_start = now
             elif now - self._naruto_hold_start > config.NARUTO_SEAL_HOLD_SECONDS:
-                events.append(f"NARUTO_{_naruto_seal}")
+                events.append(_naruto_seal)
                 self._naruto_hold_start = None
             self._naruto_miss_streak = 0
         elif self._naruto_hold_seal is not None:
