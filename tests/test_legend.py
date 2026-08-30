@@ -9,45 +9,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jarvis.gesture_icons import ICON_SPECS  # noqa: E402
 from jarvis.legend import ENTRIES, build_legend_entries, build_legend_text  # noqa: E402
 
-# Snapshot actualizado en TASK-070 (Fase 6) para incluir los 3 sellos JJK
-# (Gojo/Sukuna/Megumi) - el resto de las lineas no cambio ni un caracter, el
-# padding (ljust) tampoco crecio (ninguna linea nueva supera el largo de
-# "Sello Kai (manos juntas, dedos cruzados)", que sigue siendo la mas larga).
+# Snapshot actualizado en TASK-073 (Fase 7) para incluir Aplauso y Corazón
+# coreano - el resto de las lineas no cambio ni un caracter, el padding
+# (ljust) crecio porque "Corazón coreano (pulgar+índice, sostenido)" es mas
+# larga que la anterior mas larga ("Sello Kai...").
 _EXPECTED_TEXT = (
     "JARVIS — Gestos\n"
     "\n"
-    "Índice movido                             →  Puntero\n"
-    "Pulgar + Índice (pinch)                   →  Click / Drag\n"
-    "Pulgar + Medio (pinch)                    →  Click derecho\n"
-    "Índice + Medio arriba                     →  Scroll\n"
-    "Pulgar + Anular (pinch)                   →  Zoom\n"
-    "Palma abierta                             →  Teclado HUD\n"
-    "Pulgar + Meñique + mover                  →  Volumen\n"
-    "Pulgar + Anular cerrado                   →  Captura\n"
-    "Shaka 1.5s (1 mano)                       →  Bloquear sesión\n"
-    "Palma, pulgar a meñique                   →  Silenciar voz\n"
-    "2 puños juntos 1.2s                       →  Pausar / Reanudar\n"
-    "2 manos en Shaka 1.5s                     →  Cerrar Jarvis\n"
-    "Tecla q                                   →  Salir\n"
-    "Tecla h                                   →  Mostrar/ocultar lista\n"
-    "Tecla m                                   →  Modo espejo on/off\n"
-    "Teclas +/-                                →  Transparencia\n"
-    "Sello Tora (índice+medio)                 →  Captura\n"
-    "Sello Ushi (índice)                       →  Deshacer\n"
-    "Sello U (índice+medio separados)          →  Rehacer\n"
-    "Sello Uma (pulgar+índice+meñique)         →  Zoom +\n"
-    "Sello Hitsuji (índice+medio cruzados)     →  Silenciar sistema\n"
-    "Sello Saru (puño, pulgar arriba)          →  Teclado HUD\n"
-    "Sello Inu (solo meñique)                  →  Volumen -\n"
-    "Sello I (puño, pulgar al costado)         →  Bloquear sesión\n"
-    "Sello Ne (manos juntas, hacia arriba)     →  Zoom -\n"
-    "Sello Mi (manos juntas, hacia abajo)      →  Scroll abajo\n"
-    "Sello Tori (manos en abanico)             →  Scroll arriba\n"
-    "Sello Kai (manos juntas, dedos cruzados)  →  Cerrar Jarvis\n"
-    "Sello Tatsu (1 puño + 1 mano abierta)     →  Volumen +\n"
-    "Sello Gojo (marco en L, 2 manos arriba)   →  Click derecho\n"
-    "Sello Sukuna (chasquido pulgar-medio)     →  Captura\n"
-    "Sello Megumi (índice+medio+anular)        →  Silenciar sistema"
+    "Índice movido                               →  Puntero\n"
+    "Pulgar + Índice (pinch)                     →  Click / Drag\n"
+    "Pulgar + Medio (pinch)                      →  Click derecho\n"
+    "Índice + Medio arriba                       →  Scroll\n"
+    "Pulgar + Anular (pinch)                     →  Zoom\n"
+    "Palma abierta                               →  Teclado HUD\n"
+    "Pulgar + Meñique + mover                    →  Volumen\n"
+    "Pulgar + Anular cerrado                     →  Captura\n"
+    "Shaka 1.5s (1 mano)                         →  Bloquear sesión\n"
+    "Palma, pulgar a meñique                     →  Silenciar voz\n"
+    "2 puños juntos 1.2s                         →  Pausar / Reanudar\n"
+    "2 manos en Shaka 1.5s                       →  Cerrar Jarvis\n"
+    "Tecla q                                     →  Salir\n"
+    "Tecla h                                     →  Mostrar/ocultar lista\n"
+    "Tecla m                                     →  Modo espejo on/off\n"
+    "Teclas +/-                                  →  Transparencia\n"
+    "Sello Tora (índice+medio)                   →  Captura\n"
+    "Sello Ushi (índice)                         →  Deshacer\n"
+    "Sello U (índice+medio separados)            →  Rehacer\n"
+    "Sello Uma (pulgar+índice+meñique)           →  Zoom +\n"
+    "Sello Hitsuji (índice+medio cruzados)       →  Silenciar sistema\n"
+    "Sello Saru (puño, pulgar arriba)            →  Teclado HUD\n"
+    "Sello Inu (solo meñique)                    →  Volumen -\n"
+    "Sello I (puño, pulgar al costado)           →  Bloquear sesión\n"
+    "Sello Ne (manos juntas, hacia arriba)       →  Zoom -\n"
+    "Sello Mi (manos juntas, hacia abajo)        →  Scroll abajo\n"
+    "Sello Tori (manos en abanico)               →  Scroll arriba\n"
+    "Sello Kai (manos juntas, dedos cruzados)    →  Cerrar Jarvis\n"
+    "Sello Tatsu (1 puño + 1 mano abierta)       →  Volumen +\n"
+    "Sello Gojo (marco en L, 2 manos arriba)     →  Click derecho\n"
+    "Sello Sukuna (chasquido pulgar-medio)       →  Captura\n"
+    "Sello Megumi (índice+medio+anular)          →  Silenciar sistema\n"
+    "Aplauso (2 manos, acercar y separar)        →  Teclado HUD\n"
+    "Corazón coreano (pulgar+índice, sostenido)  →  Captura"
 )
 
 

@@ -69,6 +69,16 @@ JJK_GOJO_ANGLE_TOLERANCE_DEGREES = 35  # tolerancia sobre el angulo objetivo de 
 JJK_GOJO_MAX_DISTANCE_FRACTION = 0.30  # manos "juntas" para el marco, mas laxo que el clasp de NARUTO (0.20) - no exige contacto
 JJK_GOJO_MAX_AVG_WRIST_Y = 0.55  # ambas munecas en la mitad superior del frame (aprox. altura de pecho/cara)
 
+# TASK-071/072 (Fase 7): gestos comunes. Umbrales RAZONADOS, no medidos en
+# camara real - misma salvedad que las Fases 5/6, pospuesta a la prueba
+# integral final.
+CLAP_CONTACT_MAX_DISTANCE_FRACTION = 0.12  # centros de palma bien juntos (mas ajustado que el "clasp" de 0.20 - un aplauso es contacto real)
+CLAP_RELEASE_MIN_DISTANCE_FRACTION = 0.30  # separacion clara despues del contacto
+CLAP_MAX_WINDOW_SECONDS = 0.4  # un aplauso es rapido; acercarse+alejarse sin apuro no cuenta
+
+KOREAN_HEART_CONTACT_THRESHOLD = 20  # pulgar cerca del PRIMER nudillo del indice (landmark 6) - no de la punta, eso es PINCH_CLICK
+KOREAN_HEART_HOLD_SECONDS = 1.0  # mismo mecanismo que LOCK_SESSION - sostenido, no edge-triggered como PINCH_DOWN
+
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
 

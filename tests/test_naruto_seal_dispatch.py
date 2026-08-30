@@ -70,6 +70,14 @@ class DefaultBindingTests(_AppTestCase):
         self.app._dispatch_naruto_seal("JJK_GOJO_DOMAIN")  # default: RIGHT_CLICK
         self.mock_mouse_pyautogui.rightClick.assert_called_once()
 
+    def test_common_gesture_default_binding_dispatches_the_right_command(self):
+        # TASK-073 (Fase 7): CLAP/KOREAN_HEART no llevan prefijo NARUTO_/JJK_
+        # - run() ahora rutea por pertenencia a NARUTO_DEFAULT_BINDINGS, no
+        # por prefijo (ver comentario de _dispatch_naruto_seal), asi que
+        # _dispatch_naruto_seal en si los maneja identico.
+        self.app._dispatch_naruto_seal("KOREAN_HEART")  # default: SCREENSHOT
+        self.assertTrue(self.mock_os.take_screenshot.called)
+
     def test_every_default_binding_is_a_known_dispatchable_action(self):
         # Cada valor de NARUTO_DEFAULT_BINDINGS tiene que ser algo que
         # _dispatch_voice_action realmente sepa manejar - si no, el binding

@@ -156,6 +156,28 @@ ICON_SPECS = {
         "pinch": None,
         "glyph": None,
     },
+    # TASK-073 (Fase 7): gestos comunes.
+    "clap": {
+        # Misma forma de manos que naruto_tori (ambas bien abiertas) a
+        # proposito - lo unico que distingue a Clap es el glyph de impacto
+        # ("clap_burst"), ya que el modelo de icono no representa
+        # movimiento/distancia entre manos (Clap ES un impulso, Tori es
+        # estatico sostenido).
+        "hands": 2,
+        "extended": ({"index", "middle", "ring", "pinky"}, {"index", "middle", "ring", "pinky"}),
+        "pinch": None,
+        "glyph": "clap_burst",
+    },
+    "korean_heart": {
+        # Puño cerrado con el pulgar cerca del primer nudillo del indice (no
+        # de la punta, eso es pinch_click) - unica combinacion de 1 mano con
+        # el pulgar TAMBIEN recogido (extended=set() vacio), ya distinta sin
+        # depender del glyph; el corazon es tematico, no el discriminador.
+        "hands": 1,
+        "extended": set(),
+        "pinch": ("thumb", "index"),
+        "glyph": "heart",
+    },
 }
 
 
@@ -263,6 +285,36 @@ def _draw_snap(draw, box):
         )
 
 
+def _draw_clap_burst(draw, box):
+    # TASK-073 (Fase 7): impacto de "aplauso" - 6 lineas cortas radiando
+    # desde un punto relleno en el centro (mas denso que "snap", que usa 4
+    # lineas sin relleno - visualmente distinto a proposito, mismo espiritu
+    # de "esto es un impulso, no una pose").
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    r_in, r_out = (x1 - x0) * 0.12, (x1 - x0) * 0.55
+    for angle in (0, 60, 120, 180, 240, 300):
+        rad = math.radians(angle)
+        dx, dy = math.cos(rad), math.sin(rad)
+        draw.line(
+            [cx + dx * r_in, cy + dy * r_in, cx + dx * r_out, cy + dy * r_out],
+            fill=_GLYPH_COLOR,
+            width=2,
+        )
+    r_dot = (x1 - x0) * 0.1
+    draw.ellipse([cx - r_dot, cy - r_dot, cx + r_dot, cy + r_dot], fill=_GLYPH_COLOR)
+
+
+def _draw_heart(draw, box):
+    x0, y0, x1, y1 = box
+    width = x1 - x0
+    cx = (x0 + x1) / 2
+    r = width * 0.28
+    draw.ellipse([cx - r * 2, y0, cx, y0 + r * 2], fill=_GLYPH_COLOR)
+    draw.ellipse([cx, y0, cx + r * 2, y0 + r * 2], fill=_GLYPH_COLOR)
+    draw.polygon([(cx - r * 2, y0 + r * 1.2), (cx + r * 2, y0 + r * 1.2), (cx, y1)], fill=_GLYPH_COLOR)
+
+
 GLYPH_DRAWERS = {
     "arrow_up_down": _draw_arrow_up_down,
     "zoom": _draw_zoom,
@@ -273,6 +325,8 @@ GLYPH_DRAWERS = {
     "pause": _draw_pause,
     "close": _draw_close,
     "snap": _draw_snap,
+    "clap_burst": _draw_clap_burst,
+    "heart": _draw_heart,
 }
 
 _GLYPH_BOX = (ICON_SIZE - 15, 2, ICON_SIZE - 2, 15)  # esquina superior derecha

@@ -152,6 +152,8 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | JJK Gojo — Domain Expansion — two-hand (both hands' thumb→index vectors ~90° apart, hands close together, held up in the upper frame), held 1.2s | Right click |
 | JJK Sukuna — finger snap (thumb+middle drop below contact then rise above release within 0.35s — `ImpulseDetector`, TEMPORAL, no hold) | Screenshot |
 | JJK Megumi — shadow summon (index+middle crossed, **ring extended** — the explicit discriminator vs. Hitsuji, which requires ring curled), held 0.6s | Mute |
+| Clap — two-hand (both hands' palm centers drop below contact then rise above release within 0.4s — `ImpulseDetector`, TEMPORAL, no hold) | Toggle on-screen keyboard ("Clapper" pun) |
+| Korean finger heart — one-hand (fist, thumb near the index's first joint — **not** its tip, which stays `PINCH_CLICK`'s territory), held 1.0s | Screenshot (classic photo pose) |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
 toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
@@ -1136,6 +1138,89 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     exactly the kind of failure Phase 4's real-camera pass caught 7 times
     out of 8 and this phase, by explicit user choice, hasn't attempted yet.
     Deferred to the combined Phase 4+5+6 "prueba integral" live-camera pass.
+- **Phase 7 (TASK-071/072/073) — common gestures (Clap, Korean finger
+  heart).** Same "keep coding, defer all verification" instruction as Phase
+  6 — everything below is reasoned and synthetic-fixture-verified only.
+  - **`CLAP` (two-hand, temporal, taxonomy Pattern D per design.md §1.5)** —
+    a SECOND `ImpulseDetector` instance (the first reusable-primitive payoff:
+    design.md explicitly forbids a parallel reimplementation) tracking the
+    distance between the two hands' PALM centers (average of landmarks
+    0/5/9/13/17 — a new `_palm_center()`/`_palm_centers_distance()` pair,
+    deliberately distinct from `_hand_center()`/`_hands_distance()`, which
+    average all 21 landmarks for the Naruto/JJK two-hand seals, and from the
+    pinch-point average the two-hand pinch-zoom uses — 3 different "hand
+    center" notions, each already owned by a different existing gesture).
+    Thresholds reasoned as fractions of the frame diagonal, same unit as the
+    Naruto two-hand seals: contact 0.12 (tighter than their 0.20 "clasped"
+    proximity — a clap is actual near-contact, not just "brought together"),
+    release 0.30, window 0.4s. Fed unconditionally every frame (same reason
+    as Sukuna — the detector needs real distance every frame); the `CLAP`
+    event itself is gated behind the full two-hand hierarchy (`_twohand_seal
+    is None` and none of `both_shaka`/`both_fists`/`both_pinching`) so it
+    never collides with an already-recognized two-hand gesture, and folded
+    into `two_hand_active` like every other two-hand event. The
+    `clap_hand()` test fixture was deliberately built with all 4 non-thumb
+    fingers uniformly extended (`curl_ratio=1.0`, outside the 0.2–0.8
+    "interlaced" band Ne/Mi/Kai/Tatsu depend on) specifically so that NO
+    distance between two such hands accidentally satisfies an existing
+    two-hand gesture — confirmed by a dedicated test
+    (`test_clap_hand_pair_never_matches_an_existing_two_hand_gesture`) across
+    contact/release/near-miss distances, not assumed.
+  - **`KOREAN_HEART` (one-hand, static + hold-confirmation)** — thumb tip
+    close to the index's PIP (landmark 6, the first joint), explicitly NOT
+    close to its tip (landmark 8, `PINCH_CLICK`'s own metric) — the
+    structural distinction is what makes `d_thumb_index >= PINCH_CLICK` true
+    by construction for this shape, so `pinch_winner` can never resolve to
+    `"index"` for it and `PINCH_DOWN` can never fire for it, at any point
+    during the hold — not just "unlikely below some tuned threshold." Held
+    `KOREAN_HEART_HOLD_SECONDS=1.0` before firing (same mechanism as
+    `LOCK_SESSION`/Shaka), so a fast touch-and-release of the *real*
+    `PINCH_CLICK` shape stays exclusively `PINCH_DOWN`/`PINCH_UP` — it's
+    geometrically a different shape from the start, not a race against the
+    clock.
+    - **Real collision found and fixed WITHOUT a camera, by the test suite
+      itself** (same discipline as Phase 4's `fist_hand()`/`NARUTO_I`
+      incident): the first draft of `korean_heart_shape` didn't check finger
+      curl at all, and `tests/test_gesture_engine_regression.py`'s
+      "existing fixtures don't leak a new event" census caught that
+      `silence_hand()` — whose thumb (landmark 4) and index PIP (landmark
+      6) are coincidentally placed at the exact same point by that
+      fixture's own construction, unrelated to Korean Heart — satisfied
+      both of Korean Heart's conditions after being held. **Fixed** by
+      requiring `_fingers_curled(pts, 8, 12, 16, 20)` too (Korean Heart is a
+      closed fist with only the thumb crossing; `SILENCE` requires all 4
+      fingers extended) — a structural exclusion, not a threshold nudge,
+      matching how every other near-collision in this project has been
+      resolved once found.
+  - **Dispatch mechanism simplified, no behavior change**: `main.py`'s
+    `run()` loop used to route by `event.startswith("NARUTO_") or
+    event.startswith("JJK_")`; `CLAP`/`KOREAN_HEART` carry neither prefix
+    (they're not "seals"), so the check became `event in
+    NARUTO_DEFAULT_BINDINGS` instead — simpler (a plain membership test) and
+    already correct for every existing key, since every event
+    `GestureEngine` can emit through this path has always had exactly one
+    entry in that dict. `_dispatch_naruto_seal` itself didn't change; its
+    docstring was updated to stop implying prefix-awareness it never
+    actually had.
+  - **Dispatch defaults, thematic reuse (fixed 14-action vocabulary long
+    since exhausted, see Phase 6):** `CLAP`→`KEYBOARD_TOGGLE` (the "Clapper"
+    — clap to turn something on/off — reused from Saru) and
+    `KOREAN_HEART`→`SCREENSHOT` (the finger heart is a classic photo pose —
+    reused from Tora/Sukuna).
+  - **Icons**: `clap` reuses `naruto_tori`'s exact hand shape (both hands
+    fully open) on purpose — Clap and Tori are visually identical as static
+    poses, since the icon model can't represent motion or inter-hand
+    distance — differentiated ONLY by a NEW glyph (`clap_burst`: 6 short
+    lines radiating from a filled center dot, denser than Sukuna's `snap`
+    glyph, deliberately distinct from it too — same "this is an impulse"
+    language, different silhouette). `korean_heart` is the first one-hand
+    icon with an empty extended-set (a plain closed fist, thumb marked via
+    the existing pinch-marker mechanism at its curled position) plus a new
+    `heart` glyph. All 34 icons confirmed pairwise byte-distinct
+    (`tests/test_gesture_icons.py`).
+  - **Honest limitation, explicitly not yet closed:** neither gesture has
+    touched a real camera. Deferred, along with Phases 4/5/6, to the
+    combined "prueba integral" live-camera pass.
 
 ## Known limitations
 

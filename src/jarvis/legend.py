@@ -49,6 +49,10 @@ ENTRIES = [
     ("Sello Gojo (marco en L, 2 manos arriba)", "Click derecho", "jjk_gojo_domain"),
     ("Sello Sukuna (chasquido pulgar-medio)", "Captura", "jjk_sukuna"),
     ("Sello Megumi (índice+medio+anular)", "Silenciar sistema", "jjk_megumi"),
+    # TASK-073 (Fase 7): gestos comunes. Aplauso es temporal (ImpulseDetector,
+    # sin hold); corazón coreano exige config.KOREAN_HEART_HOLD_SECONDS.
+    ("Aplauso (2 manos, acercar y separar)", "Teclado HUD", "clap"),
+    ("Corazón coreano (pulgar+índice, sostenido)", "Captura", "korean_heart"),
 ]
 
 

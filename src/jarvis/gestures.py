@@ -278,6 +278,24 @@ def _is_jjk_megumi(pts):
     return _fingers_crossed(pts, 8, 5, 12, 9)
 
 
+# TASK-071 (Fase 7): CLAP. design.md §7.1 pide el centro de PALMA (promedio
+# de landmarks 0/5/9/13/17), no el centro de los 21 puntos (`_hand_center`,
+# usado por los sellos de 2 manos) ni el punto medio de pellizco (usado por
+# el zoom de 2 manos) - 3 nociones de "centro de mano" distintas, cada una
+# ya en uso por un gesto distinto de este archivo.
+def _palm_center(pts, w, h):
+    idx = (0, 5, 9, 13, 17)
+    xs = [pts[i].x for i in idx]
+    ys = [pts[i].y for i in idx]
+    return (sum(xs) / len(xs)) * w, (sum(ys) / len(ys)) * h
+
+
+def _palm_centers_distance(p1, p2, w, h):
+    c1x, c1y = _palm_center(p1, w, h)
+    c2x, c2y = _palm_center(p2, w, h)
+    return math.hypot(c2x - c1x, c2y - c1y)
+
+
 def _bbox_area_fraction(landmarks, w, h):
     xs = [p.x for p in landmarks]
     ys = [p.y for p in landmarks]
@@ -372,6 +390,19 @@ class GestureEngine:
             config.JJK_SUKUNA_MAX_WINDOW_SECONDS,
         )
 
+        # TASK-071 (Fase 7): CLAP - segunda instancia de ImpulseDetector
+        # (design.md §7.1 pide explicitamente reusar el primitivo, no
+        # reimplementarlo), sobre la distancia entre centros de PALMA
+        # (fraccion de la diagonal del frame, mismas unidades que los
+        # umbrales de 2 manos existentes).
+        self._clap_detector = ImpulseDetector(
+            config.CLAP_CONTACT_MAX_DISTANCE_FRACTION,
+            config.CLAP_RELEASE_MIN_DISTANCE_FRACTION,
+            config.CLAP_MAX_WINDOW_SECONDS,
+        )
+
+        self._korean_heart_hold_start = None  # TASK-072: mismo mecanismo que LOCK_SESSION
+
     @staticmethod
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
@@ -435,6 +466,13 @@ class GestureEngine:
         p1, p2 = hands[0].landmarks, hands[1].landmarks
         both_shaka = _is_shaka(p1) and _is_shaka(p2)
         both_fists = _is_fist(p1) and _is_fist(p2)
+
+        # TASK-071 (Fase 7): CLAP. Alimentado SIN gate (mismo motivo que
+        # Sukuna - el detector necesita la distancia real cuadro a cuadro
+        # para su maquina de estados); el EVENTO se emite mas abajo, una vez
+        # conocida la jerarquia completa de gestos de 2 manos.
+        _clap_dist_frac = _palm_centers_distance(p1, p2, w, h) / math.hypot(w, h)
+        _clap_fired = self._clap_detector.update(_clap_dist_frac, now)
 
         if both_shaka:
             if self.close_hold_start is None:
@@ -557,8 +595,21 @@ class GestureEngine:
                 self._twohand_seal_hold_start = None
                 self._twohand_seal_miss_streak = 0
 
+        # CLAP se emite recien aca, una vez conocida la jerarquia completa de
+        # gestos de 2 manos (Naruto/JJK/shaka/puños/pinch-zoom ya excluidos -
+        # jerarquia, no solapamiento, mismo principio que el resto del
+        # archivo). El detector ya se alimento arriba sin este gate.
+        _clap_happened = _clap_fired and _twohand_seal is None and not both_shaka and not both_fists and not both_pinching
+        if _clap_happened:
+            events.append("CLAP")
+
         two_hand_active = (
-            both_shaka or both_fists or both_pinching or (fists[0] != fists[1]) or _twohand_seal is not None
+            both_shaka
+            or both_fists
+            or both_pinching
+            or (fists[0] != fists[1])
+            or _twohand_seal is not None
+            or _clap_happened
         )
         return events, both_pinching, both_shaka, two_hand_active
 
@@ -777,6 +828,39 @@ class GestureEngine:
                 self._naruto_hold_seal = None
                 self._naruto_hold_start = None
                 self._naruto_miss_streak = 0
+
+        # TASK-072 (Fase 7): Korean finger heart. Pulgar cerca del PRIMER
+        # nudillo del indice (landmark 6), NO de la punta (eso ya es
+        # PINCH_CLICK, d_thumb_index) - la distincion geometrica que
+        # design.md §7.2 pide, y lo que hace que esta forma nunca pueda
+        # ganar pinch_winner=="index" (`d_thumb_index >= PINCH_CLICK` es
+        # estructuralmente incompatible con el umbral de PINCH_CLICK).
+        # `_fingers_curled(pts, 8, 12, 16, 20)` se agrego DESPUES de que el
+        # test de colision encontrara que silence_hand() (pulgar y primer
+        # nudillo del indice coincidentes por construccion, sin relacion
+        # alguna con este gesto) satisfacia igual las 2 condiciones de
+        # arriba - SILENCE exige los 4 dedos extendidos, este gesto es un
+        # puno con solo el pulgar cruzado, asi que la curvatura los separa
+        # estructuralmente (mismo tipo de hallazgo que el de `fist_hand()` en
+        # la Fase 4, ver ARCHITECTURE.md). Sostenido (no edge-triggered como
+        # PINCH_DOWN) para que un toque-y-suelta rapido nunca resuelva a
+        # KOREAN_HEART - mismo mecanismo que LOCK_SESSION/Shaka.
+        d_thumb_index_pip = self._dist3(thumb, pts[6], w, h)
+        korean_heart_shape = (
+            pinch_winner is None
+            and not two_hand_active
+            and d_thumb_index_pip < config.KOREAN_HEART_CONTACT_THRESHOLD
+            and d_thumb_index >= config.PINCH_CLICK
+            and _fingers_curled(pts, 8, 12, 16, 20)
+        )
+        if korean_heart_shape:
+            if self._korean_heart_hold_start is None:
+                self._korean_heart_hold_start = now
+            elif now - self._korean_heart_hold_start > config.KOREAN_HEART_HOLD_SECONDS:
+                events.append("KOREAN_HEART")
+                self._korean_heart_hold_start = None
+        else:
+            self._korean_heart_hold_start = None
 
         # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click

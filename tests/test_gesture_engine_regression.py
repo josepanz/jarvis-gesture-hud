@@ -1373,5 +1373,155 @@ class JJKGestureTests(unittest.TestCase):
                 self.assertNotIn("JJK_GOJO_DOMAIN", events)
 
 
+# TASK-071/072/073 (Fase 7): gestos comunes. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo.
+def clap_hand(cx=0.5, cy=0.5):
+    # Los 4 dedos (no el pulgar) bien extendidos parejos (curl_ratio=1.0,
+    # AFUERA de la banda "entrelazada" 0.2-0.8 que usan Ne/Mi/Kai/Tatsu) y el
+    # pulgar en una posicion neutra que no forma el angulo de 90 grados de
+    # Gojo ni pellizca nada - a proposito, para que 2 de estas manos NUNCA
+    # satisfagan ningun gesto de 2 manos EXISTENTE sin importar la distancia
+    # entre ellas (verificado explicitamente mas abajo).
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx - 0.06, cy, 0)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)
+    pts[9] = Landmark(cx - 0.02, cy, 0)
+    pts[10] = Landmark(cx - 0.02, cy - 0.05, 0)
+    pts[12] = Landmark(cx - 0.02, cy - 0.15, 0)
+    pts[13] = Landmark(cx + 0.02, cy, 0)
+    pts[14] = Landmark(cx + 0.02, cy - 0.05, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)
+    pts[17] = Landmark(cx + 0.06, cy, 0)
+    pts[18] = Landmark(cx + 0.06, cy - 0.05, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)
+    pts[2] = Landmark(cx - 0.1, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.15, cy + 0.1, 0)
+    return pts
+
+
+def korean_heart_hand(cx=0.5, cy=0.5):
+    # Identica a un puno (los 4 dedos recogidos) salvo el pulgar: en vez de
+    # recogido junto a la mano (como en Saru/I), la punta del pulgar (4)
+    # queda MUY cerca del PRIMER nudillo del indice (6) - no de su punta
+    # (8), que es lo que exige PINCH_CLICK - la distincion geometrica que
+    # design.md §7.2 pide. Verificado explicitamente mas abajo que
+    # d_thumb_index (punta a punta) queda por ENCIMA de PINCH_CLICK, y que
+    # el offset pulgar-palma no cruza los umbrales de Saru ni de I.
+    pts = _naruto_base(cx, cy)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.05, cy + 0.02, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[2] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.055, cy - 0.048, 0)
+    return pts
+
+
+class ClapTests(unittest.TestCase):
+    def test_hands_closing_then_separating_fires_clap_once(self):
+        engine = GestureEngine()
+        contact = [Hand(clap_hand(0.48, 0.5), "Left"), Hand(clap_hand(0.52, 0.5), "Right")]
+        release = [Hand(clap_hand(0.2, 0.5), "Left"), Hand(clap_hand(0.78, 0.5), "Right")]
+        engine.process(contact, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(release, W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("CLAP", events)
+
+    def test_hands_passing_near_without_reaching_contact_does_not_fire_clap(self):
+        engine = GestureEngine()
+        # Nunca cruza CLAP_CONTACT_MAX_DISTANCE_FRACTION (0.12) en ningun momento.
+        far = [Hand(clap_hand(0.35, 0.5), "Left"), Hand(clap_hand(0.60, 0.5), "Right")]
+        near = [Hand(clap_hand(0.42, 0.5), "Left"), Hand(clap_hand(0.58, 0.5), "Right")]
+        engine.process(far, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(near, W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("CLAP", events)
+
+    def test_clap_hand_pair_never_matches_an_existing_two_hand_gesture(self):
+        # Verifica explicitamente la premisa de la que depende todo lo de
+        # arriba: 2 clap_hand(), a cualquier distancia relevante, no
+        # satisfacen ningun gesto de 2 manos EXISTENTE (shaka/puños/pinch/
+        # Naruto/JJK) - si lo hicieran, la jerarquia bloquearia CLAP.
+        for label, (cx1, cx2) in {
+            "contact": (0.48, 0.52),
+            "release": (0.2, 0.78),
+            "near_miss": (0.42, 0.58),
+        }.items():
+            with self.subTest(pair=label):
+                engine = GestureEngine()
+                hands = [Hand(clap_hand(cx1, 0.5), "Left"), Hand(clap_hand(cx2, 0.5), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                engine.pause_hold_start = time.time() - 2.0
+                engine.close_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e != "CLAP"],
+                    f"{label} unexpectedly produced a non-CLAP event: {events}",
+                )
+
+
+class KoreanHeartTests(unittest.TestCase):
+    def test_a_fast_touch_and_release_fires_pinch_down_up_only(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertEqual(events, ["PINCH_DOWN"])
+        self.assertNotIn("KOREAN_HEART", events)
+
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("KOREAN_HEART", events)
+
+    def test_a_sustained_pose_past_the_hold_fires_korean_heart_without_pinch_down(self):
+        engine = GestureEngine()
+        pts = korean_heart_hand()
+        _, _, events = process(engine, pts)
+        self.assertNotIn("PINCH_DOWN", events)
+        self.assertNotIn("KOREAN_HEART", events)  # todavia no se cumplio el hold
+
+        engine._korean_heart_hold_start = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertIn("KOREAN_HEART", events)
+        self.assertNotIn("PINCH_DOWN", events)
+
+    def test_korean_heart_shape_never_wins_pinch_winner_index(self):
+        # design.md §7.2: la unica forma de garantizar "nunca dispara
+        # PINCH_DOWN" por construccion (no solo por umbral) es que
+        # d_thumb_index (punta a punta) quede estructuralmente por ENCIMA de
+        # PINCH_CLICK para esta forma.
+        pts = korean_heart_hand()
+        w, h = W, H
+        thumb, index = pts[4], pts[8]
+        d_thumb_index = GestureEngine._dist3(thumb, index, w, h)
+        self.assertGreaterEqual(d_thumb_index, config.PINCH_CLICK)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_korean_heart_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    process(engine, pts)
+                engine._korean_heart_hold_start = time.time() - 2.0
+                _, _, events = process(engine, pts)
+                self.assertNotIn("KOREAN_HEART", events, f"{name} unexpectedly produced KOREAN_HEART: {events}")
+
+
 if __name__ == "__main__":
     unittest.main()

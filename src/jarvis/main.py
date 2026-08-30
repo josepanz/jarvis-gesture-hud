@@ -199,6 +199,11 @@ NARUTO_DEFAULT_BINDINGS = {
     "JJK_GOJO_DOMAIN": "RIGHT_CLICK",  # unica accion libre - Gojo, el mas prominente de los 3, se la queda
     "JJK_SUKUNA": "SCREENSHOT",  # "snap" -> sacar una foto, mismo binding que Tora
     "JJK_MEGUMI": "MUTE",  # invocacion sigilosa de sombras -> silenciar, mismo binding que Hitsuji
+    # TASK-073 (Fase 7): gestos comunes (no son "sellos", pero comparten el
+    # mismo mecanismo generico - ver _dispatch_naruto_seal). Vocabulario fijo
+    # ya agotado (ver comentario arriba), ambos reusan una accion existente.
+    "CLAP": "KEYBOARD_TOGGLE",  # "Clapper": aplaudir para prender/apagar algo - mismo binding que Saru
+    "KOREAN_HEART": "SCREENSHOT",  # pose clasica de foto -> Captura, mismo binding que Tora/Sukuna
 }
 
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:
@@ -494,10 +499,12 @@ class JarvisApp:
             self._dispatch_migrated(action_name, None)
 
     def _dispatch_naruto_seal(self, event):
-        """TASK-063 (Fase 4), extendido en TASK-070 (Fase 6) a sellos JJK (el
-        prefijo NARUTO_/JJK_ es solo para distinguir sellos "estilo mano" en
-        `run()` de otros eventos - la resolucion del binding en si nunca miro
-        el prefijo). Resuelve el binding (override del perfil activo >
+        """TASK-063 (Fase 4), extendido en TASK-070/073 (Fases 6/7) a JJK y a
+        los gestos comunes (CLAP/KOREAN_HEART) - el nombre quedo de la
+        primera version, pero la resolucion del binding en si nunca miro el
+        nombre del evento en particular, solo si tiene entrada en
+        NARUTO_DEFAULT_BINDINGS (`run()` decide con eso, ya no con un
+        prefijo). Resuelve el binding (override del perfil activo >
         NARUTO_DEFAULT_BINDINGS > None, via ProfileManager.get_gesture_binding()
         ya existente) y reusa _dispatch_voice_action - mismo camino que la voz,
         mismo feedback. Un sello sin binding (ni de perfil ni default) es un
@@ -561,7 +568,7 @@ class JarvisApp:
             self._last_screen_xy = screen_xy
 
             for event in events:
-                if event.startswith("NARUTO_") or event.startswith("JJK_"):
+                if event in NARUTO_DEFAULT_BINDINGS:
                     self._dispatch_naruto_seal(event)
                 else:
                     self._dispatch(event, cam_xy, screen_xy)
