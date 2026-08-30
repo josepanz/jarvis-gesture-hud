@@ -19,7 +19,7 @@ with patch("cv2.VideoCapture"), patch("jarvis.hand_tracker.HandTracker.__init__"
     from jarvis.core.profiles import Profile  # noqa: E402
     from jarvis.gestures import GestureEngine  # noqa: E402
     from jarvis.hand_tracker import Hand  # noqa: E402
-    from jarvis.main import NARUTO_DEFAULT_BINDINGS, JarvisApp  # noqa: E402
+    from jarvis.main import GESTURE_DEFAULT_BINDINGS, JarvisApp  # noqa: E402
 
 
 def _make_app(mock_os):
@@ -34,6 +34,7 @@ class _AppTestCase(unittest.TestCase):
         patchers = [
             patch("jarvis.actions.mouse.pyautogui"),
             patch("jarvis.actions.keyboard.pyautogui"),
+            patch("jarvis.actions.macro.pyautogui"),  # TASK-076: HotkeyCommand tiene su propio import de pyautogui
             patch("jarvis.actions.system.CrossPlatformOS"),
             patch("cv2.VideoCapture"),
             patch("jarvis.hand_tracker.HandTracker.__init__", return_value=None),
@@ -47,7 +48,15 @@ class _AppTestCase(unittest.TestCase):
         mocks = [p.start() for p in patchers]
         for p in patchers:
             self.addCleanup(p.stop)
-        self.mock_mouse_pyautogui, self.mock_kb_pyautogui, self.mock_os = mocks[0], mocks[1], mocks[2]
+        self.mock_mouse_pyautogui, self.mock_kb_pyautogui, self.mock_macro_pyautogui, self.mock_os = mocks[:4]
+        # PressKeyCommand.can_execute() (TASK-076) mira pyautogui.KEYBOARD_KEYS,
+        # una lista REAL de datos, no una llamada al SO - mockear el modulo
+        # entero la reemplaza por un MagicMock cuyo "in" siempre da False, asi
+        # que se restaura el valor real sobre el mock (las LLAMADAS de verdad,
+        # press()/write(), siguen mockeadas normalmente).
+        import pyautogui as _real_pyautogui
+
+        self.mock_kb_pyautogui.KEYBOARD_KEYS = _real_pyautogui.KEYBOARD_KEYS
         self.app = JarvisApp()
         self.addCleanup(self.app.overlay.close)
 
@@ -72,21 +81,36 @@ class DefaultBindingTests(_AppTestCase):
 
     def test_common_gesture_default_binding_dispatches_the_right_command(self):
         # TASK-073 (Fase 7): CLAP/KOREAN_HEART no llevan prefijo NARUTO_/JJK_
-        # - run() ahora rutea por pertenencia a NARUTO_DEFAULT_BINDINGS, no
+        # - run() ahora rutea por pertenencia a GESTURE_DEFAULT_BINDINGS, no
         # por prefijo (ver comentario de _dispatch_naruto_seal), asi que
         # _dispatch_naruto_seal en si los maneja identico.
         self.app._dispatch_naruto_seal("KOREAN_HEART")  # default: SCREENSHOT
         self.assertTrue(self.mock_os.take_screenshot.called)
 
     def test_every_default_binding_is_a_known_dispatchable_action(self):
-        # Cada valor de NARUTO_DEFAULT_BINDINGS tiene que ser algo que
-        # _dispatch_voice_action realmente sepa manejar - si no, el binding
-        # quedaria mudo silenciosamente.
+        # Cada valor de GESTURE_DEFAULT_BINDINGS tiene que ser algo que
+        # _dispatch() realmente sepa manejar - si no, el binding quedaria
+        # mudo silenciosamente. TASK-081 (Fase 8) amplio esto mas alla del
+        # vocabulario fijo: los 19 gestos "clasicos" mapean a si mismos
+        # (identidad), que _dispatch() ya sabia manejar desde antes de esta
+        # fase (son sus propios nombres de evento).
         from jarvis.main import _MIGRATED_GESTURES
 
-        handled = _MIGRATED_GESTURES | {"UNDO", "REDO", "MUTE", "KEYBOARD_TOGGLE", "CLOSE_APP"}
-        for seal, action in NARUTO_DEFAULT_BINDINGS.items():
-            self.assertIn(action, handled, f"{seal} -> {action!r} no es una accion que _dispatch_voice_action maneje")
+        handled = _MIGRATED_GESTURES | {
+            "UNDO",
+            "REDO",
+            "MUTE",
+            "KEYBOARD_TOGGLE",
+            "CLOSE_APP",
+            "SILENCE",
+            "TOGGLE_ACTIVE",
+            "TOGGLE_MIRROR",
+            "TOGGLE_LEGEND",
+            "LEGEND_ALPHA_UP",
+            "LEGEND_ALPHA_DOWN",
+        }
+        for seal, action in GESTURE_DEFAULT_BINDINGS.items():
+            self.assertIn(action, handled, f"{seal} -> {action!r} no es una accion que _dispatch() maneje")
 
 
 class ProfileOverrideTests(_AppTestCase):
@@ -99,6 +123,49 @@ class ProfileOverrideTests(_AppTestCase):
 
         self.assertFalse(self.mock_os.take_screenshot.called)  # el default NO se uso
         self.assertTrue(self.mock_os.volume_up.called)  # gano el override
+
+
+class ClassicGestureRebindTests(_AppTestCase):
+    """TASK-081 (Fase 8): antes de esta fase, un gesto "clasico" (Fases 1-3)
+    iba directo a su accion, sin pasar por ProfileManager - ahora CUALQUIERA
+    es reasignable, con identidad como default (spec.md #8.3)."""
+
+    def test_an_unmodified_classic_gesture_behaves_exactly_as_before(self):
+        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.assertTrue(self.mock_os.volume_up.called)
+
+    def test_a_classic_gesture_can_be_reassigned_to_a_different_action(self):
+        override = Profile(name="custom", gesture_bindings={"SCROLL_UP": "SCREENSHOT"})
+        self.app.profiles.register(override)
+        self.app.profiles.switch_to("custom")
+
+        self.app._dispatch_naruto_seal("SCROLL_UP", cam_xy=(1, 1), screen_xy=(2, 2))
+
+        self.assertTrue(self.mock_os.take_screenshot.called)
+
+
+class MacroAndShortcutDispatchTests(_AppTestCase):
+    def test_a_gesture_bound_to_a_custom_shortcut_dispatches_a_hotkey_command(self):
+        self.app.profiles.active.gesture_bindings["NARUTO_TORA"] = "MY_SHORTCUT"
+        self.app.profiles.active.custom_shortcuts["MY_SHORTCUT"] = "ctrl+alt+t"
+
+        self.app._dispatch_naruto_seal("NARUTO_TORA")
+
+        self.mock_macro_pyautogui.hotkey.assert_called_once_with("ctrl", "alt", "t")
+        self.assertFalse(self.mock_os.take_screenshot.called)  # no cayo al default
+
+    def test_a_gesture_bound_to_a_macro_dispatches_a_macro_command(self):
+        self.app.profiles.active.gesture_bindings["NARUTO_TORA"] = "MACRO:greeting"
+        self.app.profiles.active.macros["MACRO:greeting"] = [
+            {"kind": "type-text", "value": "hola"},
+            {"kind": "press-key", "value": "enter"},
+        ]
+
+        self.app._dispatch_naruto_seal("NARUTO_TORA")
+
+        self.mock_kb_pyautogui.write.assert_called_once_with("hola")
+        self.mock_kb_pyautogui.press.assert_called_once_with("enter")
+        self.assertFalse(self.mock_os.take_screenshot.called)
 
 
 class UnboundSealTests(_AppTestCase):

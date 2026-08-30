@@ -145,5 +145,59 @@ class ProfileSensitivityTests(unittest.TestCase):
         self.assertEqual(pm.get_setting("made_up_setting", default="fallback"), "fallback")
 
 
+class ProfileSerializationTests(unittest.TestCase):
+    def test_custom_shortcuts_and_macros_default_to_empty_dicts(self):
+        p = Profile(name="x")
+        self.assertEqual(p.custom_shortcuts, {})
+        self.assertEqual(p.macros, {})
+
+    def test_custom_shortcuts_and_macros_must_be_dicts(self):
+        with self.assertRaises(ValueError):
+            Profile(name="x", custom_shortcuts=["not", "a", "dict"])
+        with self.assertRaises(ValueError):
+            Profile(name="x", macros=["not", "a", "dict"])
+
+
+class ProfileManagerToFromDictTests(unittest.TestCase):
+    def test_to_dict_round_trips_through_from_dict(self):
+        pm = ProfileManager()
+        pm.active.gesture_bindings["NARUTO_TORA"] = "SCREENSHOT"
+        pm.active.custom_shortcuts["MY_SHORTCUT"] = "ctrl+alt+t"
+        pm.active.macros["MACRO:greeting"] = [
+            {"kind": "type-text", "value": "hola"},
+            {"kind": "wait-ms", "value": 300},
+            {"kind": "press-key", "value": "enter"},
+        ]
+
+        data = pm.to_dict()
+        self.assertEqual(data["schema_version"], 1)
+
+        restored = ProfileManager.from_dict(data)
+        self.assertEqual(restored.active.gesture_bindings, pm.active.gesture_bindings)
+        self.assertEqual(restored.active.custom_shortcuts, pm.active.custom_shortcuts)
+        self.assertEqual(restored.active.macros, pm.active.macros)
+
+    def test_from_dict_preserves_the_default_profile_safe_settings(self):
+        # gesture_bindings/custom_shortcuts/macros no son lo unico que trae
+        # "default" - sensitivity/cooldowns/dwell nunca vienen del disco, y
+        # from_dict() no debe perderlos al aplicar lo persistido.
+        pm = ProfileManager.from_dict({"schema_version": 1, "profiles": {"default": {"gesture_bindings": {}}}})
+        self.assertEqual(pm.get_setting("cursor_sensitivity"), 1.0)
+
+    def test_from_dict_registers_non_default_profiles_too(self):
+        data = {"schema_version": 1, "profiles": {"default": {}, "gaming": {"gesture_bindings": {"CLAP": "MUTE"}}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertIn("gaming", pm.profile_names)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.gesture_bindings, {"CLAP": "MUTE"})
+
+    def test_from_dict_with_missing_or_malformed_data_falls_back_to_defaults(self):
+        for malformed in ({}, {"profiles": "not a dict"}, {"profiles": {"default": "not a dict"}}, None, []):
+            with self.subTest(malformed=malformed):
+                pm = ProfileManager.from_dict(malformed)
+                self.assertEqual(pm.active.name, "default")
+                self.assertEqual(pm.active.gesture_bindings, {})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,11 +42,26 @@ class Profile:
     dwell: dict = field(default_factory=dict)
     hud: dict = field(default_factory=dict)
     context_rules: dict = field(default_factory=dict)
+    # TASK-075 (Fase 8, design.md §5.2): {nombre_de_atajo: "ctrl+alt+t"} y
+    # {"MACRO:<nombre>": [pasos]} - un gesture_bindings[event] puede apuntar
+    # a una clave de cualquiera de los 2 (ademas de al vocabulario fijo de
+    # VALID_ACTIONS), resuelto en main.py._dispatch_gesture_event().
+    custom_shortcuts: dict = field(default_factory=dict)
+    macros: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not self.name:
             raise ValueError(f"name must be a non-empty string, got {self.name!r}")
-        for field_name in ("gesture_bindings", "sensitivity", "cooldowns", "dwell", "hud", "context_rules"):
+        for field_name in (
+            "gesture_bindings",
+            "sensitivity",
+            "cooldowns",
+            "dwell",
+            "hud",
+            "context_rules",
+            "custom_shortcuts",
+            "macros",
+        ):
             value = getattr(self, field_name)
             if not isinstance(value, dict):
                 raise ValueError(f"{field_name} must be a dict, got {value!r}")
@@ -141,3 +156,63 @@ class ProfileManager:
         except (AttributeError, TypeError):
             value = None
         return value if value is not None else _SAFE_DEFAULTS["dwell_duration_ms"]
+
+    # TASK-075 (Fase 8, design.md §5.2/spec.md §8.6): (de)serializacion a/desde
+    # el schema versionado que persiste `jarvis.core.config_store`. Solo
+    # gesture_bindings/custom_shortcuts/macros se persisten - sensitivity/
+    # cooldowns/dwell/hud/context_rules siguen siendo solo-codigo por ahora
+    # (spec.md #8 no pide persistirlos, y `apply.md` §14 pide no inventar una
+    # segunda representacion en memoria para lo que SI se persiste: este
+    # metodo lee directo de los `Profile` ya vivos, no de una copia aparte).
+    def to_dict(self):
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "profiles": {name: _profile_to_dict(profile) for name, profile in self._profiles.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        """Nunca lanza ante datos malformados/vacios - construye un
+        ProfileManager con los defaults de codigo de siempre en ese caso
+        (spec.md #8.6: "fail gracefully (defaults) on a missing/corrupt
+        file"). El perfil "default" ya sembrado (sensitivity/cooldowns/dwell
+        de `_default_profile()`) se ACTUALIZA con lo persistido en vez de
+        reemplazarse entero - esos campos nunca vinieron del disco."""
+        manager = cls()
+        profiles_data = data.get("profiles") if isinstance(data, dict) else None
+        if not isinstance(profiles_data, dict):
+            return manager
+        for name, profile_data in profiles_data.items():
+            if not isinstance(profile_data, dict):
+                continue
+            if name in manager._profiles:
+                _apply_persisted_fields(manager._profiles[name], profile_data)
+            else:
+                manager.register(_profile_from_dict(name, profile_data))
+        return manager
+
+
+SCHEMA_VERSION = 1
+
+
+def _profile_to_dict(profile):
+    return {
+        "gesture_bindings": dict(profile.gesture_bindings),
+        "custom_shortcuts": dict(profile.custom_shortcuts),
+        "macros": {name: list(steps) for name, steps in profile.macros.items()},
+    }
+
+
+def _apply_persisted_fields(profile, data):
+    profile.gesture_bindings.update(data.get("gesture_bindings") or {})
+    profile.custom_shortcuts.update(data.get("custom_shortcuts") or {})
+    profile.macros.update({name: list(steps) for name, steps in (data.get("macros") or {}).items()})
+
+
+def _profile_from_dict(name, data):
+    return Profile(
+        name=name,
+        gesture_bindings=dict(data.get("gesture_bindings") or {}),
+        custom_shortcuts=dict(data.get("custom_shortcuts") or {}),
+        macros={macro_name: list(steps) for macro_name, steps in (data.get("macros") or {}).items()},
+    )

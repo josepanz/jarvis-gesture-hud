@@ -34,6 +34,12 @@ def main():
         "pyautogui.size", return_value=(1920, 1080)
     ):
         mock_os.take_screenshot.return_value = "captures/fake.png"
+        # PressKeyCommand.can_execute() (TASK-076) mira pyautogui.KEYBOARD_KEYS,
+        # una lista real de datos - se restaura sobre el mock (las llamadas de
+        # verdad, press()/write(), siguen mockeadas).
+        import pyautogui as _real_pyautogui
+
+        mock_kb_pyautogui.KEYBOARD_KEYS = _real_pyautogui.KEYBOARD_KEYS
 
         app = JarvisApp()
         try:

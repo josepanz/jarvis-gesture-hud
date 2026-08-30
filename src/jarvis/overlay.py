@@ -25,6 +25,12 @@ LEGEND_MIN_ALPHA = 0.15
 LEGEND_MAX_ALPHA = 1.0
 LEGEND_MARGIN = 16
 
+# TASK-078 (Fase 8, design.md §5.7): icono de engranaje - abajo a la derecha,
+# la esquina que la leyenda (arriba a la derecha por default) no usa.
+GEAR_BG = "#101018"
+GEAR_FG = "#e8e8f0"
+GEAR_MARGIN = 16
+
 
 def _make_click_through(window):
     """Hace la ventana no-clickeable: los clicks pasan al escritorio de abajo.
@@ -57,6 +63,8 @@ class ScreenOverlay:
         self._legend_icons = []
         self._legend_alpha = 0.75
         self._legend_visible = True
+
+        self._gear_window = None
 
     def pump(self):
         """Procesa el event-loop de Tk (crea/destruye globos vencidos). Llamar cada frame."""
@@ -167,6 +175,29 @@ class ScreenOverlay:
         self._legend_alpha = min(LEGEND_MAX_ALPHA, max(LEGEND_MIN_ALPHA, self._legend_alpha + delta))
         self._apply_legend_alpha()
         return self._legend_alpha
+
+    # --- TASK-078: icono de engranaje (abre el settings screen) ----------------
+
+    def init_gear_icon(self, on_click):
+        """A diferencia de TODO lo demas en este modulo, esta ventana NO es
+        click-through (spec.md #8.1: hay que poder clickearla) - por eso NO
+        se llama `_make_click_through()` aca."""
+        self._gear_window = tk.Toplevel(self._root)
+        self._gear_window.overrideredirect(True)
+        self._gear_window.attributes("-topmost", True)
+
+        label = tk.Label(
+            self._gear_window, text="⚙", bg=GEAR_BG, fg=GEAR_FG,
+            font=("Segoe UI", 16), width=2, height=1, cursor="hand2",
+        )
+        label.pack()
+        label.bind("<Button-1>", lambda _event: on_click())
+
+        self._gear_window.update_idletasks()
+        w, h = self._gear_window.winfo_width(), self._gear_window.winfo_height()
+        sw, sh = self._gear_window.winfo_screenwidth(), self._gear_window.winfo_screenheight()
+        self._gear_window.geometry(f"+{sw - w - GEAR_MARGIN}+{sh - h - GEAR_MARGIN}")
+        self._gear_window.update_idletasks()
 
     def close(self):
         try:

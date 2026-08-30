@@ -147,10 +147,58 @@ def main():
                     app._dispatch_naruto_seal(event)
             assert mock_os.lock_session.called, "NARUTO_I deberia disparar LockSession (binding por default)"
 
+            # --- TASK-081 (Fase 8): settings screen de punta a punta -
+            # rebind real via SettingsWindow -> persiste en disco -> una
+            # instancia NUEVA de JarvisApp (arranque "de nuevo") lo carga y
+            # lo respeta. Redirige config_store a un archivo temporal (NUNCA
+            # tocar el bindings.json real del usuario en este check).
+            import tempfile
+
+            from jarvis.core import config_store
+
+            real_load, real_save = config_store.load_bindings, config_store.save_bindings
+            with tempfile.TemporaryDirectory() as tmp:
+                temp_path = Path(tmp) / "bindings.json"
+                with patch(
+                    "jarvis.core.config_store.load_bindings", side_effect=lambda path=temp_path: real_load(temp_path)
+                ), patch(
+                    "jarvis.core.config_store.save_bindings",
+                    side_effect=lambda data, path=temp_path: real_save(data, temp_path),
+                ):
+                    # --- gear icon abre la ventana real de settings ---
+                    assert app.settings_window._window is None
+                    app.overlay.pump()  # ver test_overlay.py: hace falta un update() completo antes del click sintetico
+                    app.overlay._gear_window.winfo_children()[0].event_generate("<Button-1>", when="now")
+                    app.overlay.pump()
+                    assert app.settings_window._window is not None, "clickear el engranaje debe abrir el settings"
+
+                    app.settings_window._on_rebind("NARUTO_TORA", "VOLUME_UP")
+                    assert temp_path.exists(), "el rebind deberia haber persistido de inmediato"
+
+                    mock_os.reset_mock()
+                    app._dispatch_naruto_seal("NARUTO_TORA")
+                    assert mock_os.volume_up.called, "el rebind deberia tomar efecto de inmediato, sin reiniciar"
+                    assert not mock_os.take_screenshot.called
+
+                    # No se construye un segundo JarvisApp real aca - 2 tk.Tk()
+                    # simultaneos en el mismo proceso no son confiables
+                    # (design.md §5.6 ya lo advierte para SettingsWindow, y se
+                    # confirmo en la practica: un segundo ScreenOverlay revienta
+                    # con TclError "image ... doesn't exist" al compartir
+                    # PhotoImage entre interpretes Tk distintos). Se ejercita
+                    # exactamente la misma linea que JarvisApp.__init__ usa,
+                    # sin repetir la construccion completa de la app.
+                    from jarvis.core.profiles import ProfileManager
+
+                    reloaded = ProfileManager.from_dict(config_store.load_bindings())
+                    assert reloaded.active.gesture_bindings.get("NARUTO_TORA") == "VOLUME_UP", (
+                        "una carga NUEVA (misma linea que JarvisApp.__init__) deberia ver el rebind persistido"
+                    )
+
             time.sleep(0.2)
             print(
                 "LIVE INTEGRATION OK: telemetry, history, undo/redo, profiles, debug HUD, "
-                "context, voice dispatch, Naruto seal dispatch all verified"
+                "context, voice dispatch, Naruto seal dispatch, settings persistence all verified"
             )
         finally:
             app.overlay.close()

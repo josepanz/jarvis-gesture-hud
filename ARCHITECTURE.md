@@ -101,8 +101,10 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
   - `init_legend(text, corner)` / `set_legend_visible()` / `adjust_legend_alpha()` — a persistent panel anchored to a screen corner, translucent, with runtime opacity control.
   - Both use `_make_click_through(window)`: on Windows this applies `WS_EX_LAYERED | WS_EX_TRANSPARENT` to the real HWND (obtained via `GetParent(winfo_id())`) through `ctypes` — a well-known, dependency-free trick, verified working on this machine (see Decisions). No-op elsewhere.
   - `pump()` is called once per camera frame instead of `mainloop()`, because Tk is not thread-safe and a separate UI thread would race with the camera loop.
+  - `init_gear_icon(on_click)` (TASK-078, Fase 8) — a small always-on-top gear (`⚙`) window, bottom-right corner (the legend's default corner is top-right) — deliberately NOT click-through (spec.md #8.1 requires it to actually be clickable), the only window in this module that skips `_make_click_through()`.
+- **`settings_ui.py`** (Fase 8) — `SettingsWindow`/`Tooltip`, built on the exact same Tk root `overlay.py` already owns and pumps (design.md §5.6: never a second `tk.Tk()`/`mainloop()`). Bindings table sourced from `main.GESTURE_DEFAULT_BINDINGS`'s keys (every trigger the app can dispatch, TASK-079) crossed with `legend.ENTRIES` for the human-readable name/icon — the only new hand-maintained data is a 19-entry bridge (`_CLASSIC_EVENT_ICON_KEYS`) from the pre-Fase-4 events to their icon key, needed because a couple of them share one icon (`PINCH_DOWN`/`PINCH_UP` → `pinch_click`). Rebinding (a `ttk.Combobox` per row) writes straight into `ProfileManager.active.gesture_bindings` and calls back into `main.py` to persist immediately. `+ Atajo custom`/`+ Macro` buttons open small capture dialogs (`canonicalize_shortcut()` — a pure, directly-testable function turning a `<KeyPress>`'s `state`/`keysym` into a `ctrl+alt+t`-style string) that register into `custom_shortcuts`/`macros`, making them available as rebind targets for any row. Registered voice phrases are listed read-only (not reassignable through this table — a separate registration mechanism, `VoiceIntentResolver`, not `Profile.gesture_bindings`).
 - **`gestures.py`** — `GestureEngine`: pure logic, no I/O. `process(hands, w, h, screen_w, screen_h) -> (screen_xy | None, cam_xy | None, events)`. Single-hand gestures always use `hands[0]` and are entirely skipped when `active` is `False` (paused) — in that case `screen_xy` is `None`, so `main.py` neither moves the mouse nor draws the keyboard. The two master, two-hand gestures (`TOGGLE_ACTIVE`, `CLOSE_APP`) are evaluated *before* checking `active`, so pause can always be undone and the app can always be closed.
-- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`/`z`/`y`/`p`/`d`/`v`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration. `_handle_voice_result()`/`_dispatch_voice_action()` route push-to-talk transcriptions through `VoiceIntentResolver` then `LLMIntentResolver` into the same `Command`/`CommandBus` path gestures use.
+- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`/`z`/`y`/`p`/`d`/`v`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration. `_handle_voice_result()`/`_dispatch_voice_action()` route push-to-talk transcriptions through `VoiceIntentResolver` then `LLMIntentResolver` into the same `Command`/`CommandBus` path gestures use. **TASK-081 (Fase 8)**: EVERY event from `GestureEngine` — not just Naruto/JJK/common seals — now first resolves through `GESTURE_DEFAULT_BINDINGS`/`ProfileManager.get_gesture_binding()` before reaching `_dispatch()`, via `_dispatch_naruto_seal()` (name kept for backward test compatibility, now generic — see Decisions). Bindings/custom shortcuts/macros load from disk (`core/config_store.py`) before the camera loop starts and save immediately on any change made in the settings screen.
 
 ### `src/jarvis/core/` — OpenSpec foundation (PHASE 1)
 
@@ -111,12 +113,15 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 - **`commands.py`** — `Command` (ABC: `metadata` property, `can_execute()`, `execute()`, optional `undo()`/`redo()`), `CommandMetadata` (name + safety level, one of `SAFE`/`CONFIRM_REQUIRED`/`HOLD_REQUIRED`/`DESTRUCTIVE`), `CommandResult` (`success`, `status` restricted to `EXECUTED`/`REJECTED`/`ERROR` with cross-field consistency validation, `message`, `duration_ms`, `error`, `metadata`, with `.ok()`/`.rejected()`/`.failed()` factories).
 - **`command_bus.py`** — `CommandBus.dispatch(command) -> CommandResult`: validate -> reject `DESTRUCTIVE` outright (spec.md #27) -> `can_execute()` -> `execute()` -> result, every step guarded so a bad command can never crash the caller. Logs via stdlib `logging`; fills in `duration_ms` if the command didn't report one; optional `on_result(command, result)` hook for feedback/telemetry, itself exception-guarded.
 - **`feedback.py`** — `FeedbackManager`: adapter over the *existing* `VoiceJarvis`/`ScreenOverlay` (doesn't reimplement TTS or the HUD), channels `hud`/`tts`/`sound`/`silent` per spec.md #30, per-channel enable/disable, never raises.
+- **`config_store.py`** (TASK-074, Fase 8, design.md §5.2/spec.md #8.6) — `load_bindings()`/`save_bindings()`: generic JSON-on-disk persistence, deliberately unaware of what the dict MEANS (that's `ProfileManager`'s job, see below — separation of "how it's stored" from "what's stored"). `CONFIG_FILE = ~/.jarvis-gesture-hud/bindings.json` — outside the repo/install dir, per spec. Missing file → `{}` (defaults apply); corrupt file → renamed aside (`bindings.json.bak-<timestamp>`), never overwritten silently; writes are atomic (temp file in the same dir + `os.replace()`).
+- **`profiles.py`** additions (TASK-075) — `Profile` gained `custom_shortcuts`/`macros` dict fields (same validation pattern as its existing dict fields). `ProfileManager.to_dict()`/`.from_dict()` bridge to/from `config_store`'s schema (`{"schema_version": 1, "profiles": {name: {...}}}`) — only `gesture_bindings`/`custom_shortcuts`/`macros` are persisted; `sensitivity`/`cooldowns`/`dwell`/`hud`/`context_rules` stay code-only for now (not part of this schema). `from_dict()` never raises on malformed/missing data — falls back to the same code defaults `ProfileManager()` always had, and *merges* persisted fields onto the already-seeded `"default"` profile instead of replacing it (so its safe-default sensitivity/cooldowns/dwell, which never came from disk, survive a load).
 
 ### `src/jarvis/actions/` — concrete Commands (PHASE 2)
 
 - **`mouse.py`** — `MouseMoveCommand`, `MouseButtonCommand(pressed)`, `RightClickCommand`, `ScrollCommand(amount)`, `CanvasZoomCommand(amount)` (Ctrl+Scroll — canvas/viewport zoom, not object scaling, see Decisions). Each wraps the exact `pyautogui` call `main.py` used to make directly.
-- **`keyboard.py`** — `PressKeyCommand(key_name)`, `TypeTextCommand(text)` — what `HUDKeyboard.handle_click()` used to call directly.
+- **`keyboard.py`** — `PressKeyCommand(key_name)`, `TypeTextCommand(text)` — what `HUDKeyboard.handle_click()` used to call directly. **TASK-076 (Fase 8)**: `PressKeyCommand.can_execute()` used to check membership in a hand-picked `{"space", "backspace"}` (all the on-screen HUD keyboard ever needed) — broadened to `pyautogui.KEYBOARD_KEYS` (the real, authoritative vocabulary) so `MacroCommand`'s `press-key` steps can press anything (`enter`, `tab`, arrows, ...). Strict superset of the old set, confirmed via the existing test suite unchanged (`PressKeyCommand("F13")` still rejected — pyautogui's list is lowercase-only, `"F13"` ≠ `"f13"`).
 - **`system.py`** — `VolumeUpCommand`, `VolumeDownCommand`, `MuteCommand`, `ScreenshotCommand`, `LockSessionCommand`, wrapping `CrossPlatformOS`. Safety per spec.md #27's own examples: `SAFE` for volume/mute/screenshot, `HOLD_REQUIRED` for lock (the 1.5s Shaka hold that already gated it is unchanged — this declares that fact, doesn't add new gating).
+- **`macro.py`** (TASK-076, Fase 8, design.md §5.3/spec.md #8.4) — `HotkeyCommand(combo)` wraps `pyautogui.hotkey(*combo.split("+"))` (already supports arbitrary combinations — zero new dependency). `MacroCommand(name, steps)` runs an ordered list of steps (built from JSON via `build_macro_steps()` — the only translation between disk schema and in-memory objects, per `apply.md` §14) and stops at the first failing step; `metadata.safety` is the *strictest* among its `Command` steps (a bare `WaitStep` isn't a `Command` and doesn't participate). Both are ordinary Commands — flow through the same `CommandBus`/`CommandHistory`/`FeedbackManager` as everything else, no new execution layer.
 
 ### Gesture map
 
@@ -1221,6 +1226,108 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   - **Honest limitation, explicitly not yet closed:** neither gesture has
     touched a real camera. Deferred, along with Phases 4/5/6, to the
     combined "prueba integral" live-camera pass.
+- **Phase 8 (TASK-074–081) — settings screen: persistence, rebinding,
+  custom shortcuts, macros.** The user explicitly chose the FULL-scope
+  option over the MVP one when asked (spec.md #8.3's "any row SHALL be
+  reassignable" taken literally, not just the 18 Naruto/JJK/common seals
+  that already went through `ProfileManager` in Phases 4-7) — this is the
+  largest single-turn change in the project's history, touching the core
+  event-dispatch path (`main.py`) that every previous phase built on top
+  of, so it's documented in more depth than usual.
+  - **The scope decision, and why it was safe.** Before Phase 8, only
+    seal/common events resolved through `ProfileManager.get_gesture_binding()`
+    — the original 19 "classic" events (Fases 1-3: `PINCH_DOWN`/`SCROLL_UP`/
+    `VOLUME_UP`/`SILENCE`/etc.) went straight from `GestureEngine` to a
+    hardcoded action in `main.py`. Making them ALSO reassignable didn't
+    require touching `gestures.py`'s detection logic at all — only
+    `main.py`'s dispatch-*routing* layer needed a generic resolution step,
+    because each classic event's default binding is **itself** (`GESTURE_DEFAULT_BINDINGS["SCROLL_UP"] = "SCROLL_UP"`,
+    etc.) — so with nothing reassigned, behavior is byte-for-byte identical
+    to before this phase. This is the same "identity is a no-op" trick
+    every prior phase's default-binding design already relied on, just
+    applied to a bigger set of keys.
+  - **`GESTURE_DEFAULT_BINDINGS`** (renamed from `NARUTO_DEFAULT_BINDINGS`,
+    same dict) now has 37 keys: the 18 seal/common ones from Phases 4-7
+    (thematic defaults, unchanged) plus 19 classic ones (identity defaults,
+    new). `run()`'s loop simplified from a two-branch `if event in
+    NARUTO_DEFAULT_BINDINGS: ... else: ...` to a single unconditional call
+    — every event now has SOME default (identity or thematic), so the
+    branch was never needed once the dict's coverage became total.
+  - **Dispatch consolidation, no behavior change.** `_dispatch_naruto_seal()`
+    (name kept — every existing test in `test_naruto_seal_dispatch.py`
+    calls it directly by that name; renaming would have meant touching all
+    of them for a purely cosmetic gain) is now the ONE resolution entry
+    point for every event: resolve via `GESTURE_DEFAULT_BINDINGS` → check
+    the active profile's `macros`/`custom_shortcuts` (new, see below) →
+    fall through to `_dispatch()` (the executor, unchanged in spirit,
+    gained `UNDO`/`REDO`/`MUTE` branches it was missing — those 3 lived
+    only in `_dispatch_voice_action()` before, which now just delegates to
+    `_dispatch()` with `cam_xy=None` instead of duplicating that logic).
+    Traced through every existing branch to confirm this preserves exact
+    behavior for voice, for seals, and for classic gestures — not asserted,
+    *traced*, given the size of this change.
+  - **`config_store.py`/`profiles.py` (de)serialization** — see module list
+    above. Round-trip, missing-file, and corrupt-file-preservation all
+    covered by dedicated tests (`tests/test_config_store.py`,
+    `tests/test_profiles.py::ProfileManagerToFromDictTests`).
+  - **`macro.py` (`HotkeyCommand`/`MacroCommand`)** — see module list above.
+    `PressKeyCommand.can_execute()`'s broadening (hand-picked 2-key set →
+    `pyautogui.KEYBOARD_KEYS`) was needed for macros to press ordinary keys
+    like `enter`/`tab` at all — caught by writing the macro tests first and
+    finding `can_execute()` silently rejected `"enter"`, not assumed.
+  - **A real test-infrastructure gotcha, worth recording**: any test that
+    wholesale-mocks `jarvis.actions.keyboard.pyautogui` (replacing the
+    whole module reference, e.g. `@patch("jarvis.actions.keyboard.pyautogui")`)
+    also blanks out `pyautogui.KEYBOARD_KEYS` with a `MagicMock` whose `in`
+    operator returns `False` for everything — silently breaking
+    `PressKeyCommand.can_execute()` for every key, in every test using that
+    pattern, including one pre-existing manual integration script. Fixed by
+    restoring the real `KEYBOARD_KEYS` list onto the mock in each affected
+    `setUp()`/script (`tests/test_naruto_seal_dispatch.py`,
+    `tests/manual_main_integration_check.py`) — a pure test-environment
+    artifact (production always sees the real `pyautogui` module), but one
+    that would have silently made every macro/HUD-keyboard press-key test
+    look green while actually failing at `can_execute()`, had it not been
+    caught by an assertion actually checking the mock's call.
+  - **`settings_ui.py` (`Tooltip`, `SettingsWindow`, `canonicalize_shortcut`)**
+    — see module list above. Verified two ways: `tests/test_settings_ui.py`
+    (20 tests, real `tk.Tk()` — this environment runs Tk natively, no
+    virtual display needed) AND a manual visual check
+    (`tests/manual_settings_ui_visual_check.py`, screenshots via
+    `PIL.ImageGrab`) that caught a real layout bug before it shipped: the
+    first pass truncated long Spanish descriptions in the bindings table
+    (name column too narrow) — widened the window/column after seeing the
+    actual screenshot, not by guessing.
+  - **`overlay.py`'s gear icon (`init_gear_icon`)** — the only window in
+    that module that does NOT call `_make_click_through()` (spec.md #8.1
+    requires it to be genuinely clickable), positioned bottom-right (the
+    legend's default corner is top-right). `tests/test_overlay.py` is this
+    module's first dedicated test file — it covers only the new gear-icon
+    behavior, not retroactively the rest of `overlay.py`.
+    - **Tkinter timing gotcha, worth recording**: a synthetic
+      `event_generate("<Button-1>", when="now")` on a freshly-created
+      `Toplevel`'s child widget silently does nothing unless a full
+      `update()` (not just `update_idletasks()`) has already run at least
+      once first — `update_idletasks()` alone doesn't process the
+      window-manager "map" notification a brand-new Toplevel needs before
+      it can receive synthetic events. Production code is unaffected
+      (`overlay.pump()` already runs every camera frame, long before a real
+      user could physically click anything), but the test suite's own
+      `pump()` call had to move to BEFORE the synthetic click, not just
+      after, once this was bisected down from "the whole gear icon must be
+      broken" to this one specific ordering requirement.
+  - **Persistence wired into the live app end-to-end**
+    (`tests/manual_live_integration_check.py`, extended per TASK-081):
+    rebinding a gesture through the real `SettingsWindow` persists
+    immediately, takes effect on the NEXT dispatch of that same gesture
+    without restarting, and a **fresh** `ProfileManager.from_dict(config_store.load_bindings())`
+    call (the exact line `JarvisApp.__init__` runs at startup) picks it back
+    up. Deliberately does NOT construct a second full `JarvisApp` to prove
+    this — doing so surfaced a genuine `tkinter.TclError: image ... doesn't
+    exist`, confirming design.md §5.6's own warning that Tkinter does not
+    reliably support two simultaneous `tk.Tk()` roots in one process; the
+    persistence check instead re-runs the exact loading line `JarvisApp`
+    itself uses, without a second real Tk root.
 
 ## Known limitations
 

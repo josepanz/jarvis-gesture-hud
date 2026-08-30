@@ -88,6 +88,7 @@ import pyautogui
 
 from jarvis import config
 from jarvis.actions.keyboard import PressKeyCommand, TypeTextCommand
+from jarvis.actions.macro import HotkeyCommand, MacroCommand, build_macro_steps
 from jarvis.actions.mouse import (
     CanvasZoomCommand,
     MouseButtonCommand,
@@ -102,6 +103,7 @@ from jarvis.actions.system import (
     VolumeDownCommand,
     VolumeUpCommand,
 )
+from jarvis.core import config_store
 from jarvis.core.command_bus import CommandBus
 from jarvis.core.command_history import CommandHistory
 from jarvis.core.command_metrics import CommandMetricsRecorder
@@ -125,6 +127,7 @@ from jarvis.legend import build_legend_entries
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
 from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
+from jarvis.settings_ui import SettingsWindow
 from jarvis.voice import VoiceJarvis
 from jarvis.voice_capture import VoiceListener
 
@@ -164,15 +167,22 @@ _MIGRATED_GESTURES = frozenset(
 )
 
 # TASK-063 (Fase 4, design.md §4.3): binding por default de cada sello Naruto
-# de 1 mano a una accion del vocabulario fijo que `_dispatch_voice_action` ya
-# entiende (mismo camino que usa la voz) - `ProfileManager.get_gesture_binding()`
-# ya resuelve "override del perfil activo > este default > None" (TASK-024,
+# de 1 mano a una accion del vocabulario fijo que `_dispatch` ya entiende
+# (mismo camino que usa la voz) - `ProfileManager.get_gesture_binding()` ya
+# resuelve "override del perfil activo > este default > None" (TASK-024,
 # reusado tal cual, sin tocarlo). NARUTO_I -> LOCK_SESSION es intencional:
 # LOCK_SESSION es HOLD_REQUIRED, y el propio sello ya exige
 # config.NARUTO_SEAL_HOLD_SECONDS sostenido en GestureEngine antes de emitir
 # el evento - el binding nunca puede saltarse ese requisito porque el evento
 # mismo no existe hasta que el hold ya se cumplio.
-NARUTO_DEFAULT_BINDINGS = {
+#
+# TASK-081 (Fase 8, spec.md #8.2/8.3): ampliado de "solo sellos" a TODO
+# gesto/tecla que la app puede producir - el settings screen exige que
+# CUALQUIER fila sea reasignable, no solo Naruto/JJK/comunes. Los 19 gestos
+# "clasicos" (los que ya existian antes de la Fase 4) se mapean a SI MISMOS
+# por default - reasignarlos es opcional, y sin tocar nada el comportamiento
+# es identico al de antes de esta fase (identidad = no-op semantico).
+GESTURE_DEFAULT_BINDINGS = {
     "NARUTO_TORA": "SCREENSHOT",
     "NARUTO_USHI": "UNDO",
     "NARUTO_U": "REDO",
@@ -204,6 +214,30 @@ NARUTO_DEFAULT_BINDINGS = {
     # ya agotado (ver comentario arriba), ambos reusan una accion existente.
     "CLAP": "KEYBOARD_TOGGLE",  # "Clapper": aplaudir para prender/apagar algo - mismo binding que Saru
     "KOREAN_HEART": "SCREENSHOT",  # pose clasica de foto -> Captura, mismo binding que Tora/Sukuna
+    # TASK-081 (Fase 8): los 19 gestos "clasicos" (Fases 1-3), identity por
+    # default. PINCH_DOWN/PINCH_UP siguen necesitando cam_xy para el click
+    # del teclado HUD/drag - eso lo sigue resolviendo `_dispatch_migrated`
+    # exactamente igual, la resolucion de binding no le saca ni le agrega
+    # nada a ESE camino cuando el default (identidad) esta vigente.
+    "PINCH_DOWN": "PINCH_DOWN",
+    "PINCH_UP": "PINCH_UP",
+    "RIGHT_CLICK": "RIGHT_CLICK",
+    "SCROLL_UP": "SCROLL_UP",
+    "SCROLL_DOWN": "SCROLL_DOWN",
+    "ZOOM_IN": "ZOOM_IN",
+    "ZOOM_OUT": "ZOOM_OUT",
+    "VOLUME_UP": "VOLUME_UP",
+    "VOLUME_DOWN": "VOLUME_DOWN",
+    "SCREENSHOT": "SCREENSHOT",
+    "LOCK_SESSION": "LOCK_SESSION",
+    "SILENCE": "SILENCE",
+    "KEYBOARD_TOGGLE": "KEYBOARD_TOGGLE",
+    "TOGGLE_ACTIVE": "TOGGLE_ACTIVE",
+    "CLOSE_APP": "CLOSE_APP",
+    "TOGGLE_MIRROR": "TOGGLE_MIRROR",
+    "TOGGLE_LEGEND": "TOGGLE_LEGEND",
+    "LEGEND_ALPHA_UP": "LEGEND_ALPHA_UP",
+    "LEGEND_ALPHA_DOWN": "LEGEND_ALPHA_DOWN",
 }
 
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:
@@ -217,7 +251,12 @@ class JarvisApp:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
-        self.profiles = ProfileManager()
+        # TASK-081 (Fase 8, spec.md #8.6): carga bindings/atajos/macros
+        # persistidos ANTES de que arranque el loop de camara - un archivo
+        # ausente o corrupto ya cae a {} (ver config_store.load_bindings()),
+        # asi que esto nunca puede bloquear el arranque ni dejar la app sin
+        # ProfileManager.
+        self.profiles = ProfileManager.from_dict(config_store.load_bindings())
 
         self.tracker = HandTracker(
             max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
@@ -254,6 +293,19 @@ class JarvisApp:
         self.voice_intent_resolver = VoiceIntentResolver(phrase_bindings=DEFAULT_PHRASE_BINDINGS)
         self.llm_intent_resolver = LLMIntentResolver()
         self.voice_confidence_filter = ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)
+
+        # TASK-078/081 (Fase 8): SettingsWindow vive sobre el MISMO root de Tk
+        # que ScreenOverlay ya bombea cada frame (design.md §5.6) - nunca abre
+        # un segundo Tk()/mainloop. on_change persiste en disco de inmediato
+        # (spec.md #8.3: "Persists and takes effect immediately").
+        self.settings_window = SettingsWindow(
+            self.overlay._root,
+            self.profiles,
+            GESTURE_DEFAULT_BINDINGS,
+            voice_intent_resolver=self.voice_intent_resolver,
+            on_change=self._save_bindings,
+        )
+        self.overlay.init_gear_icon(on_click=self.settings_window.open)
 
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
         self._show_hand_overlay = False  # TASK-057: tecla 'l', apagado por default
@@ -410,6 +462,12 @@ class JarvisApp:
             self.overlay.adjust_legend_alpha(+0.1)
         elif event == "LEGEND_ALPHA_DOWN":
             self.overlay.adjust_legend_alpha(-0.1)
+        elif event == "UNDO":
+            self._trigger_undo()
+        elif event == "REDO":
+            self._trigger_redo()
+        elif event == "MUTE":
+            self.command_bus.dispatch(MuteCommand())
 
     def _toggle_mirror(self):
         self.mirrored = not self.mirrored
@@ -483,35 +541,56 @@ class JarvisApp:
 
     def _dispatch_voice_action(self, action_name):
         """action_name: validado por VoiceIntentResolver/LLMIntentResolver
-        (jarvis.llm_intent.VALID_ACTIONS). Reusa exactamente el mismo camino de
-        Command que el gesto equivalente cuando existe, asi que voz y gesto
-        disparando la misma accion se comportan identico (mismo feedback,
-        misma entrada en el historial de undo/redo)."""
-        if action_name == "UNDO":
-            self._trigger_undo()
-        elif action_name == "REDO":
-            self._trigger_redo()
-        elif action_name == "MUTE":
-            self.command_bus.dispatch(MuteCommand())
-        elif action_name in ("KEYBOARD_TOGGLE", "CLOSE_APP"):
-            self._dispatch(action_name, None, self._last_screen_xy)
-        elif action_name in _MIGRATED_GESTURES:
-            self._dispatch_migrated(action_name, None)
+        (jarvis.llm_intent.VALID_ACTIONS). Delegar en `_dispatch()` (TASK-081)
+        en vez de reimplementar el mismo chequeo: la voz nunca produce un
+        evento "clasico" crudo (SILENCE/TOGGLE_ACTIVE/etc, esos no son parte
+        de VALID_ACTIONS), asi que la unica diferencia real con un gesto es
+        que la voz no tiene cam_xy - se pasa None, igual que antes."""
+        self._dispatch(action_name, None, self._last_screen_xy)
 
-    def _dispatch_naruto_seal(self, event):
-        """TASK-063 (Fase 4), extendido en TASK-070/073 (Fases 6/7) a JJK y a
-        los gestos comunes (CLAP/KOREAN_HEART) - el nombre quedo de la
-        primera version, pero la resolucion del binding en si nunca miro el
-        nombre del evento en particular, solo si tiene entrada en
-        NARUTO_DEFAULT_BINDINGS (`run()` decide con eso, ya no con un
-        prefijo). Resuelve el binding (override del perfil activo >
-        NARUTO_DEFAULT_BINDINGS > None, via ProfileManager.get_gesture_binding()
-        ya existente) y reusa _dispatch_voice_action - mismo camino que la voz,
-        mismo feedback. Un sello sin binding (ni de perfil ni default) es un
-        no-op seguro, no un error."""
-        action_name = self.profiles.get_gesture_binding(event, global_bindings=NARUTO_DEFAULT_BINDINGS)
-        if action_name is not None:
-            self._dispatch_voice_action(action_name)
+    def _save_bindings(self):
+        """TASK-081 (Fase 8, spec.md #8.6): `SettingsWindow` llama a esto
+        despues de CUALQUIER cambio (rebind, atajo nuevo, macro nueva) - la
+        propia `config_store.save_bindings()` ya escribe atomicamente."""
+        config_store.save_bindings(self.profiles.to_dict())
+
+    def _dispatch_macro_or_shortcut(self, action_name):
+        """TASK-081 (Fase 8): un binding puede apuntar a una macro o a un
+        atajo custom del perfil activo, ademas de al vocabulario fijo -
+        chequeado ANTES que `_dispatch()` porque ninguno de esos 2 nombres
+        puede colisionar con un evento/accion real (spec.md #8.3/8.4:
+        MACRO:<nombre> y el nombre de un atajo son namespaces separados,
+        elegidos por el usuario al crearlos en el settings screen). Devuelve
+        True si disparo algo, para que el llamador no siga con `_dispatch()`."""
+        macro_steps = self.profiles.active.macros.get(action_name)
+        if macro_steps is not None:
+            self.command_bus.dispatch(MacroCommand(action_name, build_macro_steps(macro_steps)))
+            return True
+        shortcut_combo = self.profiles.active.custom_shortcuts.get(action_name)
+        if shortcut_combo is not None:
+            self.command_bus.dispatch(HotkeyCommand(shortcut_combo))
+            return True
+        return False
+
+    def _dispatch_naruto_seal(self, event, cam_xy=None, screen_xy=None):
+        """TASK-063 (Fase 4), generalizado en TASK-081 (Fase 8) a TODO gesto
+        y tecla que la app puede producir, no solo sellos - nombre historico
+        conservado (las pruebas existentes lo llaman asi por su firma
+        original de 1 solo argumento, que sigue funcionando igual: cam_xy/
+        screen_xy son opcionales porque ningun sello los necesito nunca).
+        Resuelve el binding (override del perfil activo >
+        GESTURE_DEFAULT_BINDINGS > el propio evento, via
+        ProfileManager.get_gesture_binding() ya existente - TODO evento real
+        tiene un default identity o tematico, asi que ese ultimo caso es
+        puramente defensivo) y ejecuta: macro/atajo custom si el binding
+        apunta a uno, si no `_dispatch()` con el mismo cam_xy/screen_xy que
+        recibio el gesto original (PINCH_DOWN/UP los siguen necesitando)."""
+        action_name = self.profiles.get_gesture_binding(event, global_bindings=GESTURE_DEFAULT_BINDINGS)
+        if action_name is None:
+            action_name = event
+        if self._dispatch_macro_or_shortcut(action_name):
+            return
+        self._dispatch(action_name, cam_xy, screen_xy if screen_xy is not None else self._last_screen_xy)
 
     def _handle_key(self, key):
         if key == ord("q"):
@@ -568,10 +647,7 @@ class JarvisApp:
             self._last_screen_xy = screen_xy
 
             for event in events:
-                if event in NARUTO_DEFAULT_BINDINGS:
-                    self._dispatch_naruto_seal(event)
-                else:
-                    self._dispatch(event, cam_xy, screen_xy)
+                self._dispatch_naruto_seal(event, cam_xy, screen_xy)
 
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)
