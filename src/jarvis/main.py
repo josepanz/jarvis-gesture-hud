@@ -81,6 +81,8 @@ Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
   su estructura interna es riesgo real por cero cambio de comportamiento.
 """
 
+import queue
+import threading
 import time
 
 import cv2
@@ -91,6 +93,7 @@ from jarvis.actions.keyboard import PressKeyCommand, TypeTextCommand
 from jarvis.actions.macro import HotkeyCommand, MacroCommand, build_macro_steps
 from jarvis.actions.mouse import (
     CanvasZoomCommand,
+    HScrollCommand,
     MouseButtonCommand,
     MouseMoveCommand,
     RightClickCommand,
@@ -157,6 +160,8 @@ _MIGRATED_GESTURES = frozenset(
         "RIGHT_CLICK",
         "SCROLL_UP",
         "SCROLL_DOWN",
+        "SCROLL_LEFT",
+        "SCROLL_RIGHT",
         "ZOOM_IN",
         "ZOOM_OUT",
         "VOLUME_UP",
@@ -224,6 +229,8 @@ GESTURE_DEFAULT_BINDINGS = {
     "RIGHT_CLICK": "RIGHT_CLICK",
     "SCROLL_UP": "SCROLL_UP",
     "SCROLL_DOWN": "SCROLL_DOWN",
+    "SCROLL_LEFT": "SCROLL_LEFT",
+    "SCROLL_RIGHT": "SCROLL_RIGHT",
     "ZOOM_IN": "ZOOM_IN",
     "ZOOM_OUT": "ZOOM_OUT",
     "VOLUME_UP": "VOLUME_UP",
@@ -307,6 +314,18 @@ class JarvisApp:
         )
         self.overlay.init_gear_icon(on_click=self.settings_window.open)
 
+        # Hallazgo de camara real (José, 2026-08-30): la voz "no respondia"
+        # porque LLMIntentResolver.resolve() descarga el modelo GGUF (~1GB,
+        # primer uso) y lo carga de forma SINCRONICA - llamado directo desde
+        # _handle_voice_result() en el loop principal, eso congelaba TODA la
+        # app (camara incluida) sin ningun feedback visible durante la
+        # descarga/carga. Se mueve a un hilo de fondo, mismo patron que
+        # VoiceListener._transcribe (threading.Thread + queue.Queue no
+        # bloqueante) - VoiceIntentResolver.resolve() (match de frases, sin
+        # I/O) se queda sincronico, solo el fallback al LLM se mueve.
+        self._llm_intent_results = queue.Queue()
+        self._llm_resolving = False
+
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
         self._show_hand_overlay = False  # TASK-057: tecla 'l', apagado por default
         self.is_dragging = False
@@ -358,6 +377,13 @@ class JarvisApp:
         elif gesture_type in ("SCROLL_UP", "SCROLL_DOWN"):
             amount = 12 if gesture_type == "SCROLL_UP" else -12
             self.command_bus.dispatch(ScrollCommand(amount))
+        elif gesture_type in ("SCROLL_LEFT", "SCROLL_RIGHT"):
+            # pyautogui.hscroll(): positivo desplaza el contenido a la
+            # derecha - "SCROLL_RIGHT" (el usuario pide ver mas a la
+            # derecha) usa un monto positivo, igual de natural que
+            # SCROLL_UP/ZOOM_IN siendo positivos arriba.
+            amount = 12 if gesture_type == "SCROLL_RIGHT" else -12
+            self.command_bus.dispatch(HScrollCommand(amount))
         elif gesture_type in ("ZOOM_IN", "ZOOM_OUT"):
             amount = 10 if gesture_type == "ZOOM_IN" else -10
             self.command_bus.dispatch(CanvasZoomCommand(amount))
@@ -533,11 +559,44 @@ class JarvisApp:
             )
             return
 
-        intent = self.voice_intent_resolver.resolve(text) or self.llm_intent_resolver.resolve(text)
-        if intent is None:
-            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+        intent = self.voice_intent_resolver.resolve(text)
+        if intent is not None:
+            self._dispatch_voice_action(intent.name)
             return
-        self._dispatch_voice_action(intent.name)
+
+        # Fallback al LLM: PUEDE implicar descargar (~1GB, primera vez) y
+        # cargar el modelo - nunca en el hilo principal (ver comentario en
+        # __init__). Si ya hay una resolucion LLM en curso, esta frase se
+        # descarta en vez de superponer una segunda llamada concurrente
+        # sobre la misma instancia de Llama (no garantizado thread-safe).
+        if self._llm_resolving:
+            self.feedback.notify("⚠ Todavía estoy pensando la frase anterior…", channels=("hud",), position=position)
+            return
+        self._llm_resolving = True
+        self.overlay.show_bubble("🧠 Pensando…", *position)
+        threading.Thread(target=self._resolve_llm_intent_async, args=(text,), daemon=True).start()
+
+    def _resolve_llm_intent_async(self, text):
+        try:
+            intent = self.llm_intent_resolver.resolve(text)
+        except Exception as exc:
+            self._llm_intent_results.put((text, None, str(exc)))
+            return
+        self._llm_intent_results.put((text, intent, None))
+
+    def _poll_llm_intent_results(self):
+        try:
+            text, intent, error = self._llm_intent_results.get_nowait()
+        except queue.Empty:
+            return
+        self._llm_resolving = False
+        position = self._feedback_position()
+        if error is not None:
+            self.feedback.notify(f"⚠ Error al interpretar la voz: {error}", channels=("hud",), position=position)
+        elif intent is None:
+            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+        else:
+            self._dispatch_voice_action(intent.name)
 
     def _dispatch_voice_action(self, action_name):
         """action_name: validado por VoiceIntentResolver/LLMIntentResolver
@@ -656,6 +715,7 @@ class JarvisApp:
             voice_result = self.voice_listener.poll_result()
             if voice_result is not None:
                 self._handle_voice_result(voice_result)
+            self._poll_llm_intent_results()
 
             if not self.gestures.active:
                 cv2.putText(frame, "PAUSADO", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)

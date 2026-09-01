@@ -11,6 +11,7 @@ acceptance criteria de TASK-063 piden tests unitarios reales.
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -31,6 +32,27 @@ class _AppTestCase(unittest.TestCase):
     hardware/SO mockeada - mismo patron que manual_main_integration_check.py."""
 
     def setUp(self):
+        # Hallazgo real (2026-08-30): estos tests construian un JarvisApp()
+        # que leia/escribia el bindings.json REAL del usuario en
+        # ~/.jarvis-gesture-hud/ (config_store.CONFIG_FILE, sin aislar) -
+        # José reasigno JJK_GOJO_DOMAIN->REDO probando el settings screen de
+        # verdad, y ese override real hizo fallar
+        # test_jjk_seal_default_binding_dispatches_the_right_command (el
+        # test esperaba el default, no el override de disco). Se aisla a un
+        # archivo temporal por test, igual que manual_live_integration_check.py.
+        self._tmp_config_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_config_dir.cleanup)
+        temp_config_path = Path(self._tmp_config_dir.name) / "bindings.json"
+        # `load_bindings(path=CONFIG_FILE)`'s default is bound at CONFIG_FILE's
+        # import-time value, not read fresh on every call - patching the
+        # module attribute alone would NOT redirect main.py's parameterless
+        # `config_store.load_bindings()`/`save_bindings(data)` calls. Patch
+        # the functions themselves instead (same fix already applied in
+        # manual_live_integration_check.py for the same reason).
+        from jarvis.core import config_store as _config_store
+
+        _real_load, _real_save = _config_store.load_bindings, _config_store.save_bindings
+
         patchers = [
             patch("jarvis.actions.mouse.pyautogui"),
             patch("jarvis.actions.keyboard.pyautogui"),
@@ -44,6 +66,14 @@ class _AppTestCase(unittest.TestCase):
             # proposito) - mockearlo evita instanciar varios motores pyttsx3
             # reales en paralelo entre tests (ruido de threads en stderr).
             patch("jarvis.main.VoiceJarvis"),
+            patch(
+                "jarvis.core.config_store.load_bindings",
+                side_effect=lambda path=temp_config_path: _real_load(temp_config_path),
+            ),
+            patch(
+                "jarvis.core.config_store.save_bindings",
+                side_effect=lambda data, path=temp_config_path: _real_save(data, temp_config_path),
+            ),
         ]
         mocks = [p.start() for p in patchers]
         for p in patchers:

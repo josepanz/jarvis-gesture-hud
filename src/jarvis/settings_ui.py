@@ -17,20 +17,22 @@ BG = "#101018"
 FG = "#e8e8f0"
 ACCENT_BG = "#1c1c28"
 
-# TASK-081/079: los 19 gestos "clasicos" (Fases 1-3) no tienen una relacion
-# 1:1 con un icon_key de `gesture_icons.ICON_SPECS` (2 eventos comparten a
+# TASK-081/079: los gestos "clasicos" (Fases 1-3, mas SCROLL_LEFT/RIGHT
+# agregados junto con el rediseño de scroll) no tienen una relacion 1:1 con
+# un icon_key de `gesture_icons.ICON_SPECS` (varios eventos comparten a
 # veces un solo icono, ej. PINCH_DOWN/PINCH_UP -> "pinch_click") - este es el
-# UNICO puente hand-maintained que hizo falta (19 lineas, no una copia de
-# texto: el nombre/tooltip real de cada fila sigue viniendo de
-# `jarvis.legend.ENTRIES`, ver `_build_trigger_rows()`). Los 18 sellos/gestos
-# comunes de las Fases 4-7 no lo necesitan - su icon_key es siempre
-# `event.lower()`.
+# UNICO puente hand-maintained que hizo falta (no una copia de texto: el
+# nombre/tooltip real de cada fila sigue viniendo de `jarvis.legend.ENTRIES`,
+# ver `_build_trigger_rows()`). Los sellos/gestos comunes de las Fases 4-7 no
+# lo necesitan - su icon_key es siempre `event.lower()`.
 _CLASSIC_EVENT_ICON_KEYS = {
     "PINCH_DOWN": "pinch_click",
     "PINCH_UP": "pinch_click",
     "RIGHT_CLICK": "pinch_right_click",
     "SCROLL_UP": "scroll",
     "SCROLL_DOWN": "scroll",
+    "SCROLL_LEFT": "scroll",
+    "SCROLL_RIGHT": "scroll",
     "ZOOM_IN": "pinch_zoom",
     "ZOOM_OUT": "pinch_zoom",
     "VOLUME_UP": "pinch_volume",

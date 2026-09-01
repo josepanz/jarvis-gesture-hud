@@ -12,7 +12,7 @@ ENTRIES = [
     ("Índice movido", "Puntero", "pointer"),
     ("Pulgar + Índice (pinch)", "Click / Drag", "pinch_click"),
     ("Pulgar + Medio (pinch)", "Click derecho", "pinch_right_click"),
-    ("Índice + Medio arriba", "Scroll", "scroll"),
+    ("Índice + Medio arriba, mover desde el centro", "Scroll (4 direcciones)", "scroll"),
     ("Pulgar + Anular (pinch)", "Zoom", "pinch_zoom"),
     ("Palma abierta", "Teclado HUD", "open_palm_keyboard"),
     ("Pulgar + Meñique + mover", "Volumen", "pinch_volume"),

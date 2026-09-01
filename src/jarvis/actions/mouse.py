@@ -86,6 +86,30 @@ class ScrollCommand(Command):
             return CommandResult.failed(error=str(exc), message="Scroll failed")
 
 
+class HScrollCommand(Command):
+    """Scroll horizontal (TASK: rediseño de scroll, hallazgo de camara real,
+    José 2026-08-30, "mismo comportamiento para scroll izquierda o
+    derecha") - wrapea pyautogui.hscroll(), el equivalente horizontal de
+    pyautogui.scroll() ya usado por ScrollCommand."""
+
+    def __init__(self, amount):
+        self.amount = amount
+
+    @property
+    def metadata(self):
+        return CommandMetadata(name="HScroll", safety="SAFE")
+
+    def can_execute(self):
+        return True
+
+    def execute(self):
+        try:
+            pyautogui.hscroll(self.amount)
+            return CommandResult.ok(message=f"hscrolled {self.amount}")
+        except Exception as exc:
+            return CommandResult.failed(error=str(exc), message="HScroll failed")
+
+
 class CanvasZoomCommand(Command):
     """Ctrl+Scroll canvas/viewport zoom - NOT resizing a selected object (see
     ARCHITECTURE.md decisions: a generic "scale the selection" action isn't

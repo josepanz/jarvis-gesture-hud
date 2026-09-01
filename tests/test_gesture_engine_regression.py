@@ -195,6 +195,29 @@ def fist_opening_transition_hand(cx=0.5, cy=0.5):
     return pts
 
 
+def pinch_shaped_like_shaka_hand(cx=0.5, cy=0.5):
+    """Real-camera regression (José, 2026-08-30): identical to a genuine
+    Shaka in every respect _is_shaka's original 5 conditions checked (pinky
+    extended, thumb "extended" i.e. tip above its own MCP, index/middle/ring
+    curled) EXCEPT thumb and index are pinched together (0.01 apart) instead
+    of held apart - reproducing an ordinary index+thumb click pinch whose
+    incidental other-finger curl happened to satisfy every one of those 5
+    conditions by coincidence, none of which ever checked thumb-index
+    distance."""
+    pts = flat(cx, cy)
+    pts[20] = Landmark(cx, cy - 0.1, 0)  # pinky extended
+    pts[18] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx, cy + 0.05, 0)  # middle curled
+    pts[10] = Landmark(cx, cy, 0)
+    pts[16] = Landmark(cx, cy + 0.05, 0)  # ring curled
+    pts[14] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.05, 0)  # thumb tip above its own mcp ("extended")
+    pts[2] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.01, cy - 0.05, 0)  # index tip PINCHED against the thumb tip
+    pts[6] = Landmark(cx, cy - 0.08, 0)  # index pip above the tip ("curled" per _is_shaka's own metric)
+    return pts
+
+
 def fist_hand(cx=0.5, cy=0.5):
     pts = flat(cx, cy)
     pts[4] = Landmark(cx - 0.08, cy, 0)
@@ -307,7 +330,10 @@ class PointerAndSmoothingTests(unittest.TestCase):
     def test_pointer_moves_with_smoothing(self):
         engine = GestureEngine()
         screen_xy, _, _ = process(engine, flat(0.5, 0.5))
-        self.assertEqual(screen_xy, (336, 189))  # regression pin (see test_gestures_smoothing.py too)
+        # Regression pin (see test_gestures_smoothing.py too) - updated 2026-08-30
+        # for config.EMA_ALPHA's 0.35 -> 0.25 change (live-camera finding:
+        # pointer felt imprecise/jittery). Was (336, 189) at 0.35.
+        self.assertEqual(screen_xy, (240, 135))
 
 
 class LeftClickDragTests(unittest.TestCase):
@@ -370,6 +396,63 @@ class ScrollTests(unittest.TestCase):
         pts2[18] = Landmark(0.5, 0.35, 0)
         _, _, events = process(engine, pts2)
         self.assertNotIn("SCROLL_UP", events)
+
+    # TASK: rediseño de scroll (hallazgo de camara real, José, 2026-08-30) -
+    # forma sin cambios, direccion ahora sale de la posicion respecto a una
+    # base fijada al entrar al gesto, no de un delta cuadro-a-cuadro. Nuevo:
+    # scroll horizontal, con el mismo criterio.
+    def test_index_moving_right_scrolls_right(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.65, cy=0.5))
+        self.assertIn("SCROLL_RIGHT", events)
+
+    def test_index_moving_left_scrolls_left(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.65, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.5, cy=0.5))
+        self.assertIn("SCROLL_LEFT", events)
+
+    def test_a_small_tremor_within_the_threshold_fires_nothing(self):
+        # Con el delta cuadro-a-cuadro viejo, cualquier micro-temblor podia
+        # disparar (e invertir) un scroll - la base fija absorbe eso.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        _, _, events = process(engine, scroll_hand(cy=0.49))
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_holding_away_from_the_baseline_keeps_scrolling_every_frame(self):
+        # A diferencia del delta viejo (exigia seguir moviendose para seguir
+        # scrolleando), sostener la mano lejos de la base ahora sigue
+        # disparando cuadro a cuadro mientras se mantiene ahi - como un
+        # joystick, pedido explicito de José.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        pts = scroll_hand(cy=0.35)
+        _, _, events1 = process(engine, pts)
+        _, _, events2 = process(engine, pts)
+        self.assertIn("SCROLL_UP", events1)
+        self.assertIn("SCROLL_UP", events2)
+
+    def test_a_mostly_vertical_move_never_also_fires_horizontal(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.52, cy=0.35))  # mucho mas vertical que horizontal
+        self.assertIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_LEFT", events)
+        self.assertNotIn("SCROLL_RIGHT", events)
+
+    def test_releasing_the_shape_resets_the_baseline(self):
+        # Soltar el gesto y volver a levantar la mano en OTRA posicion fija
+        # una base NUEVA ahi - no arrastra la base vieja.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        process(engine, open_palm_hand())  # suelta la forma - reinicia la base
+        process(engine, scroll_hand(cy=0.2))  # nueva base, lejos de la vieja
+        _, _, events = process(engine, scroll_hand(cy=0.2))  # sin moverse de la base nueva
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
 
 
 class ZoomTests(unittest.TestCase):
@@ -459,6 +542,36 @@ class LockSessionTests(unittest.TestCase):
         # silently regress.
         self.assertFalse(_is_shaka(fist_opening_transition_hand()))
 
+    def test_a_pinch_that_happens_to_match_shakas_other_4_fingers_is_not_read_as_shaka(self):
+        # Real-camera regression (José, 2026-08-30): clicking with an
+        # index+thumb pinch triggered LOCK_SESSION unintentionally. None of
+        # _is_shaka's 5 original conditions checks thumb-to-index distance -
+        # a real pinch's thumb often reads as "extended" (tip above its own
+        # MCP) and the pinky can stay incidentally extended too, so all 5
+        # matched by coincidence. This fixture reproduces exactly that:
+        # identical to a genuine Shaka in every OTHER respect, except thumb
+        # and index are pinched together (0.01 apart) instead of separated.
+        pts = pinch_shaped_like_shaka_hand()
+        self.assertFalse(_is_shaka(pts))
+
+        engine = GestureEngine()
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
+    def test_an_ordinary_pinch_click_held_a_long_time_never_locks(self):
+        # Same real-world scenario, using the actual PINCH_CLICK fixture
+        # already used elsewhere in this file (not a Shaka-shaped one) -
+        # holding a normal click pinch, however long, must never accidentally
+        # accumulate LOCK_SESSION's hold.
+        engine = GestureEngine()
+        pts = pinch_click_hand(pinched=True)
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
 
 class TwoHandMasterGestureTests(unittest.TestCase):
     def test_both_fists_held_pauses(self):
@@ -511,7 +624,8 @@ class PrimaryHandContinuityTests(unittest.TestCase):
         # hands[0] by construction (documented, correct behavior for that case,
         # not what this test is about).
         right_moving = Hand(flat(0.8, 0.5), "Right")
-        engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(10):  # deja converger el suavizado - el test es sobre
+            engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)  # continuidad, no sobre la velocidad de EMA_ALPHA
 
         # Now a second, idle hand appears and is listed FIRST. If continuity
         # didn't work, naively using hands[0] would jump the pointer to the idle

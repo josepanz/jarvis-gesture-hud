@@ -32,9 +32,10 @@ class SmoothingToggleTests(unittest.TestCase):
         engine = GestureEngine()
         self.assertTrue(engine.smoothing_enabled)
         screen_xy, _, _ = engine.process([Hand(_flat_hand(), "Right")], 640, 480, 1920, 1080)
-        # Same result the pre-TASK-018 code always produced for this input (EMA
-        # from prev=(0,0) toward the target, alpha=0.35): regression pin.
-        self.assertEqual(screen_xy, (336, 189))
+        # EMA from prev=(0,0) toward the target: regression pin. Updated
+        # 2026-08-30 for config.EMA_ALPHA's 0.35 -> 0.25 change (live-camera
+        # finding: pointer felt imprecise/jittery) - was (336, 189) at 0.35.
+        self.assertEqual(screen_xy, (240, 135))
 
     def test_disabled_smoothing_snaps_directly_to_target(self):
         engine = GestureEngine(smoothing_enabled=False)

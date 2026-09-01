@@ -109,10 +109,24 @@ def main():
             app._handle_voice_result(("text", "subir volumen", 0.1))
             assert not mock_os.volume_up.called, "low-confidence voice result must be discarded"
 
-            # --- Voice dispatch: unmatched phrase falls through to the LLM resolver ---
+            # --- Voice dispatch: unmatched phrase falls through to the LLM
+            # resolver, on a BACKGROUND THREAD (TASK: fix real-camera finding
+            # "la voz no responde" - LLMIntentResolver.resolve() downloads
+            # ~1GB + loads a model on first use; calling it synchronously
+            # from here used to freeze the whole app). Poll until the
+            # background thread finishes instead of asserting immediately.
+            def _wait_for_llm_resolution(timeout=2.0):
+                deadline = time.time() + timeout
+                while app._llm_resolving and time.time() < deadline:
+                    time.sleep(0.01)
+                app._poll_llm_intent_results()
+
             with patch.object(app.llm_intent_resolver, "resolve", return_value=None) as mock_llm_resolve:
                 app._handle_voice_result(("text", "algo que no matchea ninguna frase", 0.95))
+                assert app._llm_resolving, "the LLM fallback must start on a background thread, not run inline"
+                _wait_for_llm_resolution()
                 assert mock_llm_resolve.called, "unmatched phrase should fall back to the LLM resolver"
+                assert not app._llm_resolving, "the busy flag should clear once the background thread finishes"
 
             # --- Voice dispatch: LLM-resolved action reaches the real Command path too ---
             from jarvis.core.intents import Intent
@@ -124,6 +138,7 @@ def main():
             ):
                 mock_os.reset_mock()
                 app._handle_voice_result(("text", "hazme el favor de silenciar todo", 0.95))
+                _wait_for_llm_resolution()
                 assert mock_os.volume_mute.called, "LLM-resolved MUTE should dispatch MuteCommand"
 
             # --- TASK-063 (Fase 4): un sello Naruto de 1 mano, de punta a

@@ -130,7 +130,7 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Index fingertip (landmark 8) moved | Mouse pointer (EMA-smoothed) |
 | Pinch thumb(4)+index(8) < 30px | Left click / drag / HUD keyboard key select |
 | Pinch thumb(4)+middle(12) < 30px | Right click |
-| Index+middle extended, ring+pinky curled | Vertical scroll |
+| Index+middle extended, ring+pinky curled, index tip held away from a per-gesture baseline position | Scroll — 4 directions (redesigned, see Decisions) |
 | Pinch thumb(4)+ring(16), index extended | Zoom (Ctrl+Scroll) |
 | Open palm (index/middle/ring/pinky extended, thumb spread >60px) | Toggle on-screen keyboard |
 | Pinch thumb(4)+pinky(20) + vertical movement | Volume up/down |
@@ -1328,6 +1328,109 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
     reliably support two simultaneous `tk.Tk()` roots in one process; the
     persistence check instead re-runs the exact loading line `JarvisApp`
     itself uses, without a second real Tk root.
+- **Post-Fase-8 fixes from real-camera use (José, 2026-08-30).** José ran
+  the app for real (installed `requirements-voice.txt`, used the settings
+  screen, exercised gestures normally) after Fase 8 shipped and reported a
+  batch of concrete problems — the first genuinely broad, everyday-use
+  session this project has had (earlier live-camera passes tested one
+  seal/gesture at a time). Fixed:
+  - **Voice "not responding" — root cause found, not guessed.**
+    `LLMIntentResolver.resolve()` downloads its ~1GB GGUF model (first use)
+    and loads it SYNCHRONOUSLY; it was being called directly from
+    `_handle_voice_result()` on the main camera-loop thread. Confirmed
+    concretely before fixing: the model file was absent from `assets/`
+    (never finished downloading), the download URL itself answered fine
+    (`HEAD` → 200, ~1.1GB) — so the freeze, not the network, was the actual
+    cause. Any unmatched phrase silently froze the ENTIRE app (camera
+    included) for as long as the download/load took, with zero visible
+    feedback — indistinguishable from "broken." Fixed by moving the LLM
+    fallback to a background thread (same `threading.Thread` + non-blocking
+    `queue.Queue` pattern `VoiceListener._transcribe` already uses),
+    polled via a new `_poll_llm_intent_results()` each frame; a "🧠
+    Pensando…" bubble covers the wait, and a busy-guard (`_llm_resolving`)
+    discards a second phrase spoken while the first is still resolving
+    instead of risking two concurrent calls into one `Llama` instance
+    (not guaranteed thread-safe). `VoiceIntentResolver`'s phrase match
+    stays synchronous (pure, no I/O) — only the LLM path needed this.
+  - **Pinch-click confused with Shaka (false `LOCK_SESSION`).** None of
+    `_is_shaka()`'s 5 original conditions checked thumb-to-index distance —
+    an ordinary index+thumb click pinch has the thumb often reading
+    "extended" (tip above its own MCP, same metric Shaka uses) and the
+    pinky can stay incidentally extended too, so a ordinary pinch could
+    satisfy all 5 by coincidence and slowly accumulate `LOCK_SESSION`'s
+    hold. Fixed by requiring thumb and index to be more than
+    `config.SHAKA_MIN_THUMB_INDEX_GAP` (0.12 normalized, reasoned not
+    measured) apart — a genuine Shaka already holds them far apart by
+    construction (thumb out to the side, index curled into the palm), so
+    this costs the real gesture nothing. Regression-tested with a fixture
+    built to satisfy the OLD 5 conditions exactly while pinching thumb+index
+    together, confirming it would have false-positived pre-fix.
+  - **Scroll direction redesigned + horizontal scroll added.** Old
+    behavior tracked `index.y`'s frame-to-frame delta — scrolling only
+    continued while the hand kept actively moving, and a single frame of
+    tremor could flip the sign, which is what read as "confusing" in
+    practice. Per José's explicit spec ("el movimiento indique el scroll...
+    señalar hacia arriba, scroll arriba... hacia abajo, scroll abajo, mismo
+    comportamiento para izquierda/derecha"): the base shape is UNCHANGED
+    (index+middle extended, ring+pinky curled, thumb spread — kept exactly
+    as-is, explicitly requested), but direction now comes from a "baseline"
+    position captured on the first frame the shape engages (`self.scroll_baseline`),
+    compared against the CURRENT index-tip position every subsequent frame
+    — like a joystick: moving away from that baseline and holding there
+    keeps scrolling every frame (no need to keep actively moving), and a
+    small tremor near the baseline fires nothing instead of a flipped
+    direction. The axis with the larger offset from baseline wins
+    (`abs(dy) >= abs(dx)` picks vertical on ties) so a mostly-vertical move
+    never also fires horizontal. New `SCROLL_LEFT`/`SCROLL_RIGHT` events,
+    `HScrollCommand` (wraps `pyautogui.hscroll()`, the horizontal sibling of
+    the existing `ScrollCommand`), both added to `_MIGRATED_GESTURES`,
+    `GESTURE_DEFAULT_BINDINGS` (identity default, like every other classic
+    event), and `llm_intent.VALID_ACTIONS` (voice can say "scroll
+    left/right" too). `config.SCROLL_DIRECTION_THRESHOLD=0.06` — reasoned,
+    not measured, deliberately larger than `VOLUME_DELTA_THRESHOLD` (that
+    one measures a per-frame delta, always small; this measures a
+    cumulative offset from baseline, naturally larger).
+  - **Sukuna snap latency.** Widened `JJK_SUKUNA_MAX_WINDOW_SECONDS` from
+    0.35s to 0.6s — a deliberate snap performed for a webcam (not a
+    lightning-fast real snap) plausibly takes longer than 350ms from
+    contact to separation; if it didn't complete inside the window, the
+    `ImpulseDetector` expired without firing, which reads as "not
+    responding" rather than "a bit slow." Contact threshold (15px) stays
+    tighter than `PINCH_RIGHT_CLICK` (20px) — the existing, still-unresolved
+    collision risk with `RIGHT_CLICK` is governed by that threshold, not
+    the window, so widening the window doesn't worsen it.
+  - **Pointer imprecision — a reasoned, NOT measured, first attempt.**
+    `EMA_ALPHA` lowered from 0.35 to 0.25 (more weight to the smoothed
+    history, less to this frame's raw reading) to damp typical MediaPipe
+    fingertip jitter at desktop distance harder. Unlike the pinch thresholds
+    elsewhere in this file (recalibrated from actual measured camera data),
+    this one is a guess pending live verification — flagged as such
+    explicitly, not quietly presented as measured.
+  - **A real, unrelated test-isolation bug found and fixed along the way**:
+    `test_naruto_seal_dispatch.py`'s `_AppTestCase` built a real `JarvisApp()`
+    that read (and could write) the ACTUAL `~/.jarvis-gesture-hud/bindings.json`
+    on this machine, with no isolation — invisible until José used the
+    settings screen for real and rebound `JJK_GOJO_DOMAIN` to `REDO`, which
+    then made `test_jjk_seal_default_binding_dispatches_the_right_command`
+    fail (it got the real override, not the code default). Fixed by
+    patching `config_store.load_bindings`/`save_bindings` to a temp path in
+    that test case's `setUp()`, same technique already used in
+    `manual_live_integration_check.py`'s persistence check.
+  - **Two findings from José's report are deferred, not fixed here**: (1)
+    "ningún sello Naruto se reconoce bien" — needs the same live,
+    one-seal-at-a-time camera diagnostic discipline as Fase 4 (José as test
+    subject, capture real landmarks, measure, don't guess) rather than a
+    code-only pass; (2) the general "todo se confunde con Shaka/Screenshot"
+    complaint is only PARTIALLY addressed (the specific pinch-vs-Shaka case
+    above) — the rest is plausibly a downstream symptom of (1), since
+    `SCREENSHOT` is the shared default action for 3 different seals
+    (`NARUTO_TORA`, `JJK_SUKUNA`, `KOREAN_HEART`) — if those are being
+    misclassified as each other, "everything triggers screenshot" would be
+    the visible symptom without there being a separate root cause to find
+    in `SCREENSHOT`'s own detection logic.
+  - 594 tests total (+17 over Fase 8's 577), all green; both manual integration
+    scripts updated and passing (the live one now also exercises the async
+    LLM-fallback path with a controllable mock instead of assuming it works).
 
 ## Known limitations
 

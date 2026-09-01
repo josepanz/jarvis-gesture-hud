@@ -3,7 +3,15 @@
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-EMA_ALPHA = 0.35
+# Hallazgo de camara real (José, 2026-08-30): "el puntero es muy impreciso
+# con el movimiento de los dedos". Bajado de 0.35 a 0.25 (mas peso al valor
+# suavizado anterior, menos al crudo de este frame) para amortiguar mejor el
+# jitter tipico de la punta del indice en MediaPipe a distancia de escritorio
+# - razonado, NO medido en camara todavia (a diferencia de los umbrales de
+# pinch de abajo, que si tienen datos reales detras). Pendiente de verificar
+# si esto alcanza o si el "impreciso" viene de otro lado (ej. deteccion en
+# si, no el suavizado).
+EMA_ALPHA = 0.25
 POINTER_MARGIN = 0.1  # recorte de bordes al mapear cámara -> pantalla
 
 # Umbrales de pinch/distancia (px sobre el frame). Recalibrados 2026-08-27 con
@@ -25,6 +33,15 @@ PINCH_CONFIRM_FRAMES = 2  # frames seguidos bajo el umbral antes de confirmar un
 PALM_OPEN_MIN_SPREAD = 60
 SILENCE_TUCK_MAX = 40
 
+# Hallazgo de camara real (José, 2026-08-30): el pinch de click (indice+pulgar)
+# se confundia con Shaka y disparaba LOCK_SESSION sin querer - ver el
+# comentario de _is_shaka() en gestures.py para el analisis completo. 0.12
+# normalizado (~77px en un frame de 640px) - bien por encima del ruido de
+# mano relajada en indice (~0.024 normalizado, ver arriba) y de cualquier
+# pinch intencional, bien por debajo de la separacion esperable pulgar-indice
+# de un Shaka genuino. Razonado, no medido en camara todavia.
+SHAKA_MIN_THUMB_INDEX_GAP = 0.12
+
 # Cooldowns (segundos)
 CLICK_COOLDOWN = 0.3
 RIGHT_CLICK_COOLDOWN = 0.4
@@ -37,6 +54,15 @@ PAUSE_HOLD_SECONDS = 1.2
 META_HOLD_SECONDS = 0.6
 VOLUME_DELTA_THRESHOLD = 0.03
 TWO_HAND_ZOOM_DELTA_PX = 15
+
+# Hallazgo de camara real (José, 2026-08-30): rediseño de scroll - la
+# direccion ahora sale de la distancia normalizada entre la punta del indice
+# y la posicion "base" fijada al entrar al gesto (no de un delta cuadro a
+# cuadro, ver gestures.py). Mas grande que VOLUME_DELTA_THRESHOLD a
+# proposito: ese mide un delta INSTANTANEO entre 2 cuadros consecutivos
+# (siempre chico); esto mide un desplazamiento ACUMULADO desde que se levanto
+# la mano (naturalmente mas grande). Razonado, no medido en camara todavia.
+SCROLL_DIRECTION_THRESHOLD = 0.06
 
 NARUTO_SEAL_HOLD_SECONDS = 0.6  # TASK-062: mismo orden que META_HOLD_SECONDS - deliberado pero rapido
 # Verificado en camara real (2026-08-27): incluso con la forma correcta
@@ -64,7 +90,18 @@ NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
 # como en Fase 4).
 JJK_SUKUNA_CONTACT_THRESHOLD = 15  # mas ajustado que PINCH_RIGHT_CLICK (20): un snap es un toque decidido, no un roce casual
 JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~51px en menique)
-JJK_SUKUNA_MAX_WINDOW_SECONDS = 0.35  # un snap es rapido; una pinza sostenida (RIGHT_CLICK) excede esta ventana sin esfuerzo
+# Hallazgo de camara real (José, 2026-08-30): "el chasquido tardo en
+# responder" - subido de 0.35 a 0.6s. Un snap DELIBERADO frente a una
+# webcam (no un chasquido veloz de verdad) probablemente tarda mas de 350ms
+# en completar el contacto->separacion; con la ventana vieja, un intento un
+# poco lento nunca llegaba a completarse dentro de ella y el detector
+# expiraba sin disparar (ver ImpulseDetector, temporal_gesture.py) - eso se
+# percibe como "no responde" o "tarda", no como una accion mas lenta.
+# JJK_SUKUNA_CONTACT_THRESHOLD (15px) sigue mas ajustado que PINCH_RIGHT_CLICK
+# (20px), asi que ensanchar la ventana no aumenta el riesgo de colision ya
+# documentado con RIGHT_CLICK (ese se resuelve por el umbral de contacto, no
+# por la ventana). Razonado, no medido en camara todavia.
+JJK_SUKUNA_MAX_WINDOW_SECONDS = 0.6
 JJK_GOJO_ANGLE_TOLERANCE_DEGREES = 35  # tolerancia sobre el angulo objetivo de 90 grados entre pulgar e indice
 JJK_GOJO_MAX_DISTANCE_FRACTION = 0.30  # manos "juntas" para el marco, mas laxo que el clasp de NARUTO (0.20) - no exige contacto
 JJK_GOJO_MAX_AVG_WRIST_Y = 0.55  # ambas munecas en la mitad superior del frame (aprox. altura de pecho/cara)

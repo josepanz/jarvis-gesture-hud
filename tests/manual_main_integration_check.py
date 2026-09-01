@@ -62,6 +62,13 @@ def main():
             app._dispatch("SCROLL_DOWN", (100, 100), (500, 400))
             mock_mouse_pyautogui.scroll.assert_any_call(-12)
 
+            # --- scroll horizontal (rediseño de scroll, hallazgo de camara
+            # real, José 2026-08-30) ---
+            app._dispatch("SCROLL_RIGHT", (100, 100), (500, 400))
+            mock_mouse_pyautogui.hscroll.assert_any_call(12)
+            app._dispatch("SCROLL_LEFT", (100, 100), (500, 400))
+            mock_mouse_pyautogui.hscroll.assert_any_call(-12)
+
             # --- zoom (TASK-011) ---
             app._dispatch("ZOOM_IN", (100, 100), (500, 400))
             mock_mouse_pyautogui.scroll.assert_any_call(10)

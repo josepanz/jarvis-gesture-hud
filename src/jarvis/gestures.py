@@ -50,6 +50,22 @@ def _is_shaka(pts):
     # LOCK_SESSION sin que el usuario hiciera Shaka a proposito. Un Shaka real
     # (hang loose) tiene el anular curvado tambien, asi que este chequeo no
     # le saca alcance al gesto genuino.
+    #
+    # Hallazgo de camara real (José, 2026-08-30): el pinch de click
+    # (indice+pulgar) se confundia con Shaka y disparaba LOCK_SESSION sin
+    # querer. Ninguna de las 5 condiciones de arriba chequea la distancia
+    # pulgar-indice - durante un pinch real el pulgar sube (pts[4].y<pts[2].y,
+    # "extendido") y el menique a menudo queda relajado/extendido tambien,
+    # cumpliendo las 5 por casualidad. Un Shaka genuino tiene el pulgar bien
+    # separado del indice (apuntan en direcciones opuestas por construccion:
+    # pulgar hacia arriba/costado, indice recogido hacia la palma) - un pinch
+    # real, por definicion, los tiene juntos. Umbral razonado (no medido en
+    # camara todavia): bien por encima del rango de pinch/ruido de mano
+    # relajada documentado en config.py (maximo ~15.5px de indice sobre un
+    # frame de 640px, ~0.024 normalizado) y bien por debajo de la separacion
+    # esperable de un Shaka genuino.
+    if math.hypot(pts[4].x - pts[8].x, pts[4].y - pts[8].y) < config.SHAKA_MIN_THUMB_INDEX_GAP:
+        return False
     return (
         pts[20].y < pts[18].y
         and pts[4].y < pts[2].y
@@ -345,7 +361,14 @@ class GestureEngine:
         self.prev_x, self.prev_y = 0, 0
         self.was_pinching = False
         self.was_right_pinching = False
-        self.prev_scroll_y = None
+        # TASK: rediseño de scroll (hallazgo de camara real, José, 2026-08-30:
+        # "arriba/abajo se confunde"). Antes: delta cuadro-a-cuadro de
+        # index.y (habia que seguir moviendo la mano para seguir scrolleando,
+        # y un solo cuadro de temblor invertia el signo). Ahora: posicion
+        # "base" (donde el usuario levanto la mano por primera vez en esta
+        # forma) fijada al entrar al gesto - la direccion sale de cuanto se
+        # aleja la punta del indice de esa base, no de un delta instantaneo.
+        self.scroll_baseline = None  # (x, y) normalizado, o None si el gesto no esta activo
         self.prev_zoom_y = None
         self.prev_pinky_y = None
         self.lock_start_time = None
@@ -746,8 +769,24 @@ class GestureEngine:
         # Scroll: índice+medio juntos extendidos, resto de los dedos recogidos
         # (anular Y meñique, no solo anular - pedido explícito para no
         # confundirse con otros gestos que solo recogen el anular), pulgar
-        # separado del índice. Dirección: mover la mano hacia arriba dispara
-        # SCROLL_UP, hacia abajo SCROLL_DOWN (natural, igual que zoom/volumen).
+        # separado del índice - forma sin cambios, pedida explícitamente así
+        # (hallazgo de cámara real, José, 2026-08-30).
+        #
+        # Dirección REDISEÑADA (mismo hallazgo: "arriba/abajo se confunde,
+        # que el movimiento indique el scroll... señalar hacia arriba,
+        # scroll arriba... hacia abajo, scroll abajo, mismo comportamiento
+        # para izquierda/derecha"). Antes: delta cuadro-a-cuadro de index.y -
+        # solo scrolleaba mientras la mano seguía en movimiento activo, y un
+        # solo cuadro de temblor podía invertir el signo. Ahora: se fija una
+        # posición "base" en el primer cuadro que se entra a esta forma
+        # (donde el usuario levantó la mano), y la dirección sale de hacia
+        # dónde se alejó la punta del índice desde esa base - sostenido, no
+        # instantáneo (como un joystick: alejarse de la base y mantenerse
+        # ahí sigue scrolleando, un solo cuadro de temblor ya no invierte
+        # nada). El eje dominante (el de mayor desplazamiento) decide
+        # vertical vs horizontal, así un movimiento mayormente vertical
+        # nunca dispara scroll horizontal de paso y viceversa. Umbral
+        # razonado, no medido en cámara todavía.
         if (
             not two_hand_active
             and index.y < pts[6].y
@@ -756,15 +795,24 @@ class GestureEngine:
             and pinky.y > pts[18].y
             and d_thumb_index > 40
         ):
-            if self.prev_scroll_y is not None:
-                delta = self.prev_scroll_y - index.y
-                if delta > config.VOLUME_DELTA_THRESHOLD:
-                    events.append("SCROLL_UP")
-                elif delta < -config.VOLUME_DELTA_THRESHOLD:
-                    events.append("SCROLL_DOWN")
-            self.prev_scroll_y = index.y
+            if self.scroll_baseline is None:
+                self.scroll_baseline = (index.x, index.y)
+            else:
+                base_x, base_y = self.scroll_baseline
+                dx = index.x - base_x
+                dy = base_y - index.y  # positivo = el indice subio respecto a la base
+                if abs(dy) >= abs(dx):
+                    if dy > config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_UP")
+                    elif dy < -config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_DOWN")
+                else:
+                    if dx > config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_RIGHT")
+                    elif dx < -config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_LEFT")
         else:
-            self.prev_scroll_y = None
+            self.scroll_baseline = None
 
         # TASK-062 (Fase 4) + TASK-068 (Fase 6): sellos de 1 mano. Todos
         # exigen ningun pinch activo (pinch_winner is None - asi cualquier
