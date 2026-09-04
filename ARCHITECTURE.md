@@ -101,8 +101,10 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
   - `init_legend(text, corner)` / `set_legend_visible()` / `adjust_legend_alpha()` — a persistent panel anchored to a screen corner, translucent, with runtime opacity control.
   - Both use `_make_click_through(window)`: on Windows this applies `WS_EX_LAYERED | WS_EX_TRANSPARENT` to the real HWND (obtained via `GetParent(winfo_id())`) through `ctypes` — a well-known, dependency-free trick, verified working on this machine (see Decisions). No-op elsewhere.
   - `pump()` is called once per camera frame instead of `mainloop()`, because Tk is not thread-safe and a separate UI thread would race with the camera loop.
+  - `init_gear_icon(on_click)` (TASK-078, Fase 8) — a small always-on-top gear (`⚙`) window, bottom-right corner (the legend's default corner is top-right) — deliberately NOT click-through (spec.md #8.1 requires it to actually be clickable), the only window in this module that skips `_make_click_through()`.
+- **`settings_ui.py`** (Fase 8) — `SettingsWindow`/`Tooltip`, built on the exact same Tk root `overlay.py` already owns and pumps (design.md §5.6: never a second `tk.Tk()`/`mainloop()`). Bindings table sourced from `main.GESTURE_DEFAULT_BINDINGS`'s keys (every trigger the app can dispatch, TASK-079) crossed with `legend.ENTRIES` for the human-readable name/icon — the only new hand-maintained data is a 19-entry bridge (`_CLASSIC_EVENT_ICON_KEYS`) from the pre-Fase-4 events to their icon key, needed because a couple of them share one icon (`PINCH_DOWN`/`PINCH_UP` → `pinch_click`). Rebinding (a `ttk.Combobox` per row) writes straight into `ProfileManager.active.gesture_bindings` and calls back into `main.py` to persist immediately. `+ Atajo custom`/`+ Macro` buttons open small capture dialogs (`canonicalize_shortcut()` — a pure, directly-testable function turning a `<KeyPress>`'s `state`/`keysym` into a `ctrl+alt+t`-style string) that register into `custom_shortcuts`/`macros`, making them available as rebind targets for any row. Registered voice phrases are listed read-only (not reassignable through this table — a separate registration mechanism, `VoiceIntentResolver`, not `Profile.gesture_bindings`).
 - **`gestures.py`** — `GestureEngine`: pure logic, no I/O. `process(hands, w, h, screen_w, screen_h) -> (screen_xy | None, cam_xy | None, events)`. Single-hand gestures always use `hands[0]` and are entirely skipped when `active` is `False` (paused) — in that case `screen_xy` is `None`, so `main.py` neither moves the mouse nor draws the keyboard. The two master, two-hand gestures (`TOGGLE_ACTIVE`, `CLOSE_APP`) are evaluated *before* checking `active`, so pause can always be undone and the app can always be closed.
-- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`/`z`/`y`/`p`/`d`/`v`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration. `_handle_voice_result()`/`_dispatch_voice_action()` route push-to-talk transcriptions through `VoiceIntentResolver` then `LLMIntentResolver` into the same `Command`/`CommandBus` path gestures use.
+- **`main.py`** — `JarvisApp`: owns the camera loop, calls `GestureEngine.process`, draws the keyboard/pause banner, handles the keyboard shortcuts (`q`/`h`/`m`/`+`/`-`/`z`/`y`/`p`/`d`/`v`). `_dispatch()` splits events into the 11 discrete gestures migrated onto `Command`/`CommandBus` (`_dispatch_migrated()`) vs. everything else, still called directly exactly as before this migration. `_handle_voice_result()`/`_dispatch_voice_action()` route push-to-talk transcriptions through `VoiceIntentResolver` then `LLMIntentResolver` into the same `Command`/`CommandBus` path gestures use. **TASK-081 (Fase 8)**: EVERY event from `GestureEngine` — not just Naruto/JJK/common seals — now first resolves through `GESTURE_DEFAULT_BINDINGS`/`ProfileManager.get_gesture_binding()` before reaching `_dispatch()`, via `_dispatch_naruto_seal()` (name kept for backward test compatibility, now generic — see Decisions). Bindings/custom shortcuts/macros load from disk (`core/config_store.py`) before the camera loop starts and save immediately on any change made in the settings screen.
 
 ### `src/jarvis/core/` — OpenSpec foundation (PHASE 1)
 
@@ -111,12 +113,15 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 - **`commands.py`** — `Command` (ABC: `metadata` property, `can_execute()`, `execute()`, optional `undo()`/`redo()`), `CommandMetadata` (name + safety level, one of `SAFE`/`CONFIRM_REQUIRED`/`HOLD_REQUIRED`/`DESTRUCTIVE`), `CommandResult` (`success`, `status` restricted to `EXECUTED`/`REJECTED`/`ERROR` with cross-field consistency validation, `message`, `duration_ms`, `error`, `metadata`, with `.ok()`/`.rejected()`/`.failed()` factories).
 - **`command_bus.py`** — `CommandBus.dispatch(command) -> CommandResult`: validate -> reject `DESTRUCTIVE` outright (spec.md #27) -> `can_execute()` -> `execute()` -> result, every step guarded so a bad command can never crash the caller. Logs via stdlib `logging`; fills in `duration_ms` if the command didn't report one; optional `on_result(command, result)` hook for feedback/telemetry, itself exception-guarded.
 - **`feedback.py`** — `FeedbackManager`: adapter over the *existing* `VoiceJarvis`/`ScreenOverlay` (doesn't reimplement TTS or the HUD), channels `hud`/`tts`/`sound`/`silent` per spec.md #30, per-channel enable/disable, never raises.
+- **`config_store.py`** (TASK-074, Fase 8, design.md §5.2/spec.md #8.6) — `load_bindings()`/`save_bindings()`: generic JSON-on-disk persistence, deliberately unaware of what the dict MEANS (that's `ProfileManager`'s job, see below — separation of "how it's stored" from "what's stored"). `CONFIG_FILE = ~/.jarvis-gesture-hud/bindings.json` — outside the repo/install dir, per spec. Missing file → `{}` (defaults apply); corrupt file → renamed aside (`bindings.json.bak-<timestamp>`), never overwritten silently; writes are atomic (temp file in the same dir + `os.replace()`).
+- **`profiles.py`** additions (TASK-075) — `Profile` gained `custom_shortcuts`/`macros` dict fields (same validation pattern as its existing dict fields). `ProfileManager.to_dict()`/`.from_dict()` bridge to/from `config_store`'s schema (`{"schema_version": 1, "profiles": {name: {...}}}`) — only `gesture_bindings`/`custom_shortcuts`/`macros` are persisted; `sensitivity`/`cooldowns`/`dwell`/`hud`/`context_rules` stay code-only for now (not part of this schema). `from_dict()` never raises on malformed/missing data — falls back to the same code defaults `ProfileManager()` always had, and *merges* persisted fields onto the already-seeded `"default"` profile instead of replacing it (so its safe-default sensitivity/cooldowns/dwell, which never came from disk, survive a load).
 
 ### `src/jarvis/actions/` — concrete Commands (PHASE 2)
 
 - **`mouse.py`** — `MouseMoveCommand`, `MouseButtonCommand(pressed)`, `RightClickCommand`, `ScrollCommand(amount)`, `CanvasZoomCommand(amount)` (Ctrl+Scroll — canvas/viewport zoom, not object scaling, see Decisions). Each wraps the exact `pyautogui` call `main.py` used to make directly.
-- **`keyboard.py`** — `PressKeyCommand(key_name)`, `TypeTextCommand(text)` — what `HUDKeyboard.handle_click()` used to call directly.
+- **`keyboard.py`** — `PressKeyCommand(key_name)`, `TypeTextCommand(text)` — what `HUDKeyboard.handle_click()` used to call directly. **TASK-076 (Fase 8)**: `PressKeyCommand.can_execute()` used to check membership in a hand-picked `{"space", "backspace"}` (all the on-screen HUD keyboard ever needed) — broadened to `pyautogui.KEYBOARD_KEYS` (the real, authoritative vocabulary) so `MacroCommand`'s `press-key` steps can press anything (`enter`, `tab`, arrows, ...). Strict superset of the old set, confirmed via the existing test suite unchanged (`PressKeyCommand("F13")` still rejected — pyautogui's list is lowercase-only, `"F13"` ≠ `"f13"`).
 - **`system.py`** — `VolumeUpCommand`, `VolumeDownCommand`, `MuteCommand`, `ScreenshotCommand`, `LockSessionCommand`, wrapping `CrossPlatformOS`. Safety per spec.md #27's own examples: `SAFE` for volume/mute/screenshot, `HOLD_REQUIRED` for lock (the 1.5s Shaka hold that already gated it is unchanged — this declares that fact, doesn't add new gating).
+- **`macro.py`** (TASK-076, Fase 8, design.md §5.3/spec.md #8.4) — `HotkeyCommand(combo)` wraps `pyautogui.hotkey(*combo.split("+"))` (already supports arbitrary combinations — zero new dependency). `MacroCommand(name, steps)` runs an ordered list of steps (built from JSON via `build_macro_steps()` — the only translation between disk schema and in-memory objects, per `apply.md` §14) and stops at the first failing step; `metadata.safety` is the *strictest* among its `Command` steps (a bare `WaitStep` isn't a `Command` and doesn't participate). Both are ordinary Commands — flow through the same `CommandBus`/`CommandHistory`/`FeedbackManager` as everything else, no new execution layer.
 
 ### Gesture map
 
@@ -125,7 +130,7 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Index fingertip (landmark 8) moved | Mouse pointer (EMA-smoothed) |
 | Pinch thumb(4)+index(8) < 30px | Left click / drag / HUD keyboard key select |
 | Pinch thumb(4)+middle(12) < 30px | Right click |
-| Index+middle extended, ring+pinky curled | Vertical scroll |
+| Index+middle extended, ring+pinky curled, index tip held away from a per-gesture baseline position | Scroll — 4 directions (redesigned, see Decisions) |
 | Pinch thumb(4)+ring(16), index extended | Zoom (Ctrl+Scroll) |
 | Open palm (index/middle/ring/pinky extended, thumb spread >60px) | Toggle on-screen keyboard |
 | Pinch thumb(4)+pinky(20) + vertical movement | Volume up/down |
@@ -136,9 +141,28 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 | Both hands in Shaka, held 1.5s | **Close Jarvis** (works even while paused) |
 | Both hands pinching (thumb+index), spread apart / brought together | **Canvas zoom** (Ctrl+Scroll) — same action as the single-hand zoom, just a more natural two-hand trigger. Does **not** scale the selected object in a design app; that already works today via a normal single-hand drag on the app's own resize handle. |
 | One hand closed fist (anchor, either hand) + the other showing 1/2/3/4 fingers, held 0.6s | Secondary menu: 1 = toggle gesture legend, 2 = toggle mirror mode, 3 = legend more opaque, 4 = legend more transparent — the same four actions already bound to `h`/`m`/`+`/`-`, now also reachable without touching the keyboard. Debounced: won't repeat while the pose is held, needs to be released and re-formed. |
+| Naruto seal Tora (index+middle together, thumb crossed close), held 0.6s | Screenshot (default binding, profile-overridable) |
+| Naruto seal Ushi (index only, thumb tucked), held 0.6s | Undo |
+| Naruto seal U/Hare (index+middle spread apart, thumb tucked), held 0.6s | Redo |
+| Naruto seal Uma/Horse — redefined a 3rd time, real-camera verified (thumb+index+pinky extended, middle+ring curled), held 0.6s | Zoom in |
+| Naruto seal Hitsuji/Ram (index+middle genuinely crossed — segment-intersection check), held 0.6s | Mute |
+| Naruto seal Saru/Monkey — redefined a 3rd time, real-camera verified (fist, thumb pointing up), held 0.6s | Toggle on-screen keyboard |
+| Naruto seal Inu/Dog — redefined, real-camera verified (pinky extended alone), held 0.6s | Volume down |
+| Naruto seal I/Boar (fist, thumb extended to the side — lateral offset check), held 0.6s | Lock session (`HOLD_REQUIRED` — the hold above already satisfies it) |
+| Naruto seal Ne/Rat — two-hand (hands clasped close, partially folded, pointing up), held 1.2s | Zoom out |
+| Naruto seal Mi/Snake — two-hand (same as Ne, pointing down), held 1.2s | Scroll down |
+| Naruto seal Tori/Bird — two-hand (hands fanned apart, both open), held 1.2s | Scroll up |
+| Naruto seal Kai/Release — two-hand (clasped, index+middle of both hands crossed), held 1.2s | Close Jarvis |
+| Naruto seal Tatsu/Dragon — two-hand (clasped, one fist + one open hand), held 1.2s | Volume up |
+| JJK Gojo — Domain Expansion — two-hand (both hands' thumb→index vectors ~90° apart, hands close together, held up in the upper frame), held 1.2s | Right click |
+| JJK Sukuna — finger snap (thumb+middle drop below contact then rise above release within 0.35s — `ImpulseDetector`, TEMPORAL, no hold) | Screenshot |
+| JJK Megumi — shadow summon (index+middle crossed, **ring extended** — the explicit discriminator vs. Hitsuji, which requires ring curled), held 0.6s | Mute |
+| Clap — two-hand (both hands' palm centers drop below contact then rise above release within 0.4s — `ImpulseDetector`, TEMPORAL, no hold) | Toggle on-screen keyboard ("Clapper" pun) |
+| Korean finger heart — one-hand (fist, thumb near the index's first joint — **not** its tip, which stays `PINCH_CLICK`'s territory), held 1.0s | Screenshot (classic photo pose) |
 
 Keyboard shortcuts (camera window focused): `q` quit, `h` toggle legend visibility, `m`
-toggle mirror mode, `+`/`-` legend opacity.
+toggle mirror mode, `+`/`-` legend opacity, `l` toggle hand/landmark visualization
+overlay (TASK-057, off by default).
 
 ### Camera mirroring & handedness
 
@@ -271,6 +295,8 @@ assumption:
 | `GestureEngine.process()` (one frame, one hand, worst-case branch coverage) | **~2.65µs/call** (5,000-iteration average) | design.md #25: "gesture event generation: < 1 frame of additional latency" (~16–33ms at 30–60fps) — ~0.01–0.02% of that budget |
 | `CommandBus.dispatch()` overhead alone (pyautogui mocked, so only the architecture's own cost is measured) | **~11.8µs/call** (5,000-iteration average) | design.md #25: "local command dispatch: < 20ms target" — ~0.06% of that budget |
 | Packaged `.exe`, idle with camera running, no hand in frame | ~260MB RAM, clean log, no crash across 7+ separate manual boot checks (one per phase since PHASE 6) | spec.md #1: "≤ 7% CPU on quad-core" — not independently profiled per-core, but sustained real-time operation across every check is consistent with it |
+| `HandLandmarker.process()` (real camera frame, real inference — the existing per-frame cost, not new) | **~10.0ms/frame average, ~12.7ms p95** | (baseline for the row below, not previously measured on its own) |
+| `PoseLandmarker.process()` (TASK-060c, lite variant, real camera frame — new, opt-in) | **~10.4ms/frame average, ~12.6ms p95** — roughly doubles combined per-frame vision-inference cost when enabled | design.md #25's ~16–33ms/frame budget — significant enough that this ships disabled by default (`config.POSE_HAND_OWNERSHIP_ENABLED`), see Decisions |
 
 There is no meaningful "before" to compare against beyond "zero abstraction
 overhead by definition" (the original monolithic prototype called `pyautogui`
@@ -668,6 +694,743 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   requires `pinky.y > pts[18].y`, matching the user's explicit description
   ("el resto de los dedos" — ring AND pinky — curled, not just ring), same
   disambiguation reasoning as the earlier Shaka/fist fix.
+- **Phase 3B (TASK-060b/060c) — MediaPipe Pose-based anatomical hand-ownership
+  filter.** New `src/jarvis/pose_tracker.py` (`PoseTracker`, mirrors
+  `hand_tracker.py`'s structure, `num_poses=1` deliberately — see its
+  docstring), plus `filter_hands_by_pose_ownership()`: a detected hand is only
+  kept if its wrist (landmark 0) is within `config.POSE_MAX_WRIST_DISTANCE_FRACTION`
+  of the frame diagonal from the tracked body's left- or right-wrist landmark
+  (indices 15/16 of MediaPipe's 33-point BlazePose topology). Wired into
+  `main.py`'s `run()`, right after `HandTracker.process()`: when a body is
+  confidently tracked, its result narrows `hands` before they reach
+  `GestureEngine.process()` (which still runs TASK-056's bbox-area filter
+  underneath — augments, doesn't replace); when no body is tracked that
+  frame, `filter_hands_by_pose_ownership()` returns `None` and `hands` is
+  left untouched, falling back to TASK-056's heuristic exactly as before —
+  verified live (8s, real camera, no body in the frame's close-up
+  hand/desk framing): 0 exceptions, hand tracking/pointer behavior
+  unchanged throughout the whole run.
+  - **Performance measurement (`spec.md` #3B.3), real camera, this
+    development machine:** `PoseLandmarker` (lite variant) costs **~10.4ms/
+    frame average, ~12.6ms p95** — measured back-to-back with
+    `HandLandmarker`'s own **~10.0ms/frame average, ~12.7ms p95** on the same
+    hardware/frames. Running both every frame roughly **doubles** per-frame
+    vision-inference cost (~20ms combined) against design.md #25's "< 1 frame
+    of additional latency" budget (~16–33ms at 30–60fps) — a real, non-trivial
+    cost, not negligible.
+  - **Decision: disabled by default** (`config.POSE_HAND_OWNERSHIP_ENABLED =
+    False`), togglable via that constant — not "clearly bad" (TASK-056's
+    heuristic keeps working standalone with zero regression), but doubling
+    inference cost is significant enough that shipping it opt-in, honestly
+    documented with real numbers, is the responsible default per design.md
+    §3B.3's own guidance for a borderline-not-catastrophic cost.
+  - **Explicit limitations, not silently solved:** (1) `POSE_MAX_WRIST_DISTANCE_FRACTION`
+    (0.08) is a *reasoned* default (2 different models agreeing on the same
+    physical wrist point should be very close), **not measured against real
+    full-body camera data** — this session's camera framing (hand/desk
+    close-up) never had a full body in view, so the wrist-agreement distance
+    and the "hand correctly kept when a body IS tracked" path were verified
+    only via `tests/test_pose_tracker.py`'s deterministic unit tests, not live
+    end-to-end. (2) Same residual gap Phase 1 §1.2 already documented for a
+    second person at a *similar* distance — Pose ownership fixes the "hand
+    not attached to any tracked body" case, not "two people, each anatomically
+    holding up their own hand, close together" (only 1 body is tracked,
+    `num_poses=1`, by design — see §3B.1's own rationale).
+- **Phase 2 (TASK-057) — toggleable hand/landmark visualization overlay.**
+  New `src/jarvis/hand_visualizer.py`: `HAND_CONNECTIONS` (standard 21-point
+  hand topology, declared locally — not from the removed `mp.solutions`, same
+  reasoning as `hand_tracker.py`'s own docstring), `hand_connection_segments()`/
+  `bounding_quadrant()` (pure, unit-tested against synthetic landmark sets),
+  and `draw_hand_overlay()` (plain `cv2` drawing, zero new dependency):
+  skeleton lines + landmark dots + a bounding-quadrant rectangle per detected
+  hand, primary hand in `config.HAND_OVERLAY_PRIMARY_COLOR` (green) vs. any
+  other detected hand in `config.HAND_OVERLAY_OTHER_COLOR` (dim gray) — primary
+  determined by object identity against `GestureEngine.last_primary_landmarks`
+  (new attribute, set every `process()` call, `None` when paused/no hands) —
+  and the last-fired gesture name labeled next to the primary hand. New key
+  **`l`** toggles it (off by default); reuses the existing `events[-1] if
+  events else None` convention the debug HUD already uses for "current
+  gesture." Doesn't change any gesture-detection behavior (full regression
+  suite green with the toggle both on and off, since the draw call only runs
+  after `GestureEngine.process()` has already produced its result). **Visual
+  correctness verified by actually rendering it**: a real camera session had
+  no hand in frame during this task (this environment's camera framing), so
+  correctness was confirmed by rendering `draw_hand_overlay()` onto a frame
+  with realistic synthetic 2-hand landmark data (proportioned like a real
+  open hand) and reading the resulting PNG back as an image — skeleton
+  connects correctly end-to-end (thumb/index/middle/ring/pinky + palm base),
+  primary hand renders green with its bounding quadrant and the
+  `PINCH_DOWN` label positioned above it, the other hand renders dim gray
+  with no label, exactly as designed.
+- **Phase 3 (TASK-058/059/060) — procedural reference-icon infrastructure.**
+  New `src/jarvis/gesture_icons.py`: `ICON_SPECS` (declarative — finger
+  extended/curled sets per hand, optional pinch-contact marker, optional
+  small action-glyph badge), `ensure_icon(key) -> Path` (lazy-generate-and-
+  cache under `assets_dir()/gesture_icons/`, same pattern as the MediaPipe
+  model downloads — gitignored, nothing hand-authored committed), and
+  `generate_all_icons()`. Drawn with `PIL.Image`/`PIL.ImageDraw` (new
+  dependency: Pillow, added to `requirements.txt`) — a stylized palm +
+  5-finger skeleton (bold/dark for extended, thin/gray for curled), a red dot
+  marking pinch contact when relevant, and a small geometric action badge
+  (arrow/lock/mute/zoom/camera/keyboard/pause/close — no text, to sidestep
+  the same accented-character font problem `cv2.putText` already has,
+  documented below). Keyboard-only legend entries (no hand involved) get a
+  plain keycap glyph with the literal key letter instead (ASCII only: Q/H/M/
+  +-, no accents needed there). All 17 existing legend entries covered; every
+  icon's raw PNG bytes verified pairwise-distinct (`tests/test_gesture_icons.py`).
+  - `jarvis.legend.ENTRIES` gained a 3rd tuple element (icon key) per entry;
+    new `build_legend_entries()` resolves it through `ensure_icon()`.
+    `build_legend_text()` kept unchanged — verified byte-identical output
+    before/after (`tests/test_legend.py`).
+  - `overlay.ScreenOverlay.init_legend()` signature changed from a single
+    pre-formatted `text` string to `(entries, corner, title=None)`: each
+    entry renders as an icon `Label` + a text `Label` in a grid row, native
+    `tk.PhotoImage(file=...)` (PNG support built into Tk 8.6+) — no
+    `PIL.ImageTk`, per spec.md #3.1's explicit Must NOT. `PhotoImage`
+    instances are kept alive in `self._legend_icons` (Tk does not hold its
+    own reference — without this, Python's GC would collect them and the
+    icons would blank out shortly after the panel is created, a known Tk
+    gotcha). Toggle/opacity/click-through bindings unchanged (`_toggle_legend_visible`/
+    `adjust_legend_alpha`/`_make_click_through` untouched).
+  - **Verified by actually rendering it**, same discipline as the hand
+    overlay above: constructed a real `ScreenOverlay`, called
+    `init_legend(build_legend_entries(), title=TITLE)` for real, screenshotted
+    the live screen region, and read the image back — icons, colors, and text
+    rows all render correctly against the translucent panel background, title
+    at top, exactly as designed.
+- **Phase 4 (TASK-061/062/063) — one-hand Naruto seals.** Full collision
+  census against the complete 9-check single-hand surface (`design.md` §1.4)
+  plus every other new seal, verified against the REAL `GestureEngine` (not
+  just reasoned about) — every one of the 8 seal fixtures produces
+  `[f"NARUTO_{name}"]` and nothing else after its hold, and every existing
+  fixture (pinch/scroll/zoom/volume/screenshot/shaka/fist/silence/open-palm,
+  including the fist-opening-transition regression from the earlier
+  Shaka fix) produces zero `NARUTO_*` events (`tests/test_gesture_engine_regression.py::NarutoOneHandSealTests`).
+  - **`Saru` (Monkey) — REDEFINED, per design.md's own explicit flag.** The
+    original definition ("thumb+pinky extended, rest curled") is EXACTLY
+    `_is_shaka`'s shape — reusing it would silently change what an existing
+    gesture (`LOCK_SESSION`/`CLOSE_APP`) means, forbidden by `apply.md` §15.
+    Redefined to thumb+ring extended, index/middle/pinky curled — unused by
+    anything else, verified.
+  - **`Uma` (Horse) — REDEFINED, a collision design.md itself did NOT flag,
+    found during this task's own census (same kind of gap-catching this
+    project has done before — see the earlier collision-surface undercount
+    and the shared-cooldown bug).** The original definition ("all 5 fingers
+    extended and spread, thumb out") is a STRICT SUBSET of `KEYBOARD_TOGGLE`'s
+    existing condition (open palm + thumb spread >60px) — any hand shaped
+    like the original Uma would ALSO satisfy `KEYBOARD_TOGGLE`, firing both.
+    Redefined to index+middle+ring extended, pinky curled, thumb extended to
+    the side — distinct curl signature, verified.
+  - **Tora/U/Hitsuji share the same base finger-curl shape as SCROLL**
+    (index+middle extended, ring+pinky curled) — per design.md's own
+    description of Tora. Distinguished from SCROLL and from each other
+    entirely via conditions ALREADY computed in `process()`, without
+    touching SCROLL's existing condition at all: thumb distance to index
+    `<=40px` (Tora/U/Hitsuji) vs. SCROLL's existing, unchanged `>40px`
+    (mutually exclusive, no dead zone, no shared code path); index-middle
+    tip distance `<30px` ("together" → Tora) vs. `>50px` ("spread/peace-sign"
+    → U); a genuine finger-crossing check (`_fingers_crossed` — compares tip
+    x-order against MCP x-order, not just "close together") → Hitsuji. A
+    30–50px index-middle gap is a deliberate dead zone: fires neither, safer
+    than guessing.
+  - **All 8 seals additionally gated on `pinch_winner is None`** (no
+    pinch-family condition currently winning) **and `not two_hand_active`.**
+    This is a blanket rule, not per-seal tuning — it structurally rules out
+    any collision with the 5 pinch-family gestures regardless of a specific
+    seal's exact thumb geometry (if a seal's thumb ever gets close enough to
+    a fingertip to register as a pinch, the pinch wins that frame and the
+    seal simply doesn't fire — never both).
+  - **`I` (Boar) — accepted, documented limitation, not a collision to
+    resolve.** `_is_fist()` doesn't check the thumb, so `I`'s shape (fist +
+    thumb out) also reads as `_is_fist()==True` for the two-hand
+    `fists[0] != fists[1]` meta-menu discrimination. With 2 hands in frame
+    and the other hand NOT a fist, this arms the meta-menu's anchor mode in
+    the background — it does not fire any action by itself (still needs a
+    separate, deliberate 1–4-finger hold on the other hand). Judged
+    acceptable: a dormant background state, not a silently-wrong executed
+    action — the exact line `apply.md`/this project's collision policy
+    actually cares about.
+  - **Hold-then-confirm timing, same pattern as `LOCK_SESSION`/`_is_shaka`:**
+    a new `config.NARUTO_SEAL_HOLD_SECONDS=0.6` (same order as
+    `META_HOLD_SECONDS`) — a seal must be held continuously before its event
+    fires; releasing it (even to a shape that matches no seal) resets the
+    timer from zero, verified (`test_releasing_the_seal_before_the_hold_resets_it`).
+    **This is what satisfies "a seal bound to a `HOLD_REQUIRED` command
+    doesn't bypass its gating" (TASK-063):** the gating lives entirely
+    upstream, inside `GestureEngine` — a `NARUTO_*` event is structurally
+    incapable of existing before its hold completes, so no dispatch-layer
+    code could ever bypass it even if it tried. Verified end-to-end
+    (`tests/test_naruto_seal_dispatch.py::HoldRequiredGatingTests` +
+    `manual_live_integration_check.py`, both using the real default binding
+    `NARUTO_I` → `LockSession`, which is genuinely `HOLD_REQUIRED`).
+  - **Dispatch (TASK-063):** `main.py`'s `NARUTO_DEFAULT_BINDINGS` dict +
+    `JarvisApp._dispatch_naruto_seal()`, reusing `ProfileManager.get_gesture_binding()`
+    (already built for TASK-024, untouched) for "profile override > default
+    > None" precedence, and reusing `_dispatch_voice_action()` (the same
+    fixed-vocabulary path voice already uses) for the actual dispatch — a
+    seal and the equivalent voice command produce identical feedback/history
+    behavior by construction, not by parallel implementation. An unbound
+    seal (`get_gesture_binding` returns `None`) is a safe no-op, verified.
+    Default bindings: Tora→Screenshot, Ushi→Undo, U→Redo, Uma→ZoomIn,
+    Hitsuji→Mute, Saru→KeyboardToggle, Inu→VolumeDown, I→LockSession.
+  - **Icons:** 8 new `ICON_SPECS` entries (Phase 3 infra), all pairwise
+    byte-distinct from each other and from the 17 existing icons (verified),
+    plus one new legend row per seal — the 16 pre-existing legend lines
+    changed ONLY in padding width (a longer new line widened the shared
+    `ljust`), never in their own text (verified, updated snapshot in
+    `tests/test_legend.py`).
+  - **Update — real-camera verification session (2026-08-27), one seal at a
+    time, with the user's real hand.** Synthetic-fixture verification (above)
+    proved the code was internally consistent and collision-free; it did NOT
+    prove a real hand could actually produce these shapes the way the
+    fixtures assumed. It couldn't — of the 8 seals, only Hitsuji's base shape
+    came close on the first real attempt. Root-caused per seal (raw
+    per-finger tip/pip deltas and derived distances logged live, not
+    guessed):
+    - **`_fingers_crossed` (v1) false-positived ~60–70% of the time** on a
+      genuine Tora attempt (index+middle simply held together, not crossed)
+      — it only compared the LATERAL ORDER of the two tips against their
+      MCPs' order, which flips easily from ordinary landmark noise when tips
+      are close together. **Fixed (v2):** real 2D line-segment intersection
+      (orientation/cross-product test) between each finger's full MCP→tip
+      segment — a structurally stronger signal that a genuine cross requires.
+    - **Uma (v2: "index+middle+ring extended, pinky curled") and Saru (v2:
+      "thumb+ring extended") both scored 0% on a genuine attempt** — both
+      required isolating the ring finger independently of its neighbors,
+      which is physiologically hard (middle/ring/pinky share tendons; most
+      people cannot curl/extend the ring finger alone without dragging
+      adjacent fingers). The real hand naturally produced thumb+index+pinky
+      extended (middle+ring curled — an "I-love-you"/"rock-on"-style shape)
+      when attempting Uma, and a fully-open hand when attempting Saru.
+      **Redefined a 3rd time, informed by what the real hand could actually
+      do:** Uma → thumb+index+pinky extended, middle+ring curled (verified
+      achievable). Saru → closed fist with the thumb pointing UP (not
+      isolating any single finger — distinguished from `I` below by thumb
+      DIRECTION, not by which fingers curl).
+    - **Inu (v1: "ring+pinky extended together") also scored 0%** — same
+      ring-isolation problem; the real hand stayed fully closed. **Redefined:**
+      pinky extended alone (pinky has meaningfully more independent tendon
+      control than ring, confirmed by every capture where it moved
+      independently while ring did not).
+    - **`I` (Boar) scored ~0% on its own thumb condition** for a different
+      reason: the original check reused the same VERTICAL curl test as every
+      other finger (`tip.y < pip.y`), but "thumb extended outward to the
+      side" is a LATERAL motion — a vertical check structurally cannot see
+      it (thumb read as "curled" ~97% of the time even while held clearly
+      out to the side). **Fixed:** new `_thumb_offset_from_palm()` compares
+      the thumb tip's horizontal vs. vertical offset from the palm-center
+      landmark (9) and requires the lateral component to dominate — the same
+      helper now also drives Saru's "thumb up" (vertical component
+      dominates instead).
+    - **New shared mechanism: `config.NARUTO_SEAL_MISS_TOLERANCE=3`.** Even
+      holding a correct shape deliberately, live classification flickers to
+      "no seal" for an occasional single frame (landmark noise, not a real
+      pose change) — confirmed live. Without tolerance, ANY flicker fully
+      reset the 0.6s hold, making it near-impossible to complete in
+      practice. Same principle as `PINCH_CONFIRM_FRAMES` (TASK-055/1.5),
+      applied to the opposite side of the problem: not losing an in-progress
+      confirmation, rather than not granting one too early.
+    - **A real, subtler bug the fix for `I` surfaced and caught before
+      shipping:** the existing `fist_hand()` regression fixture (used
+      throughout this whole test file for two-hand scenarios) has its thumb
+      resting a plausible-but-arbitrary distance to the side — with `I`'s
+      original 0.06 lateral threshold, that ordinary fixture ALSO read as
+      `NARUTO_I` when passed as a single hand. Raised the threshold to 0.15
+      (verified against `fist_hand()`'s own offset) so a relaxed fist's
+      incidental thumb position can't be mistaken for a deliberate sideways
+      extension; `I`'s own fixture (built for a clearly deliberate lateral
+      thumb) still clears the new threshold comfortably.
+    - **Icons and legend updated to match** every redefinition (Uma/Saru/Inu
+      geometry, `I`'s clarified "costado" wording) — regenerated, re-verified
+      pairwise-distinct.
+    - **Scope of this pass:** re-verified via updated unit tests (496 total,
+      green) and the same root-cause-from-real-data discipline as every fix
+      in this project. The FIXED detectors were **not** re-run against the
+      camera a second time in this session (explicit user choice — "documenta
+      y sigue" — to move on rather than spend another live round); a
+      follow-up live check of Tora/Hitsuji/Uma/Saru/Inu/`I` specifically is
+      recommended before considering Phase 4 fully closed. Ushi and U were
+      not cleanly re-attempted live either (the session moved on before a
+      clean take) — their designs were left unchanged since the underlying
+      shapes (index alone; index+middle spread) are anatomically ordinary,
+      but they carry the same "not confirmed after this pass" caveat.
+- **Phase 5 (TASK-064/065/066) — two-hand Naruto seals (Ne, Mi, Tori, Kai,
+  Tatsu).** The user provided a reference photo of the real traditional
+  seals (all genuinely two-hand, fine finger-interlacing) and explicitly
+  chose **"real geometry first, simplify only if it fails live"** over
+  starting from a simplified proxy. design.md §5.1 itself already flags
+  that MediaPipe's 21 landmarks per hand can't reliably resolve fine
+  inter-hand finger interlacing (occlusion) and explicitly permits a coarser
+  proxy (hand-center distance + average finger curl + relative orientation)
+  as long as it's documented and the seal stays visually recognizable — that
+  permission is what's implemented here, not an unprompted simplification.
+  - **Collision surface is larger than design.md described**, because it
+    was written before Phase 4 added 8 new single-hand checks: a new
+    two-hand gesture must now avoid colliding with **17** single-hand checks
+    (9 original + 8 Naruto one-hand seals) × 2 hands, plus the **4** existing
+    two-hand-specific checks (`both_shaka`/`both_fists`/`both_pinching`/meta-menu)
+    = 21 conditions total, not the 13 the original document counted.
+  - **New shared primitives** (`gestures.py`): `_segments_cross()` (factored
+    out of the one-hand `_fingers_crossed` fix so it can also compare
+    segments ACROSS the two hands, for Kai), `_curl_ratio()` (fraction of
+    the 4 non-thumb fingers reading extended — the "how folded/interlaced"
+    proxy), `_hand_center()`/`_hands_distance()`, `_hand_points_up()`/`_hand_points_down()`.
+  - **Geometric definitions** (all evaluated inside `_process_two_hand_gestures`,
+    excluded whenever `both_shaka`/`both_fists`/`both_pinching` already
+    matched — hierarchy, not overlap, per the user's own standing principle
+    for this project):
+    - `Kai` — both hands' centers clasped-close AND both hands' index+middle
+      extended AND a real segment-cross between the two hands' index or
+      middle fingers (reuses the same geometric intersection test as the
+      one-hand Hitsuji fix, applied cross-hand). Checked first (most
+      specific).
+    - `Tatsu` — clasped-close AND a large curl-count asymmetry between the
+      two hands (one much more curled than the other — a coarse proxy for
+      "one hand wraps/layers over the other").
+    - `Ne` — clasped-close AND both hands' curl ratio in a "partially
+      folded" middle band (neither a fist nor fully open — the interlacing
+      proxy) AND both hands' average fingertip position above the wrist
+      ("pointing up").
+    - `Mi` — identical to `Ne` except both hands point DOWN instead — the
+      ONLY difference between the two, matching the real seals (design.md
+      §5.1: "distinguish from Ne by orientation... not finger shape alone").
+    - `Tori` — hands at a MEDIUM distance (further apart than the clasped
+      seals, not as far as an unrelated two-hand gesture) AND both hands'
+      curl ratio high (open/spread, not folded) — "fanned open" per the
+      reference photo.
+  - **Same hold-then-confirm + miss-tolerance mechanism as Phase 4**, new
+    dedicated state (`self._twohand_seal_hold_name/_start/_miss_streak`) and
+    a longer `config.NARUTO_TWOHAND_HOLD_SECONDS=1.2` (matches the existing
+    `PAUSE_HOLD_SECONDS` two-hand precedent — longer than the one-hand
+    seals' 0.6s, since a two-hand pose is more complex/error-prone to hold
+    by accident).
+  - **Verified against the real `GestureEngine`** (synthetic fixtures, same
+    discipline as every seal in this project): each of the 5 fixtures fires
+    exactly its own `NARUTO_<NAME>` event and nothing else; none of the
+    existing two-hand fixtures (`both_fists`/`both_shaka`/meta-menu) leak a
+    seal event, and none of the 5 new fixtures leak an existing two-hand
+    event (`tests/test_gesture_engine_regression.py::NarutoTwoHandSealTests`).
+  - **Dispatch/icons/legend**, same TASK-063 mechanism reused as-is
+    (`_dispatch_naruto_seal` already dispatches by the `NARUTO_` prefix
+    regardless of 1- or 2-hand origin — no new dispatch code needed).
+    Defaults: Ne→ZoomOut, Mi→ScrollDown, Tori→ScrollUp, Kai→CloseApp
+    ("Release" — a deliberate thematic fit), Tatsu→VolumeUp. 5 new
+    `hands: 2` icons (Phase 3 infra already supported this), all pairwise
+    byte-distinct from the existing 25.
+  - **Honest limitation, explicitly not yet closed:** unlike Phase 4, **none
+    of these 5 seals have been verified against a real hand on camera yet**
+    — this pass ends at synthetic-fixture verification, by the user's own
+    explicit choice ("saltamos a la fase 5, luego realizaremos la prueba
+    integral nuevamente" — skip to Phase 5, do the real-camera pass together
+    afterward). All 5 geometric thresholds
+    (`NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION=0.20`,
+    `NARUTO_TWOHAND_FAN_MIN/MAX_DISTANCE_FRACTION=0.20/0.42`, the 0.2–0.8
+    curl-ratio "interlaced" band, the 0.75 "open" threshold for Tori, the
+    ≥2 curl-count asymmetry for Tatsu) are REASONED, not measured — given
+    Phase 4's experience (7 of 8 one-hand seals needed real correction
+    despite passing synthetic verification first), these should be treated
+    as a first draft pending the same live-camera correction cycle, not a
+    finished result.
+- **Phase 6 (TASK-067/068/069/070) — Jujutsu Kaisen gestures (Gojo Domain
+  Expansion, Sukuna's snap, Megumi).** First phase in the project where the
+  user opted OUT of the per-phase live-camera correction cycle used for
+  Phases 4/5 — explicit instruction was to defer ALL remaining verification
+  to one combined "prueba integral" pass covering Phases 4/5/6 together, and
+  to keep implementing code in the meantime. Everything below is REASONED
+  and synthetic-fixture-verified only; nothing here has touched a real
+  camera yet.
+  - **`temporal_gesture.py` (new module) — `ImpulseDetector`**, the first
+    TEMPORAL/multi-frame primitive in this codebase (every existing gesture
+    is either single-frame state or a simple hold-timer). A 3-state machine
+    (`idle` → `armed` → fires and returns to `idle`, OR `armed` → `expired`
+    if the window elapses while still in contact → `idle` only once the
+    tracked distance finally rises above `release_threshold`, WITHOUT
+    firing). The 3rd state is what makes a long sustained pinch that
+    eventually releases NOT count as an impulse — a naive 2-state version
+    (armed/idle only) was drafted first and found, by reasoning through the
+    exact sequence, to spuriously refire once the sustained hold finally
+    let go; the 3-state version was written specifically to close that hole,
+    and `tests/test_temporal_gesture.py` pins all 4 of TASK-067's acceptance
+    criteria including that exact scenario. Reused as-is for Sukuna here and
+    intended for Clap in Phase 7 (design.md explicitly forbids a second,
+    parallel implementation).
+  - **`JJK_SUKUNA` (one-hand, temporal)** — `ImpulseDetector` tracking
+    `d_thumb_middle` (the same distance `RIGHT_CLICK` already computes),
+    contact/release/window reasoned at 15px/55px/0.35s (tighter contact than
+    `PINCH_RIGHT_CLICK`'s 20px — a snap is a decisive full touch, not a
+    casual pinch; release comfortably above the ~51px relaxed-hand noise
+    ceiling measured for Phase 4/TASK-056). Fed unconditionally every frame
+    (not gated behind `pinch_winner`/`two_hand_active` like the static
+    seals) because the detector needs the real distance every frame to track
+    its own state machine correctly — gating it would starve it of frames
+    mid-gesture. **Known, deliberately UNRESOLVED collision risk:** because
+    Sukuna's contact threshold (15px) is tighter than `RIGHT_CLICK`'s
+    (20px), a real snap's approach necessarily crosses `RIGHT_CLICK`'s
+    looser threshold first — if held there for `PINCH_CONFIRM_FRAMES`
+    consecutive frames, `RIGHT_CLICK` could fire on the same physical
+    motion that later completes as `JJK_SUKUNA`. This is flagged in code
+    (`gestures.py`, next to the `update()` call) rather than silently
+    "solved" by an unverified threshold tweak — it's exactly the kind of
+    thing Phase 4's real-camera pass caught and this one explicitly can't,
+    yet. `tests/test_gesture_engine_regression.py::JJKGestureTests` does
+    confirm the synthetic discrimination TASK-069 asks for (a fast
+    contact→release sequence fires `JJK_SUKUNA` not `RIGHT_CLICK`; a
+    2-frame-confirmed sustained pinch fires `RIGHT_CLICK` and, even after
+    being rewound past Sukuna's window and finally released, never fires
+    `JJK_SUKUNA`) — synthetic fixtures necessarily can't exercise the timing
+    ambiguity of a *real*, noisy, human snap.
+  - **`JJK_GOJO_DOMAIN` (two-hand, static, taxonomy Pattern B per design.md
+    §1.5)** — new `_thumb_index_angle_deg()` primitive (dot product between
+    each hand's thumb MCP→tip and index MCP→tip vectors) checked against
+    ~90°±35° for BOTH hands, AND the two hands' centers within
+    `JJK_GOJO_MAX_DISTANCE_FRACTION=0.30` of the frame diagonal (looser than
+    the Naruto seals' 0.20 "clasped" threshold — Gojo's frame doesn't
+    require the hands to actually touch), AND both wrists' average y above
+    (numerically below, image coordinates) `JJK_GOJO_MAX_AVG_WRIST_Y=0.55`
+    (upper half of frame, approximating "held up near the face"). The
+    condition is genuinely BETWEEN the two hands (relative angle + relative
+    position), never two independently-classified single-hand shapes —
+    confirmed staying Pattern B per TASK-068's explicit ask. Checked LAST in
+    the two-hand elif chain (after Kai/Tatsu/Ne/Mi/Tori) since it's a
+    structurally distinct geometric family (vector angle, not
+    distance/curl-ratio) and doesn't need to compete for priority with them.
+  - **`JJK_MEGUMI` (one-hand, static)** — same visual family as Hitsuji
+    (index+middle genuinely crossed, via the existing `_segments_cross`
+    primitive) but with the ring finger EXTENDED instead of curled — the
+    exact discriminator design.md §6.3 asked for, made structurally
+    impossible to collide with Hitsuji (Hitsuji's own base-shape check
+    requires ring curled) rather than relying on a threshold.
+    `tests/test_gesture_engine_regression.py::JJKGestureTests::test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger`
+    builds both fixtures from the literal same coordinates except that one
+    finger, to pin exactly that.
+  - **Event naming refactor (no behavior change):** `_naruto_seal` and
+    `_twohand_seal` now hold the FULL event string (`"NARUTO_KAI"`,
+    `"JJK_MEGUMI"`, `"JJK_GOJO_DOMAIN"`) instead of a bare name later
+    f-string-prefixed with `NARUTO_` — needed so the same
+    hold-then-confirm-then-miss-tolerance state machine could serve both the
+    `NARUTO_` and `JJK_` namespaces without duplicating it. `main.py`'s
+    dispatch loop now checks `event.startswith("NARUTO_") or
+    event.startswith("JJK_")` before routing to `_dispatch_naruto_seal`
+    (kept that name — it already only ever cared about the prefix
+    generically, never NARUTO-specific logic).
+  - **Dispatch defaults exhaust the fixed action vocabulary.**
+    `llm_intent.VALID_ACTIONS` has exactly 14 actions, and the 13 Naruto
+    seals from Phases 4/5 already claim 13 of them — only `RIGHT_CLICK`
+    remained free. `JJK_GOJO_DOMAIN` takes it (Gojo, the most prominent of
+    the 3, gets the one genuinely free slot); `JJK_SUKUNA`→`SCREENSHOT`
+    (reused from Tora — "snap" a picture) and `JJK_MEGUMI`→`MUTE` (reused
+    from Hitsuji — shadow/stealth theme) deliberately REUSE an already-bound
+    action. This isn't a bug: `ProfileManager.get_gesture_binding()` already
+    treats every binding as independently overridable per profile, so two
+    physical gestures defaulting to the same command is equivalent to two
+    keyboard shortcuts for the same action, not a collision.
+  - **Icons**: `jjk_sukuna` is the first icon to use a NEW glyph (`snap` —
+    four short radiating lines, a small motion/spark cue) instead of a
+    static pose glyph, per TASK-070's explicit ask that Sukuna's icon
+    communicate motion, not just shape (it reuses `pinch_right_click`'s
+    exact hand shape — thumb+middle touching — and is differentiated
+    ONLY by that glyph, intentionally, since Sukuna genuinely IS that
+    pinch, just fast). `jjk_gojo_domain`/`jjk_megumi` are visually distinct
+    by extended-finger-set alone (new combinations not used by any prior
+    icon), no glyph needed. All 32 icons confirmed pairwise byte-distinct
+    (`tests/test_gesture_icons.py`).
+  - **Honest limitation, explicitly not yet closed:** none of Gojo/Sukuna/
+    Megumi have touched a real camera. Beyond the usual "thresholds are
+    reasoned not measured" caveat already carried over from Phase 5, Sukuna
+    specifically carries a KNOWN, undiagnosed collision risk against
+    `RIGHT_CLICK` (see above) that can only really be resolved by watching
+    what a real snap's landmark sequence actually does frame-by-frame —
+    exactly the kind of failure Phase 4's real-camera pass caught 7 times
+    out of 8 and this phase, by explicit user choice, hasn't attempted yet.
+    Deferred to the combined Phase 4+5+6 "prueba integral" live-camera pass.
+- **Phase 7 (TASK-071/072/073) — common gestures (Clap, Korean finger
+  heart).** Same "keep coding, defer all verification" instruction as Phase
+  6 — everything below is reasoned and synthetic-fixture-verified only.
+  - **`CLAP` (two-hand, temporal, taxonomy Pattern D per design.md §1.5)** —
+    a SECOND `ImpulseDetector` instance (the first reusable-primitive payoff:
+    design.md explicitly forbids a parallel reimplementation) tracking the
+    distance between the two hands' PALM centers (average of landmarks
+    0/5/9/13/17 — a new `_palm_center()`/`_palm_centers_distance()` pair,
+    deliberately distinct from `_hand_center()`/`_hands_distance()`, which
+    average all 21 landmarks for the Naruto/JJK two-hand seals, and from the
+    pinch-point average the two-hand pinch-zoom uses — 3 different "hand
+    center" notions, each already owned by a different existing gesture).
+    Thresholds reasoned as fractions of the frame diagonal, same unit as the
+    Naruto two-hand seals: contact 0.12 (tighter than their 0.20 "clasped"
+    proximity — a clap is actual near-contact, not just "brought together"),
+    release 0.30, window 0.4s. Fed unconditionally every frame (same reason
+    as Sukuna — the detector needs real distance every frame); the `CLAP`
+    event itself is gated behind the full two-hand hierarchy (`_twohand_seal
+    is None` and none of `both_shaka`/`both_fists`/`both_pinching`) so it
+    never collides with an already-recognized two-hand gesture, and folded
+    into `two_hand_active` like every other two-hand event. The
+    `clap_hand()` test fixture was deliberately built with all 4 non-thumb
+    fingers uniformly extended (`curl_ratio=1.0`, outside the 0.2–0.8
+    "interlaced" band Ne/Mi/Kai/Tatsu depend on) specifically so that NO
+    distance between two such hands accidentally satisfies an existing
+    two-hand gesture — confirmed by a dedicated test
+    (`test_clap_hand_pair_never_matches_an_existing_two_hand_gesture`) across
+    contact/release/near-miss distances, not assumed.
+  - **`KOREAN_HEART` (one-hand, static + hold-confirmation)** — thumb tip
+    close to the index's PIP (landmark 6, the first joint), explicitly NOT
+    close to its tip (landmark 8, `PINCH_CLICK`'s own metric) — the
+    structural distinction is what makes `d_thumb_index >= PINCH_CLICK` true
+    by construction for this shape, so `pinch_winner` can never resolve to
+    `"index"` for it and `PINCH_DOWN` can never fire for it, at any point
+    during the hold — not just "unlikely below some tuned threshold." Held
+    `KOREAN_HEART_HOLD_SECONDS=1.0` before firing (same mechanism as
+    `LOCK_SESSION`/Shaka), so a fast touch-and-release of the *real*
+    `PINCH_CLICK` shape stays exclusively `PINCH_DOWN`/`PINCH_UP` — it's
+    geometrically a different shape from the start, not a race against the
+    clock.
+    - **Real collision found and fixed WITHOUT a camera, by the test suite
+      itself** (same discipline as Phase 4's `fist_hand()`/`NARUTO_I`
+      incident): the first draft of `korean_heart_shape` didn't check finger
+      curl at all, and `tests/test_gesture_engine_regression.py`'s
+      "existing fixtures don't leak a new event" census caught that
+      `silence_hand()` — whose thumb (landmark 4) and index PIP (landmark
+      6) are coincidentally placed at the exact same point by that
+      fixture's own construction, unrelated to Korean Heart — satisfied
+      both of Korean Heart's conditions after being held. **Fixed** by
+      requiring `_fingers_curled(pts, 8, 12, 16, 20)` too (Korean Heart is a
+      closed fist with only the thumb crossing; `SILENCE` requires all 4
+      fingers extended) — a structural exclusion, not a threshold nudge,
+      matching how every other near-collision in this project has been
+      resolved once found.
+  - **Dispatch mechanism simplified, no behavior change**: `main.py`'s
+    `run()` loop used to route by `event.startswith("NARUTO_") or
+    event.startswith("JJK_")`; `CLAP`/`KOREAN_HEART` carry neither prefix
+    (they're not "seals"), so the check became `event in
+    NARUTO_DEFAULT_BINDINGS` instead — simpler (a plain membership test) and
+    already correct for every existing key, since every event
+    `GestureEngine` can emit through this path has always had exactly one
+    entry in that dict. `_dispatch_naruto_seal` itself didn't change; its
+    docstring was updated to stop implying prefix-awareness it never
+    actually had.
+  - **Dispatch defaults, thematic reuse (fixed 14-action vocabulary long
+    since exhausted, see Phase 6):** `CLAP`→`KEYBOARD_TOGGLE` (the "Clapper"
+    — clap to turn something on/off — reused from Saru) and
+    `KOREAN_HEART`→`SCREENSHOT` (the finger heart is a classic photo pose —
+    reused from Tora/Sukuna).
+  - **Icons**: `clap` reuses `naruto_tori`'s exact hand shape (both hands
+    fully open) on purpose — Clap and Tori are visually identical as static
+    poses, since the icon model can't represent motion or inter-hand
+    distance — differentiated ONLY by a NEW glyph (`clap_burst`: 6 short
+    lines radiating from a filled center dot, denser than Sukuna's `snap`
+    glyph, deliberately distinct from it too — same "this is an impulse"
+    language, different silhouette). `korean_heart` is the first one-hand
+    icon with an empty extended-set (a plain closed fist, thumb marked via
+    the existing pinch-marker mechanism at its curled position) plus a new
+    `heart` glyph. All 34 icons confirmed pairwise byte-distinct
+    (`tests/test_gesture_icons.py`).
+  - **Honest limitation, explicitly not yet closed:** neither gesture has
+    touched a real camera. Deferred, along with Phases 4/5/6, to the
+    combined "prueba integral" live-camera pass.
+- **Phase 8 (TASK-074–081) — settings screen: persistence, rebinding,
+  custom shortcuts, macros.** The user explicitly chose the FULL-scope
+  option over the MVP one when asked (spec.md #8.3's "any row SHALL be
+  reassignable" taken literally, not just the 18 Naruto/JJK/common seals
+  that already went through `ProfileManager` in Phases 4-7) — this is the
+  largest single-turn change in the project's history, touching the core
+  event-dispatch path (`main.py`) that every previous phase built on top
+  of, so it's documented in more depth than usual.
+  - **The scope decision, and why it was safe.** Before Phase 8, only
+    seal/common events resolved through `ProfileManager.get_gesture_binding()`
+    — the original 19 "classic" events (Fases 1-3: `PINCH_DOWN`/`SCROLL_UP`/
+    `VOLUME_UP`/`SILENCE`/etc.) went straight from `GestureEngine` to a
+    hardcoded action in `main.py`. Making them ALSO reassignable didn't
+    require touching `gestures.py`'s detection logic at all — only
+    `main.py`'s dispatch-*routing* layer needed a generic resolution step,
+    because each classic event's default binding is **itself** (`GESTURE_DEFAULT_BINDINGS["SCROLL_UP"] = "SCROLL_UP"`,
+    etc.) — so with nothing reassigned, behavior is byte-for-byte identical
+    to before this phase. This is the same "identity is a no-op" trick
+    every prior phase's default-binding design already relied on, just
+    applied to a bigger set of keys.
+  - **`GESTURE_DEFAULT_BINDINGS`** (renamed from `NARUTO_DEFAULT_BINDINGS`,
+    same dict) now has 37 keys: the 18 seal/common ones from Phases 4-7
+    (thematic defaults, unchanged) plus 19 classic ones (identity defaults,
+    new). `run()`'s loop simplified from a two-branch `if event in
+    NARUTO_DEFAULT_BINDINGS: ... else: ...` to a single unconditional call
+    — every event now has SOME default (identity or thematic), so the
+    branch was never needed once the dict's coverage became total.
+  - **Dispatch consolidation, no behavior change.** `_dispatch_naruto_seal()`
+    (name kept — every existing test in `test_naruto_seal_dispatch.py`
+    calls it directly by that name; renaming would have meant touching all
+    of them for a purely cosmetic gain) is now the ONE resolution entry
+    point for every event: resolve via `GESTURE_DEFAULT_BINDINGS` → check
+    the active profile's `macros`/`custom_shortcuts` (new, see below) →
+    fall through to `_dispatch()` (the executor, unchanged in spirit,
+    gained `UNDO`/`REDO`/`MUTE` branches it was missing — those 3 lived
+    only in `_dispatch_voice_action()` before, which now just delegates to
+    `_dispatch()` with `cam_xy=None` instead of duplicating that logic).
+    Traced through every existing branch to confirm this preserves exact
+    behavior for voice, for seals, and for classic gestures — not asserted,
+    *traced*, given the size of this change.
+  - **`config_store.py`/`profiles.py` (de)serialization** — see module list
+    above. Round-trip, missing-file, and corrupt-file-preservation all
+    covered by dedicated tests (`tests/test_config_store.py`,
+    `tests/test_profiles.py::ProfileManagerToFromDictTests`).
+  - **`macro.py` (`HotkeyCommand`/`MacroCommand`)** — see module list above.
+    `PressKeyCommand.can_execute()`'s broadening (hand-picked 2-key set →
+    `pyautogui.KEYBOARD_KEYS`) was needed for macros to press ordinary keys
+    like `enter`/`tab` at all — caught by writing the macro tests first and
+    finding `can_execute()` silently rejected `"enter"`, not assumed.
+  - **A real test-infrastructure gotcha, worth recording**: any test that
+    wholesale-mocks `jarvis.actions.keyboard.pyautogui` (replacing the
+    whole module reference, e.g. `@patch("jarvis.actions.keyboard.pyautogui")`)
+    also blanks out `pyautogui.KEYBOARD_KEYS` with a `MagicMock` whose `in`
+    operator returns `False` for everything — silently breaking
+    `PressKeyCommand.can_execute()` for every key, in every test using that
+    pattern, including one pre-existing manual integration script. Fixed by
+    restoring the real `KEYBOARD_KEYS` list onto the mock in each affected
+    `setUp()`/script (`tests/test_naruto_seal_dispatch.py`,
+    `tests/manual_main_integration_check.py`) — a pure test-environment
+    artifact (production always sees the real `pyautogui` module), but one
+    that would have silently made every macro/HUD-keyboard press-key test
+    look green while actually failing at `can_execute()`, had it not been
+    caught by an assertion actually checking the mock's call.
+  - **`settings_ui.py` (`Tooltip`, `SettingsWindow`, `canonicalize_shortcut`)**
+    — see module list above. Verified two ways: `tests/test_settings_ui.py`
+    (20 tests, real `tk.Tk()` — this environment runs Tk natively, no
+    virtual display needed) AND a manual visual check
+    (`tests/manual_settings_ui_visual_check.py`, screenshots via
+    `PIL.ImageGrab`) that caught a real layout bug before it shipped: the
+    first pass truncated long Spanish descriptions in the bindings table
+    (name column too narrow) — widened the window/column after seeing the
+    actual screenshot, not by guessing.
+  - **`overlay.py`'s gear icon (`init_gear_icon`)** — the only window in
+    that module that does NOT call `_make_click_through()` (spec.md #8.1
+    requires it to be genuinely clickable), positioned bottom-right (the
+    legend's default corner is top-right). `tests/test_overlay.py` is this
+    module's first dedicated test file — it covers only the new gear-icon
+    behavior, not retroactively the rest of `overlay.py`.
+    - **Tkinter timing gotcha, worth recording**: a synthetic
+      `event_generate("<Button-1>", when="now")` on a freshly-created
+      `Toplevel`'s child widget silently does nothing unless a full
+      `update()` (not just `update_idletasks()`) has already run at least
+      once first — `update_idletasks()` alone doesn't process the
+      window-manager "map" notification a brand-new Toplevel needs before
+      it can receive synthetic events. Production code is unaffected
+      (`overlay.pump()` already runs every camera frame, long before a real
+      user could physically click anything), but the test suite's own
+      `pump()` call had to move to BEFORE the synthetic click, not just
+      after, once this was bisected down from "the whole gear icon must be
+      broken" to this one specific ordering requirement.
+  - **Persistence wired into the live app end-to-end**
+    (`tests/manual_live_integration_check.py`, extended per TASK-081):
+    rebinding a gesture through the real `SettingsWindow` persists
+    immediately, takes effect on the NEXT dispatch of that same gesture
+    without restarting, and a **fresh** `ProfileManager.from_dict(config_store.load_bindings())`
+    call (the exact line `JarvisApp.__init__` runs at startup) picks it back
+    up. Deliberately does NOT construct a second full `JarvisApp` to prove
+    this — doing so surfaced a genuine `tkinter.TclError: image ... doesn't
+    exist`, confirming design.md §5.6's own warning that Tkinter does not
+    reliably support two simultaneous `tk.Tk()` roots in one process; the
+    persistence check instead re-runs the exact loading line `JarvisApp`
+    itself uses, without a second real Tk root.
+- **Post-Fase-8 fixes from real-camera use (José, 2026-08-30).** José ran
+  the app for real (installed `requirements-voice.txt`, used the settings
+  screen, exercised gestures normally) after Fase 8 shipped and reported a
+  batch of concrete problems — the first genuinely broad, everyday-use
+  session this project has had (earlier live-camera passes tested one
+  seal/gesture at a time). Fixed:
+  - **Voice "not responding" — root cause found, not guessed.**
+    `LLMIntentResolver.resolve()` downloads its ~1GB GGUF model (first use)
+    and loads it SYNCHRONOUSLY; it was being called directly from
+    `_handle_voice_result()` on the main camera-loop thread. Confirmed
+    concretely before fixing: the model file was absent from `assets/`
+    (never finished downloading), the download URL itself answered fine
+    (`HEAD` → 200, ~1.1GB) — so the freeze, not the network, was the actual
+    cause. Any unmatched phrase silently froze the ENTIRE app (camera
+    included) for as long as the download/load took, with zero visible
+    feedback — indistinguishable from "broken." Fixed by moving the LLM
+    fallback to a background thread (same `threading.Thread` + non-blocking
+    `queue.Queue` pattern `VoiceListener._transcribe` already uses),
+    polled via a new `_poll_llm_intent_results()` each frame; a "🧠
+    Pensando…" bubble covers the wait, and a busy-guard (`_llm_resolving`)
+    discards a second phrase spoken while the first is still resolving
+    instead of risking two concurrent calls into one `Llama` instance
+    (not guaranteed thread-safe). `VoiceIntentResolver`'s phrase match
+    stays synchronous (pure, no I/O) — only the LLM path needed this.
+  - **Pinch-click confused with Shaka (false `LOCK_SESSION`).** None of
+    `_is_shaka()`'s 5 original conditions checked thumb-to-index distance —
+    an ordinary index+thumb click pinch has the thumb often reading
+    "extended" (tip above its own MCP, same metric Shaka uses) and the
+    pinky can stay incidentally extended too, so a ordinary pinch could
+    satisfy all 5 by coincidence and slowly accumulate `LOCK_SESSION`'s
+    hold. Fixed by requiring thumb and index to be more than
+    `config.SHAKA_MIN_THUMB_INDEX_GAP` (0.12 normalized, reasoned not
+    measured) apart — a genuine Shaka already holds them far apart by
+    construction (thumb out to the side, index curled into the palm), so
+    this costs the real gesture nothing. Regression-tested with a fixture
+    built to satisfy the OLD 5 conditions exactly while pinching thumb+index
+    together, confirming it would have false-positived pre-fix.
+  - **Scroll direction redesigned + horizontal scroll added.** Old
+    behavior tracked `index.y`'s frame-to-frame delta — scrolling only
+    continued while the hand kept actively moving, and a single frame of
+    tremor could flip the sign, which is what read as "confusing" in
+    practice. Per José's explicit spec ("el movimiento indique el scroll...
+    señalar hacia arriba, scroll arriba... hacia abajo, scroll abajo, mismo
+    comportamiento para izquierda/derecha"): the base shape is UNCHANGED
+    (index+middle extended, ring+pinky curled, thumb spread — kept exactly
+    as-is, explicitly requested), but direction now comes from a "baseline"
+    position captured on the first frame the shape engages (`self.scroll_baseline`),
+    compared against the CURRENT index-tip position every subsequent frame
+    — like a joystick: moving away from that baseline and holding there
+    keeps scrolling every frame (no need to keep actively moving), and a
+    small tremor near the baseline fires nothing instead of a flipped
+    direction. The axis with the larger offset from baseline wins
+    (`abs(dy) >= abs(dx)` picks vertical on ties) so a mostly-vertical move
+    never also fires horizontal. New `SCROLL_LEFT`/`SCROLL_RIGHT` events,
+    `HScrollCommand` (wraps `pyautogui.hscroll()`, the horizontal sibling of
+    the existing `ScrollCommand`), both added to `_MIGRATED_GESTURES`,
+    `GESTURE_DEFAULT_BINDINGS` (identity default, like every other classic
+    event), and `llm_intent.VALID_ACTIONS` (voice can say "scroll
+    left/right" too). `config.SCROLL_DIRECTION_THRESHOLD=0.06` — reasoned,
+    not measured, deliberately larger than `VOLUME_DELTA_THRESHOLD` (that
+    one measures a per-frame delta, always small; this measures a
+    cumulative offset from baseline, naturally larger).
+  - **Sukuna snap latency.** Widened `JJK_SUKUNA_MAX_WINDOW_SECONDS` from
+    0.35s to 0.6s — a deliberate snap performed for a webcam (not a
+    lightning-fast real snap) plausibly takes longer than 350ms from
+    contact to separation; if it didn't complete inside the window, the
+    `ImpulseDetector` expired without firing, which reads as "not
+    responding" rather than "a bit slow." Contact threshold (15px) stays
+    tighter than `PINCH_RIGHT_CLICK` (20px) — the existing, still-unresolved
+    collision risk with `RIGHT_CLICK` is governed by that threshold, not
+    the window, so widening the window doesn't worsen it.
+  - **Pointer imprecision — a reasoned, NOT measured, first attempt.**
+    `EMA_ALPHA` lowered from 0.35 to 0.25 (more weight to the smoothed
+    history, less to this frame's raw reading) to damp typical MediaPipe
+    fingertip jitter at desktop distance harder. Unlike the pinch thresholds
+    elsewhere in this file (recalibrated from actual measured camera data),
+    this one is a guess pending live verification — flagged as such
+    explicitly, not quietly presented as measured.
+  - **A real, unrelated test-isolation bug found and fixed along the way**:
+    `test_naruto_seal_dispatch.py`'s `_AppTestCase` built a real `JarvisApp()`
+    that read (and could write) the ACTUAL `~/.jarvis-gesture-hud/bindings.json`
+    on this machine, with no isolation — invisible until José used the
+    settings screen for real and rebound `JJK_GOJO_DOMAIN` to `REDO`, which
+    then made `test_jjk_seal_default_binding_dispatches_the_right_command`
+    fail (it got the real override, not the code default). Fixed by
+    patching `config_store.load_bindings`/`save_bindings` to a temp path in
+    that test case's `setUp()`, same technique already used in
+    `manual_live_integration_check.py`'s persistence check.
+  - **Two findings from José's report are deferred, not fixed here**: (1)
+    "ningún sello Naruto se reconoce bien" — needs the same live,
+    one-seal-at-a-time camera diagnostic discipline as Fase 4 (José as test
+    subject, capture real landmarks, measure, don't guess) rather than a
+    code-only pass; (2) the general "todo se confunde con Shaka/Screenshot"
+    complaint is only PARTIALLY addressed (the specific pinch-vs-Shaka case
+    above) — the rest is plausibly a downstream symptom of (1), since
+    `SCREENSHOT` is the shared default action for 3 different seals
+    (`NARUTO_TORA`, `JJK_SUKUNA`, `KOREAN_HEART`) — if those are being
+    misclassified as each other, "everything triggers screenshot" would be
+    the visible symptom without there being a separate root cause to find
+    in `SCREENSHOT`'s own detection logic.
+  - 594 tests total (+17 over Fase 8's 577), all green; both manual integration
+    scripts updated and passing (the live one now also exercises the async
+    LLM-fallback path with a controllable mock instead of assuming it works).
 
 ## Known limitations
 

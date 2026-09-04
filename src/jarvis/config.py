@@ -3,7 +3,15 @@
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-EMA_ALPHA = 0.35
+# Hallazgo de camara real (José, 2026-08-30): "el puntero es muy impreciso
+# con el movimiento de los dedos". Bajado de 0.35 a 0.25 (mas peso al valor
+# suavizado anterior, menos al crudo de este frame) para amortiguar mejor el
+# jitter tipico de la punta del indice en MediaPipe a distancia de escritorio
+# - razonado, NO medido en camara todavia (a diferencia de los umbrales de
+# pinch de abajo, que si tienen datos reales detras). Pendiente de verificar
+# si esto alcanza o si el "impreciso" viene de otro lado (ej. deteccion en
+# si, no el suavizado).
+EMA_ALPHA = 0.25
 POINTER_MARGIN = 0.1  # recorte de bordes al mapear cámara -> pantalla
 
 # Umbrales de pinch/distancia (px sobre el frame). Recalibrados 2026-08-27 con
@@ -25,6 +33,15 @@ PINCH_CONFIRM_FRAMES = 2  # frames seguidos bajo el umbral antes de confirmar un
 PALM_OPEN_MIN_SPREAD = 60
 SILENCE_TUCK_MAX = 40
 
+# Hallazgo de camara real (José, 2026-08-30): el pinch de click (indice+pulgar)
+# se confundia con Shaka y disparaba LOCK_SESSION sin querer - ver el
+# comentario de _is_shaka() en gestures.py para el analisis completo. 0.12
+# normalizado (~77px en un frame de 640px) - bien por encima del ruido de
+# mano relajada en indice (~0.024 normalizado, ver arriba) y de cualquier
+# pinch intencional, bien por debajo de la separacion esperable pulgar-indice
+# de un Shaka genuino. Razonado, no medido en camara todavia.
+SHAKA_MIN_THUMB_INDEX_GAP = 0.12
+
 # Cooldowns (segundos)
 CLICK_COOLDOWN = 0.3
 RIGHT_CLICK_COOLDOWN = 0.4
@@ -37,6 +54,67 @@ PAUSE_HOLD_SECONDS = 1.2
 META_HOLD_SECONDS = 0.6
 VOLUME_DELTA_THRESHOLD = 0.03
 TWO_HAND_ZOOM_DELTA_PX = 15
+
+# Hallazgo de camara real (José, 2026-08-30): rediseño de scroll - la
+# direccion ahora sale de la distancia normalizada entre la punta del indice
+# y la posicion "base" fijada al entrar al gesto (no de un delta cuadro a
+# cuadro, ver gestures.py). Mas grande que VOLUME_DELTA_THRESHOLD a
+# proposito: ese mide un delta INSTANTANEO entre 2 cuadros consecutivos
+# (siempre chico); esto mide un desplazamiento ACUMULADO desde que se levanto
+# la mano (naturalmente mas grande). Razonado, no medido en camara todavia.
+SCROLL_DIRECTION_THRESHOLD = 0.06
+
+NARUTO_SEAL_HOLD_SECONDS = 0.6  # TASK-062: mismo orden que META_HOLD_SECONDS - deliberado pero rapido
+# Verificado en camara real (2026-08-27): incluso con la forma correcta
+# sostenida a proposito, la clasificacion parpadea a None por 1 frame suelto
+# de tanto en tanto (ruido de landmark/deteccion, no un cambio real de
+# pose). Sin tolerancia, CUALQUIER parpadeo reinicia el hold entero y hace
+# casi imposible acumular 0.6s seguidos en la practica. Mismo principio que
+# PINCH_CONFIRM_FRAMES (TASK-055/1.5), aplicado del lado de "no perder el
+# progreso" en vez de "no confirmar de mas".
+NARUTO_SEAL_MISS_TOLERANCE = 3  # frames seguidos sin match tolerados antes de reiniciar el hold
+
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos - umbrales RAZONADOS, no
+# medidos en camara real todavia (a diferencia de los de Fase 4, que fueron
+# recalibrados con datos reales despues de fallar en vivo). Pendiente de
+# verificacion real, ver ARCHITECTURE.md.
+NARUTO_TWOHAND_HOLD_SECONDS = 1.2  # igual que PAUSE_HOLD_SECONDS - un gesto de 2 manos mas complejo
+NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION = 0.20  # manos "juntas/pegadas" (Ne/Mi/Kai/Tatsu)
+NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION = 0.20  # manos "en abanico" (Tori), mas separadas que el clasp
+NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
+
+# TASK-068/069 (Fase 6): gestos Jujutsu Kaisen. Umbrales RAZONADOS, no
+# medidos en camara real todavia - misma salvedad que la Fase 5 (Naruto de 2
+# manos), pendiente de la prueba integral final (José pidio explicitamente
+# posponer TODA verificacion en camara a esa fase, en vez de una por fase
+# como en Fase 4).
+JJK_SUKUNA_CONTACT_THRESHOLD = 15  # mas ajustado que PINCH_RIGHT_CLICK (20): un snap es un toque decidido, no un roce casual
+JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~51px en menique)
+# Hallazgo de camara real (José, 2026-08-30): "el chasquido tardo en
+# responder" - subido de 0.35 a 0.6s. Un snap DELIBERADO frente a una
+# webcam (no un chasquido veloz de verdad) probablemente tarda mas de 350ms
+# en completar el contacto->separacion; con la ventana vieja, un intento un
+# poco lento nunca llegaba a completarse dentro de ella y el detector
+# expiraba sin disparar (ver ImpulseDetector, temporal_gesture.py) - eso se
+# percibe como "no responde" o "tarda", no como una accion mas lenta.
+# JJK_SUKUNA_CONTACT_THRESHOLD (15px) sigue mas ajustado que PINCH_RIGHT_CLICK
+# (20px), asi que ensanchar la ventana no aumenta el riesgo de colision ya
+# documentado con RIGHT_CLICK (ese se resuelve por el umbral de contacto, no
+# por la ventana). Razonado, no medido en camara todavia.
+JJK_SUKUNA_MAX_WINDOW_SECONDS = 0.6
+JJK_GOJO_ANGLE_TOLERANCE_DEGREES = 35  # tolerancia sobre el angulo objetivo de 90 grados entre pulgar e indice
+JJK_GOJO_MAX_DISTANCE_FRACTION = 0.30  # manos "juntas" para el marco, mas laxo que el clasp de NARUTO (0.20) - no exige contacto
+JJK_GOJO_MAX_AVG_WRIST_Y = 0.55  # ambas munecas en la mitad superior del frame (aprox. altura de pecho/cara)
+
+# TASK-071/072 (Fase 7): gestos comunes. Umbrales RAZONADOS, no medidos en
+# camara real - misma salvedad que las Fases 5/6, pospuesta a la prueba
+# integral final.
+CLAP_CONTACT_MAX_DISTANCE_FRACTION = 0.12  # centros de palma bien juntos (mas ajustado que el "clasp" de 0.20 - un aplauso es contacto real)
+CLAP_RELEASE_MIN_DISTANCE_FRACTION = 0.30  # separacion clara despues del contacto
+CLAP_MAX_WINDOW_SECONDS = 0.4  # un aplauso es rapido; acercarse+alejarse sin apuro no cuenta
+
+KOREAN_HEART_CONTACT_THRESHOLD = 20  # pulgar cerca del PRIMER nudillo del indice (landmark 6) - no de la punta, eso es PINCH_CLICK
+KOREAN_HEART_HOLD_SECONDS = 1.0  # mismo mecanismo que LOCK_SESSION - sostenido, no edge-triggered como PINCH_DOWN
 
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
@@ -56,6 +134,28 @@ MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False 
 MIN_HAND_AREA_FRACTION = 0.0015
 TWO_HAND_MAX_CENTER_DISTANCE_FRACTION = 0.55
 
+# TASK-060c (Fase 3B): filtro de propiedad anatomica mano-cuerpo via
+# MediaPipe Pose. Deshabilitado por default: medido en camara real
+# (2026-08-27) que PoseLandmarker cuesta ~10.4ms/frame promedio (p95 ~12.6ms),
+# practicamente el mismo costo que HandLandmarker (~10.0ms/frame promedio) -
+# activarlo DUPLICA el costo de inferencia por frame (~20ms combinado), un
+# costo real y no trivial contra el presupuesto de "menos de 1 frame" de
+# design.md #25 (~16-33ms a 30-60fps). No es un costo "claramente malo" (el
+# heuristico de TASK-056 sigue funcionando solo, sin esto), pero tampoco es
+# gratis - se deja togglable y apagado por default en vez de descartarlo,
+# per design.md §3B.3. Ver ARCHITECTURE.md para el detalle completo.
+POSE_HAND_OWNERSHIP_ENABLED = False
+# Distancia maxima (fraccion de la diagonal del frame) entre la muñeca que
+# reporta HandTracker y la muñeca correspondiente que reporta PoseTracker
+# para considerar que son el mismo punto fisico (2 modelos distintos
+# detectando el mismo punto del cuerpo, no 2 manos distintas - por eso el
+# margen es chico, muy por debajo de TWO_HAND_MAX_CENTER_DISTANCE_FRACTION
+# de arriba, que es entre 2 MANOS DISTINTAS de la misma persona). No pudo
+# verificarse con datos reales de cuerpo completo en esta sesion (la camara
+# disponible estaba encuadrada en la mano/escritorio, no en el torso) -
+# valor razonado, no medido; documentado como limitacion conocida.
+POSE_MAX_WRIST_DISTANCE_FRACTION = 0.08
+
 CAPTURES_DIR = "captures"
 
 HUD_KEY_COLOR = (255, 0, 0)
@@ -64,3 +164,7 @@ HUD_TEXT_COLOR = (255, 255, 255)
 HUD_START_Y = 50
 HUD_ROW_HEIGHT = 35
 HUD_KEY_WIDTH = 52
+
+# TASK-057 (Fase 2): overlay toggleable de landmarks/cuadrante de mano.
+HAND_OVERLAY_PRIMARY_COLOR = (0, 255, 0)  # mano primaria (BGR, verde)
+HAND_OVERLAY_OTHER_COLOR = (120, 120, 120)  # cualquier otra mano detectada (BGR, gris)

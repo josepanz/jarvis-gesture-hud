@@ -10,6 +10,7 @@ the real GestureEngine before being accepted into this file.
 """
 
 import sys
+import time
 import unittest
 from collections import namedtuple
 from pathlib import Path
@@ -194,6 +195,29 @@ def fist_opening_transition_hand(cx=0.5, cy=0.5):
     return pts
 
 
+def pinch_shaped_like_shaka_hand(cx=0.5, cy=0.5):
+    """Real-camera regression (José, 2026-08-30): identical to a genuine
+    Shaka in every respect _is_shaka's original 5 conditions checked (pinky
+    extended, thumb "extended" i.e. tip above its own MCP, index/middle/ring
+    curled) EXCEPT thumb and index are pinched together (0.01 apart) instead
+    of held apart - reproducing an ordinary index+thumb click pinch whose
+    incidental other-finger curl happened to satisfy every one of those 5
+    conditions by coincidence, none of which ever checked thumb-index
+    distance."""
+    pts = flat(cx, cy)
+    pts[20] = Landmark(cx, cy - 0.1, 0)  # pinky extended
+    pts[18] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx, cy + 0.05, 0)  # middle curled
+    pts[10] = Landmark(cx, cy, 0)
+    pts[16] = Landmark(cx, cy + 0.05, 0)  # ring curled
+    pts[14] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.05, 0)  # thumb tip above its own mcp ("extended")
+    pts[2] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.01, cy - 0.05, 0)  # index tip PINCHED against the thumb tip
+    pts[6] = Landmark(cx, cy - 0.08, 0)  # index pip above the tip ("curled" per _is_shaka's own metric)
+    return pts
+
+
 def fist_hand(cx=0.5, cy=0.5):
     pts = flat(cx, cy)
     pts[4] = Landmark(cx - 0.08, cy, 0)
@@ -306,7 +330,10 @@ class PointerAndSmoothingTests(unittest.TestCase):
     def test_pointer_moves_with_smoothing(self):
         engine = GestureEngine()
         screen_xy, _, _ = process(engine, flat(0.5, 0.5))
-        self.assertEqual(screen_xy, (336, 189))  # regression pin (see test_gestures_smoothing.py too)
+        # Regression pin (see test_gestures_smoothing.py too) - updated 2026-08-30
+        # for config.EMA_ALPHA's 0.35 -> 0.25 change (live-camera finding:
+        # pointer felt imprecise/jittery). Was (336, 189) at 0.35.
+        self.assertEqual(screen_xy, (240, 135))
 
 
 class LeftClickDragTests(unittest.TestCase):
@@ -369,6 +396,63 @@ class ScrollTests(unittest.TestCase):
         pts2[18] = Landmark(0.5, 0.35, 0)
         _, _, events = process(engine, pts2)
         self.assertNotIn("SCROLL_UP", events)
+
+    # TASK: rediseño de scroll (hallazgo de camara real, José, 2026-08-30) -
+    # forma sin cambios, direccion ahora sale de la posicion respecto a una
+    # base fijada al entrar al gesto, no de un delta cuadro-a-cuadro. Nuevo:
+    # scroll horizontal, con el mismo criterio.
+    def test_index_moving_right_scrolls_right(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.65, cy=0.5))
+        self.assertIn("SCROLL_RIGHT", events)
+
+    def test_index_moving_left_scrolls_left(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.65, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.5, cy=0.5))
+        self.assertIn("SCROLL_LEFT", events)
+
+    def test_a_small_tremor_within_the_threshold_fires_nothing(self):
+        # Con el delta cuadro-a-cuadro viejo, cualquier micro-temblor podia
+        # disparar (e invertir) un scroll - la base fija absorbe eso.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        _, _, events = process(engine, scroll_hand(cy=0.49))
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_holding_away_from_the_baseline_keeps_scrolling_every_frame(self):
+        # A diferencia del delta viejo (exigia seguir moviendose para seguir
+        # scrolleando), sostener la mano lejos de la base ahora sigue
+        # disparando cuadro a cuadro mientras se mantiene ahi - como un
+        # joystick, pedido explicito de José.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        pts = scroll_hand(cy=0.35)
+        _, _, events1 = process(engine, pts)
+        _, _, events2 = process(engine, pts)
+        self.assertIn("SCROLL_UP", events1)
+        self.assertIn("SCROLL_UP", events2)
+
+    def test_a_mostly_vertical_move_never_also_fires_horizontal(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.52, cy=0.35))  # mucho mas vertical que horizontal
+        self.assertIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_LEFT", events)
+        self.assertNotIn("SCROLL_RIGHT", events)
+
+    def test_releasing_the_shape_resets_the_baseline(self):
+        # Soltar el gesto y volver a levantar la mano en OTRA posicion fija
+        # una base NUEVA ahi - no arrastra la base vieja.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        process(engine, open_palm_hand())  # suelta la forma - reinicia la base
+        process(engine, scroll_hand(cy=0.2))  # nueva base, lejos de la vieja
+        _, _, events = process(engine, scroll_hand(cy=0.2))  # sin moverse de la base nueva
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
 
 
 class ZoomTests(unittest.TestCase):
@@ -458,6 +542,36 @@ class LockSessionTests(unittest.TestCase):
         # silently regress.
         self.assertFalse(_is_shaka(fist_opening_transition_hand()))
 
+    def test_a_pinch_that_happens_to_match_shakas_other_4_fingers_is_not_read_as_shaka(self):
+        # Real-camera regression (José, 2026-08-30): clicking with an
+        # index+thumb pinch triggered LOCK_SESSION unintentionally. None of
+        # _is_shaka's 5 original conditions checks thumb-to-index distance -
+        # a real pinch's thumb often reads as "extended" (tip above its own
+        # MCP) and the pinky can stay incidentally extended too, so all 5
+        # matched by coincidence. This fixture reproduces exactly that:
+        # identical to a genuine Shaka in every OTHER respect, except thumb
+        # and index are pinched together (0.01 apart) instead of separated.
+        pts = pinch_shaped_like_shaka_hand()
+        self.assertFalse(_is_shaka(pts))
+
+        engine = GestureEngine()
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
+    def test_an_ordinary_pinch_click_held_a_long_time_never_locks(self):
+        # Same real-world scenario, using the actual PINCH_CLICK fixture
+        # already used elsewhere in this file (not a Shaka-shaped one) -
+        # holding a normal click pinch, however long, must never accidentally
+        # accumulate LOCK_SESSION's hold.
+        engine = GestureEngine()
+        pts = pinch_click_hand(pinched=True)
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
 
 class TwoHandMasterGestureTests(unittest.TestCase):
     def test_both_fists_held_pauses(self):
@@ -510,7 +624,8 @@ class PrimaryHandContinuityTests(unittest.TestCase):
         # hands[0] by construction (documented, correct behavior for that case,
         # not what this test is about).
         right_moving = Hand(flat(0.8, 0.5), "Right")
-        engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(10):  # deja converger el suavizado - el test es sobre
+            engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)  # continuidad, no sobre la velocidad de EMA_ALPHA
 
         # Now a second, idle hand appears and is listed FIRST. If continuity
         # didn't work, naively using hands[0] would jump the pointer to the idle
@@ -778,6 +893,748 @@ class BackgroundHandFilterTests(unittest.TestCase):
         engine.pause_hold_start = time.time() - 2.0
         _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
         self.assertIn("TOGGLE_ACTIVE", events)
+
+
+# TASK-061/062 (Fase 4): sellos Naruto de 1 mano. Cada fixture fue verificado
+# contra el GestureEngine real antes de aceptarse aca (mismo criterio que el
+# resto de este archivo, ver docstring del modulo) - las 4 distancias
+# pulgar-a-cada-dedo se calcularon explicitamente para confirmar que ninguna
+# cae bajo ningun umbral de pinch (PINCH_CLICK/RIGHT_CLICK/ZOOM/SCREENSHOT/
+# VOLUME), y cada fixture se corrio de punta a punta contra GestureEngine.process()
+# confirmando que dispara UNICAMENTE su propio NARUTO_<NOMBRE> y ningun otro evento.
+def _naruto_base(cx, cy):
+    pts = flat(cx, cy)
+    pts[5] = Landmark(cx - 0.06, cy, 0)  # index mcp
+    pts[9] = Landmark(cx - 0.02, cy, 0)  # middle mcp
+    pts[13] = Landmark(cx + 0.02, cy, 0)  # ring mcp
+    pts[17] = Landmark(cx + 0.06, cy, 0)  # pinky mcp
+    return pts
+
+
+def naruto_tora_hand(cx=0.5, cy=0.5):
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy - 0.08, 0)
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.05, cy - 0.08, 0)  # muy cerca del indice ("juntos")
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy - 0.02, 0)  # pulgar cruzado, cerca de la palma
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def naruto_u_hand(cx=0.5, cy=0.5):
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.09, cy - 0.08, 0)
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx + 0.15, cy - 0.08, 0)  # bien separado del indice ("peace sign")
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy - 0.02, 0)  # pulgar tucked
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def naruto_hitsuji_hand(cx=0.5, cy=0.5):
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.02, cy - 0.08, 0)  # indice cruza a la derecha
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.09, cy - 0.08, 0)  # medio cruza a la izquierda
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.04, cy - 0.04, 0)
+    pts[2] = Landmark(cx - 0.05, cy - 0.01, 0)
+    return pts
+
+
+def naruto_ushi_hand(cx=0.5, cy=0.5):
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)  # solo el indice extendido
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido junto a los dedos
+    pts[2] = Landmark(cx - 0.09, cy, 0)
+    return pts
+
+
+def naruto_uma_hand(cx=0.5, cy=0.5):
+    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
+    # ver ARCHITECTURE.md y el comentario de `_is_naruto_uma` en gestures.py.
+    # Ahora: pulgar+indice+menique extendidos, medio+anular recogidos.
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)  # indice extendido
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)  # medio recogido
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)  # anular recogido
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
+    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
+    pts[4] = Landmark(cx - 0.15, cy - 0.05, 0)  # pulgar extendido
+    pts[2] = Landmark(cx - 0.1, cy, 0)
+    return pts
+
+
+def naruto_saru_hand(cx=0.5, cy=0.5):
+    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
+    # ver ARCHITECTURE.md y el comentario de `_is_naruto_saru` en gestures.py.
+    # Ahora: puño cerrado con el pulgar hacia ARRIBA (distinto de I, que es
+    # hacia el costado) - pulgar alineado con el nudillo medio (landmark 9)
+    # en x, bien arriba en y.
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[6] = Landmark(cx - 0.06, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.02, cy - 0.2, 0)  # pulgar recto hacia arriba desde el mcp medio
+    pts[2] = Landmark(cx - 0.02, cy - 0.05, 0)
+    return pts
+
+
+def naruto_inu_hand(cx=0.5, cy=0.5):
+    # REDEFINIDO (verificado en camara real, 2026-08-27) - ver
+    # ARCHITECTURE.md y el comentario de `_is_naruto_inu` en gestures.py.
+    # Ahora: solo el menique extendido, resto recogido.
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[6] = Landmark(cx - 0.06, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
+    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
+    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido
+    pts[2] = Landmark(cx - 0.09, cy, 0)
+    return pts
+
+
+def naruto_i_hand(cx=0.5, cy=0.5):
+    # FIX (verificado en camara real, 2026-08-27) - ver ARCHITECTURE.md y el
+    # comentario de `_is_naruto_i` en gestures.py. Pulgar bien lateral
+    # (domina el eje x, no el y) respecto al mcp medio (landmark 9).
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[6] = Landmark(cx - 0.06, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.25, cy + 0.01, 0)  # pulgar lateral, mismo nivel que el mcp medio
+    pts[2] = Landmark(cx - 0.15, cy, 0)
+    return pts
+
+
+NARUTO_SEAL_FIXTURES = {
+    "TORA": naruto_tora_hand,
+    "U": naruto_u_hand,
+    "HITSUJI": naruto_hitsuji_hand,
+    "USHI": naruto_ushi_hand,
+    "UMA": naruto_uma_hand,
+    "SARU": naruto_saru_hand,
+    "INU": naruto_inu_hand,
+    "I": naruto_i_hand,
+}
+
+
+def hold_naruto(engine, pts):
+    """Primer process() arma el hold; se retrocede el reloj interno mas alla
+    de NARUTO_SEAL_HOLD_SECONDS y se llama process() de nuevo - mismo patron
+    que LockSessionTests/TwoHandMasterGestureTests usan para LOCK_SESSION/
+    TOGGLE_ACTIVE/CLOSE_APP."""
+    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+    engine._naruto_hold_start = time.time() - 1.0
+    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+
+
+class NarutoOneHandSealTests(unittest.TestCase):
+    def test_each_seal_fires_only_its_own_event_after_the_hold(self):
+        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                _, _, events = hold_naruto(engine, fixture_fn())
+                self.assertEqual(events, [f"NARUTO_{name}"])
+
+    def test_no_seal_fires_before_the_hold_completes(self):
+        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                _, _, events = engine.process([Hand(fixture_fn(), "Right")], W, H, SCREEN_W, SCREEN_H)
+                self.assertEqual(events, [])
+
+    def test_releasing_the_seal_past_the_miss_tolerance_resets_it(self):
+        # open_palm_hand() como "sin match" en vez de flat(): flat() tiene
+        # las 21 landmarks coincidentes, lo que la hace pellizcar por
+        # construccion (d_thumb_index=0) y contamina el assert con un
+        # PINCH_UP de paso - open_palm_hand() no matchea ningun sello NI
+        # ninguna condicion de pinch.
+        engine = GestureEngine()
+        engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE + 1):  # supera la tolerancia -> reinicia de verdad
+            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        # Rehace el sello - el hold tiene que rearmarse desde 0, no heredar
+        # ningun progreso del intento anterior.
+        _, _, events = engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+
+    def test_a_brief_flicker_within_the_miss_tolerance_does_not_reset_the_hold(self):
+        # Verificado en camara real (2026-08-27): incluso sosteniendo la
+        # forma correcta a proposito, la clasificacion parpadea a "ningun
+        # sello" por 1 frame suelto de vez en cuando (ruido, no un cambio de
+        # pose real) - sin esta tolerancia, el hold casi nunca llega a
+        # completarse en la practica.
+        engine = GestureEngine()
+        pts = naruto_tora_hand()
+        engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE):  # exactamente en el limite, no lo supera
+            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        engine._naruto_hold_start = time.time() - 1.0
+        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, ["NARUTO_TORA"])  # el progreso del hold sobrevivio al parpadeo
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_naruto_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "fist_opening_transition": fist_opening_transition_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                engine._naruto_hold_start = time.time() - 1.0
+                _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("NARUTO_")],
+                    f"{name} unexpectedly produced a NARUTO_* event: {events}",
+                )
+
+    def test_no_seal_fixture_triggers_a_pinch_family_event(self):
+        # La otra mitad del censo de colision: cada fixture de sello nuevo NO
+        # debe disparar ningun gesto EXISTENTE (no solo lo inverso de arriba).
+        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                pts = fixture_fn()
+                for _ in range(3):
+                    _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                    self.assertFalse(
+                        [e for e in events if not e.startswith("NARUTO_")],
+                        f"{name} unexpectedly produced a non-Naruto event: {events}",
+                    )
+
+
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos. design.md §5.1 permite
+# explicitamente un proxy grueso (distancia entre centros + curvatura
+# promedio + orientacion) en vez de intentar el entrelazado fino de dedos,
+# que MediaPipe no puede ver de forma confiable entre 2 manos. Cada fixture
+# fue verificado contra el GestureEngine real antes de aceptarse aca, igual
+# que los de 1 mano - dispara UNICAMENTE su propio NARUTO_<NOMBRE>, y ningun
+# fixture de 2 manos existente (both_fists/both_shaka/meta-menu) dispara
+# ninguno de estos. Umbrales de config.py RAZONADOS, no medidos en camara
+# real todavia (pendiente, ver ARCHITECTURE.md).
+def ne_hand(cx=0.48, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)  # muñeca abajo -> la mano "apunta" hacia arriba
+    pts[8] = Landmark(cx - 0.02, cy - 0.15, 0)
+    pts[6] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[12] = Landmark(cx + 0.02, cy - 0.15, 0)
+    pts[10] = Landmark(cx + 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.04, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.06, cy, 0)
+    pts[2] = Landmark(cx - 0.05, cy, 0)
+    return pts
+
+
+def mi_hand(cx=0.48, cy=0.5):
+    # Mismo "entrelazado" que Ne (2 de 4 dedos extendidos) - solo cambia la
+    # muñeca, para que la mano "apunte" hacia abajo en vez de hacia arriba.
+    pts = list(ne_hand(cx, cy))
+    pts[0] = Landmark(cx, cy - 0.2, 0)
+    return pts
+
+
+def tori_hand(cx, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy - 0.15, 0)
+        pts[pip] = Landmark(cx, cy - 0.03, 0)
+    pts[4] = Landmark(cx - 0.1, cy, 0)
+    pts[2] = Landmark(cx - 0.08, cy, 0)
+    return pts
+
+
+def kai_hand_1(cx=0.46, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx - 0.02, cy, 0)
+    pts[9] = Landmark(cx + 0.01, cy, 0)
+    pts[8] = Landmark(cx + 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 2
+    pts[6] = Landmark(cx, cy - 0.05, 0)
+    pts[12] = Landmark(cx + 0.12, cy - 0.18, 0)
+    pts[10] = Landmark(cx + 0.01, cy - 0.05, 0)
+    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.04, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy, 0)
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def kai_hand_2(cx=0.54, cy=0.5):
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx + 0.02, cy, 0)
+    pts[9] = Landmark(cx - 0.01, cy, 0)
+    pts[8] = Landmark(cx - 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 1
+    pts[6] = Landmark(cx, cy - 0.05, 0)
+    pts[12] = Landmark(cx - 0.12, cy - 0.18, 0)
+    pts[10] = Landmark(cx - 0.01, cy - 0.05, 0)
+    pts[16] = Landmark(cx - 0.04, cy + 0.05, 0)
+    pts[14] = Landmark(cx - 0.04, cy, 0)
+    pts[20] = Landmark(cx - 0.06, cy + 0.05, 0)
+    pts[18] = Landmark(cx - 0.06, cy, 0)
+    pts[4] = Landmark(cx + 0.08, cy, 0)
+    pts[2] = Landmark(cx + 0.07, cy, 0)
+    return pts
+
+
+def tatsu_hand_1(cx=0.48, cy=0.5):
+    # Una mano bien cerrada (puño)...
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy + 0.05, 0)
+        pts[pip] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx - 0.08, cy, 0)
+    pts[2] = Landmark(cx - 0.07, cy, 0)
+    return pts
+
+
+def tatsu_hand_2(cx=0.52, cy=0.5):
+    # ...la otra bien abierta - la asimetria de curvatura es la señal de Tatsu.
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
+        pts[tip] = Landmark(cx, cy - 0.15, 0)
+        pts[pip] = Landmark(cx, cy - 0.03, 0)
+    pts[4] = Landmark(cx + 0.08, cy, 0)
+    pts[2] = Landmark(cx + 0.07, cy, 0)
+    return pts
+
+
+TWOHAND_SEAL_FIXTURES = {
+    "NE": (ne_hand, ne_hand),
+    "MI": (mi_hand, mi_hand),
+    "TORI": (lambda: tori_hand(0.35), lambda: tori_hand(0.65)),
+    "KAI": (kai_hand_1, kai_hand_2),
+    "TATSU": (tatsu_hand_1, tatsu_hand_2),
+}
+
+
+def hold_twohand_seal(engine, p1, p2):
+    hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+    engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+    engine._twohand_seal_hold_start = time.time() - 2.0
+    return engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+
+
+class NarutoTwoHandSealTests(unittest.TestCase):
+    def test_each_seal_fires_only_its_own_event_after_the_hold(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                _, _, events = hold_twohand_seal(engine, fn1(), fn2())
+                self.assertEqual(events, [f"NARUTO_{name}"])
+
+    def test_no_seal_fires_before_the_hold_completes(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertEqual(events, [])
+
+    def test_existing_two_hand_fixtures_do_not_leak_a_naruto_twohand_event(self):
+        existing_pairs = {
+            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
+            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
+            "meta_menu": (fist_hand(0.3, 0.5), open_hand_n_fingers(1, 0.7, 0.5)),
+        }
+        for name, (p1, p2) in existing_pairs.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("NARUTO_")],
+                    f"{name} unexpectedly produced a NARUTO_* two-hand event: {events}",
+                )
+
+    def test_no_twohand_seal_fixture_triggers_an_existing_two_hand_event(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine.pause_hold_start = time.time() - 2.0
+                engine.close_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if not e.startswith("NARUTO_")],
+                    f"{name} unexpectedly produced a non-Naruto event: {events}",
+                )
+
+
+# TASK-068/069/070 (Fase 6): gestos JJK. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo -
+# incluye el censo de colision pedido explicitamente por design.md §6.4
+# (contra las fases 1/4/5 y entre si), aunque la verificacion en CAMARA REAL
+# (a diferencia de la Fase 4) queda pospuesta a la prueba integral final,
+# pedida explicitamente por el usuario.
+def jjk_megumi_hand(cx=0.5, cy=0.5):
+    # Identica a naruto_hitsuji_hand salvo el anular (16/14): EXTENDIDO aca,
+    # RECOGIDO en Hitsuji - esa es la unica diferencia entre las 2 fixtures,
+    # a proposito, para que el discriminador quede aislado (design.md §6.3).
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.02, cy - 0.08, 0)  # indice cruza a la derecha
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.09, cy - 0.08, 0)  # medio cruza a la izquierda
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)  # anular EXTENDIDO
+    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)  # menique recogido
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.04, cy - 0.04, 0)
+    pts[2] = Landmark(cx - 0.05, cy - 0.01, 0)
+    return pts
+
+
+def jjk_gojo_hand(cx=0.5, cy=0.3):
+    # Marco en L: pulgar recto hacia arriba (vector vertical puro desde su
+    # mcp), indice recto hacia el costado (vector horizontal puro desde su
+    # mcp) - perpendiculares por construccion. Resto de los dedos sin
+    # overridear (curl ambiguo, no importa para este chequeo).
+    pts = flat(cx, cy)
+    pts[2] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.15, 0)
+    pts[5] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.15, cy, 0)
+    return pts
+
+
+def sukuna_contact_hand(cx=0.5, cy=0.5):
+    # Misma forma que right_click_hand a proposito (design.md §6.2: Sukuna
+    # reusa d_thumb_middle, el snap ES ese pellizco, solo que rapido).
+    return right_click_hand(cx, cy)
+
+
+def sukuna_release_hand(cx=0.5, cy=0.5):
+    pts = list(right_click_hand(cx, cy))
+    pts[12] = Landmark(cx + 0.15, cy, 0)  # medio bien separado del pulgar
+    return pts
+
+
+class JJKGestureTests(unittest.TestCase):
+    def test_megumi_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_naruto(engine, jjk_megumi_hand())
+        self.assertEqual(events, ["JJK_MEGUMI"])
+
+    def test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger(self):
+        # design.md §6.3: la unica diferencia entre las 2 fixtures es la
+        # posicion del anular - confirma que ESE es el discriminador real.
+        engine = GestureEngine()
+        _, _, hitsuji_events = hold_naruto(engine, naruto_hitsuji_hand())
+        self.assertEqual(hitsuji_events, ["NARUTO_HITSUJI"])
+
+        engine2 = GestureEngine()
+        _, _, megumi_events = hold_naruto(engine2, jjk_megumi_hand())
+        self.assertEqual(megumi_events, ["JJK_MEGUMI"])
+
+    def test_gojo_domain_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.25), jjk_gojo_hand(0.52, 0.25))
+        self.assertEqual(events, ["JJK_GOJO_DOMAIN"])
+
+    def test_gojo_domain_does_not_fire_before_the_hold_completes(self):
+        engine = GestureEngine()
+        hands = [Hand(jjk_gojo_hand(0.42, 0.25), "Left"), Hand(jjk_gojo_hand(0.52, 0.25), "Right")]
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+
+    def test_gojo_domain_does_not_fire_when_hands_are_low_in_frame(self):
+        # Mismas 2 manos, mas abajo en el cuadro - JJK_GOJO_MAX_AVG_WRIST_Y
+        # (mitad superior) deberia excluirlo.
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.75), jjk_gojo_hand(0.52, 0.75))
+        self.assertEqual(events, [])
+
+    def test_a_fast_snap_fires_sukuna_not_right_click(self):
+        engine = GestureEngine()
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("JJK_SUKUNA", events)
+        self.assertNotIn("RIGHT_CLICK", events)
+
+    def test_a_sustained_pinch_fires_right_click_not_sukuna(self):
+        engine = GestureEngine()
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("RIGHT_CLICK", events)  # confirmado tras 2 frames seguidos en contacto (PINCH_CONFIRM_FRAMES)
+
+        # Sostenido mucho mas alla de la ventana de Sukuna (JJK_SUKUNA_MAX_WINDOW_SECONDS) -
+        # mismo truco de rebobinar el reloj interno que el resto del archivo.
+        engine._sukuna_detector._contact_time = time.time() - 1.0
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("JJK_SUKUNA", events)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_jjk_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                engine._naruto_hold_start = time.time() - 1.0
+                _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("JJK_")],
+                    f"{name} unexpectedly produced a JJK_* event: {events}",
+                )
+
+    def test_no_naruto_seal_fixture_triggers_a_jjk_event(self):
+        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                pts = fixture_fn()
+                for _ in range(3):
+                    _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                    self.assertFalse([e for e in events if e.startswith("JJK_")])
+
+    def test_no_existing_two_hand_fixture_leaks_gojo_domain(self):
+        existing_pairs = {
+            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
+            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
+        }
+        for name, (p1, p2) in existing_pairs.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+
+    def test_no_twohand_naruto_seal_fixture_leaks_gojo_domain(self):
+        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
+            with self.subTest(seal=name):
+                engine = GestureEngine()
+                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+
+
+# TASK-071/072/073 (Fase 7): gestos comunes. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo.
+def clap_hand(cx=0.5, cy=0.5):
+    # Los 4 dedos (no el pulgar) bien extendidos parejos (curl_ratio=1.0,
+    # AFUERA de la banda "entrelazada" 0.2-0.8 que usan Ne/Mi/Kai/Tatsu) y el
+    # pulgar en una posicion neutra que no forma el angulo de 90 grados de
+    # Gojo ni pellizca nada - a proposito, para que 2 de estas manos NUNCA
+    # satisfagan ningun gesto de 2 manos EXISTENTE sin importar la distancia
+    # entre ellas (verificado explicitamente mas abajo).
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx - 0.06, cy, 0)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)
+    pts[9] = Landmark(cx - 0.02, cy, 0)
+    pts[10] = Landmark(cx - 0.02, cy - 0.05, 0)
+    pts[12] = Landmark(cx - 0.02, cy - 0.15, 0)
+    pts[13] = Landmark(cx + 0.02, cy, 0)
+    pts[14] = Landmark(cx + 0.02, cy - 0.05, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)
+    pts[17] = Landmark(cx + 0.06, cy, 0)
+    pts[18] = Landmark(cx + 0.06, cy - 0.05, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)
+    pts[2] = Landmark(cx - 0.1, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.15, cy + 0.1, 0)
+    return pts
+
+
+def korean_heart_hand(cx=0.5, cy=0.5):
+    # Identica a un puno (los 4 dedos recogidos) salvo el pulgar: en vez de
+    # recogido junto a la mano (como en Saru/I), la punta del pulgar (4)
+    # queda MUY cerca del PRIMER nudillo del indice (6) - no de su punta
+    # (8), que es lo que exige PINCH_CLICK - la distincion geometrica que
+    # design.md §7.2 pide. Verificado explicitamente mas abajo que
+    # d_thumb_index (punta a punta) queda por ENCIMA de PINCH_CLICK, y que
+    # el offset pulgar-palma no cruza los umbrales de Saru ni de I.
+    pts = _naruto_base(cx, cy)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.05, cy + 0.02, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[2] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.055, cy - 0.048, 0)
+    return pts
+
+
+class ClapTests(unittest.TestCase):
+    def test_hands_closing_then_separating_fires_clap_once(self):
+        engine = GestureEngine()
+        contact = [Hand(clap_hand(0.48, 0.5), "Left"), Hand(clap_hand(0.52, 0.5), "Right")]
+        release = [Hand(clap_hand(0.2, 0.5), "Left"), Hand(clap_hand(0.78, 0.5), "Right")]
+        engine.process(contact, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(release, W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("CLAP", events)
+
+    def test_hands_passing_near_without_reaching_contact_does_not_fire_clap(self):
+        engine = GestureEngine()
+        # Nunca cruza CLAP_CONTACT_MAX_DISTANCE_FRACTION (0.12) en ningun momento.
+        far = [Hand(clap_hand(0.35, 0.5), "Left"), Hand(clap_hand(0.60, 0.5), "Right")]
+        near = [Hand(clap_hand(0.42, 0.5), "Left"), Hand(clap_hand(0.58, 0.5), "Right")]
+        engine.process(far, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(near, W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("CLAP", events)
+
+    def test_clap_hand_pair_never_matches_an_existing_two_hand_gesture(self):
+        # Verifica explicitamente la premisa de la que depende todo lo de
+        # arriba: 2 clap_hand(), a cualquier distancia relevante, no
+        # satisfacen ningun gesto de 2 manos EXISTENTE (shaka/puños/pinch/
+        # Naruto/JJK) - si lo hicieran, la jerarquia bloquearia CLAP.
+        for label, (cx1, cx2) in {
+            "contact": (0.48, 0.52),
+            "release": (0.2, 0.78),
+            "near_miss": (0.42, 0.58),
+        }.items():
+            with self.subTest(pair=label):
+                engine = GestureEngine()
+                hands = [Hand(clap_hand(cx1, 0.5), "Left"), Hand(clap_hand(cx2, 0.5), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                engine.pause_hold_start = time.time() - 2.0
+                engine.close_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e != "CLAP"],
+                    f"{label} unexpectedly produced a non-CLAP event: {events}",
+                )
+
+
+class KoreanHeartTests(unittest.TestCase):
+    def test_a_fast_touch_and_release_fires_pinch_down_up_only(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertEqual(events, ["PINCH_DOWN"])
+        self.assertNotIn("KOREAN_HEART", events)
+
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("KOREAN_HEART", events)
+
+    def test_a_sustained_pose_past_the_hold_fires_korean_heart_without_pinch_down(self):
+        engine = GestureEngine()
+        pts = korean_heart_hand()
+        _, _, events = process(engine, pts)
+        self.assertNotIn("PINCH_DOWN", events)
+        self.assertNotIn("KOREAN_HEART", events)  # todavia no se cumplio el hold
+
+        engine._korean_heart_hold_start = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertIn("KOREAN_HEART", events)
+        self.assertNotIn("PINCH_DOWN", events)
+
+    def test_korean_heart_shape_never_wins_pinch_winner_index(self):
+        # design.md §7.2: la unica forma de garantizar "nunca dispara
+        # PINCH_DOWN" por construccion (no solo por umbral) es que
+        # d_thumb_index (punta a punta) quede estructuralmente por ENCIMA de
+        # PINCH_CLICK para esta forma.
+        pts = korean_heart_hand()
+        w, h = W, H
+        thumb, index = pts[4], pts[8]
+        d_thumb_index = GestureEngine._dist3(thumb, index, w, h)
+        self.assertGreaterEqual(d_thumb_index, config.PINCH_CLICK)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_korean_heart_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    process(engine, pts)
+                engine._korean_heart_hold_start = time.time() - 2.0
+                _, _, events = process(engine, pts)
+                self.assertNotIn("KOREAN_HEART", events, f"{name} unexpectedly produced KOREAN_HEART: {events}")
 
 
 if __name__ == "__main__":

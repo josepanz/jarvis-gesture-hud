@@ -44,6 +44,8 @@ VALID_ACTIONS = frozenset(
         "RIGHT_CLICK",
         "SCROLL_UP",
         "SCROLL_DOWN",
+        "SCROLL_LEFT",
+        "SCROLL_RIGHT",
         "ZOOM_IN",
         "ZOOM_OUT",
         "KEYBOARD_TOGGLE",

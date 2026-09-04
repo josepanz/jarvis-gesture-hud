@@ -1,30 +1,71 @@
 """Contenido del listado de gestos — fuente unica, consumida por el overlay nativo
-de escritorio (`overlay.py`). Ya no se dibuja dentro de la ventana de camara."""
+de escritorio (`overlay.py`). Ya no se dibuja dentro de la ventana de camara.
+
+TASK-059 (Fase 3, spec.md #3.3): cada entrada ahora tambien lleva una icon key,
+resuelta via `jarvis.gesture_icons.ensure_icon()` en `build_legend_entries()` -
+`build_legend_text()` se mantiene sin cambios en su salida (solo el unpacking
+de la tupla cambia de 2 a 3 elementos)."""
 
 TITLE = "JARVIS — Gestos"
 
 ENTRIES = [
-    ("Índice movido", "Puntero"),
-    ("Pulgar + Índice (pinch)", "Click / Drag"),
-    ("Pulgar + Medio (pinch)", "Click derecho"),
-    ("Índice + Medio arriba", "Scroll"),
-    ("Pulgar + Anular (pinch)", "Zoom"),
-    ("Palma abierta", "Teclado HUD"),
-    ("Pulgar + Meñique + mover", "Volumen"),
-    ("Pulgar + Anular cerrado", "Captura"),
-    ("Shaka 1.5s (1 mano)", "Bloquear sesión"),
-    ("Palma, pulgar a meñique", "Silenciar voz"),
-    ("2 puños juntos 1.2s", "Pausar / Reanudar"),
-    ("2 manos en Shaka 1.5s", "Cerrar Jarvis"),
-    ("Tecla q", "Salir"),
-    ("Tecla h", "Mostrar/ocultar lista"),
-    ("Tecla m", "Modo espejo on/off"),
-    ("Teclas +/-", "Transparencia"),
+    ("Índice movido", "Puntero", "pointer"),
+    ("Pulgar + Índice (pinch)", "Click / Drag", "pinch_click"),
+    ("Pulgar + Medio (pinch)", "Click derecho", "pinch_right_click"),
+    ("Índice + Medio arriba, mover desde el centro", "Scroll (4 direcciones)", "scroll"),
+    ("Pulgar + Anular (pinch)", "Zoom", "pinch_zoom"),
+    ("Palma abierta", "Teclado HUD", "open_palm_keyboard"),
+    ("Pulgar + Meñique + mover", "Volumen", "pinch_volume"),
+    ("Pulgar + Anular cerrado", "Captura", "pinch_screenshot"),
+    ("Shaka 1.5s (1 mano)", "Bloquear sesión", "shaka_lock"),
+    ("Palma, pulgar a meñique", "Silenciar voz", "silence"),
+    ("2 puños juntos 1.2s", "Pausar / Reanudar", "two_fist_pause"),
+    ("2 manos en Shaka 1.5s", "Cerrar Jarvis", "two_shaka_close"),
+    ("Tecla q", "Salir", "key_quit"),
+    ("Tecla h", "Mostrar/ocultar lista", "key_toggle_legend"),
+    ("Tecla m", "Modo espejo on/off", "key_mirror"),
+    ("Teclas +/-", "Transparencia", "key_legend_opacity"),
+    # TASK-063 (Fase 4): sellos Naruto de 1 mano, sostenidos
+    # config.NARUTO_SEAL_HOLD_SECONDS - accion segun el binding por default
+    # (o el override del perfil activo, ver main.py NARUTO_DEFAULT_BINDINGS).
+    ("Sello Tora (índice+medio)", "Captura", "naruto_tora"),
+    ("Sello Ushi (índice)", "Deshacer", "naruto_ushi"),
+    ("Sello U (índice+medio separados)", "Rehacer", "naruto_u"),
+    ("Sello Uma (pulgar+índice+meñique)", "Zoom +", "naruto_uma"),
+    ("Sello Hitsuji (índice+medio cruzados)", "Silenciar sistema", "naruto_hitsuji"),
+    ("Sello Saru (puño, pulgar arriba)", "Teclado HUD", "naruto_saru"),
+    ("Sello Inu (solo meñique)", "Volumen -", "naruto_inu"),
+    ("Sello I (puño, pulgar al costado)", "Bloquear sesión", "naruto_i"),
+    # TASK-066 (Fase 5): sellos Naruto de 2 manos, sostenidos
+    # config.NARUTO_TWOHAND_HOLD_SECONDS.
+    ("Sello Ne (manos juntas, hacia arriba)", "Zoom -", "naruto_ne"),
+    ("Sello Mi (manos juntas, hacia abajo)", "Scroll abajo", "naruto_mi"),
+    ("Sello Tori (manos en abanico)", "Scroll arriba", "naruto_tori"),
+    ("Sello Kai (manos juntas, dedos cruzados)", "Cerrar Jarvis", "naruto_kai"),
+    ("Sello Tatsu (1 puño + 1 mano abierta)", "Volumen +", "naruto_tatsu"),
+    # TASK-070 (Fase 6): sellos JJK, sostenidos config.NARUTO_TWOHAND_HOLD_SECONDS
+    # (Gojo) o config.NARUTO_SEAL_HOLD_SECONDS (Megumi) - Sukuna es temporal
+    # (ImpulseDetector), sin hold.
+    ("Sello Gojo (marco en L, 2 manos arriba)", "Click derecho", "jjk_gojo_domain"),
+    ("Sello Sukuna (chasquido pulgar-medio)", "Captura", "jjk_sukuna"),
+    ("Sello Megumi (índice+medio+anular)", "Silenciar sistema", "jjk_megumi"),
+    # TASK-073 (Fase 7): gestos comunes. Aplauso es temporal (ImpulseDetector,
+    # sin hold); corazón coreano exige config.KOREAN_HEART_HOLD_SECONDS.
+    ("Aplauso (2 manos, acercar y separar)", "Teclado HUD", "clap"),
+    ("Corazón coreano (pulgar+índice, sostenido)", "Captura", "korean_heart"),
 ]
 
 
 def build_legend_text():
-    width = max(len(gesture) for gesture, _ in ENTRIES)
+    width = max(len(gesture) for gesture, _, _ in ENTRIES)
     lines = [TITLE, ""]
-    lines += [f"{gesture.ljust(width)}  →  {action}" for gesture, action in ENTRIES]
+    lines += [f"{gesture.ljust(width)}  →  {action}" for gesture, action, _ in ENTRIES]
     return "\n".join(lines)
+
+
+def build_legend_entries():
+    """(gesture, action, icon_path) por cada entrada - spec.md #3.3, consumido
+    por `overlay.ScreenOverlay.init_legend()`."""
+    from jarvis.gesture_icons import ensure_icon
+
+    return [(gesture, action, ensure_icon(icon_key)) for gesture, action, icon_key in ENTRIES]

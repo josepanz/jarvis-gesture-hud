@@ -34,6 +34,12 @@ def main():
         "pyautogui.size", return_value=(1920, 1080)
     ):
         mock_os.take_screenshot.return_value = "captures/fake.png"
+        # PressKeyCommand.can_execute() (TASK-076) mira pyautogui.KEYBOARD_KEYS,
+        # una lista real de datos - se restaura sobre el mock (las llamadas de
+        # verdad, press()/write(), siguen mockeadas).
+        import pyautogui as _real_pyautogui
+
+        mock_kb_pyautogui.KEYBOARD_KEYS = _real_pyautogui.KEYBOARD_KEYS
 
         app = JarvisApp()
         try:
@@ -55,6 +61,13 @@ def main():
             mock_mouse_pyautogui.scroll.assert_any_call(12)
             app._dispatch("SCROLL_DOWN", (100, 100), (500, 400))
             mock_mouse_pyautogui.scroll.assert_any_call(-12)
+
+            # --- scroll horizontal (rediseño de scroll, hallazgo de camara
+            # real, José 2026-08-30) ---
+            app._dispatch("SCROLL_RIGHT", (100, 100), (500, 400))
+            mock_mouse_pyautogui.hscroll.assert_any_call(12)
+            app._dispatch("SCROLL_LEFT", (100, 100), (500, 400))
+            mock_mouse_pyautogui.hscroll.assert_any_call(-12)
 
             # --- zoom (TASK-011) ---
             app._dispatch("ZOOM_IN", (100, 100), (500, 400))

@@ -81,6 +81,8 @@ Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
   su estructura interna es riesgo real por cero cambio de comportamiento.
 """
 
+import queue
+import threading
 import time
 
 import cv2
@@ -88,8 +90,10 @@ import pyautogui
 
 from jarvis import config
 from jarvis.actions.keyboard import PressKeyCommand, TypeTextCommand
+from jarvis.actions.macro import HotkeyCommand, MacroCommand, build_macro_steps
 from jarvis.actions.mouse import (
     CanvasZoomCommand,
+    HScrollCommand,
     MouseButtonCommand,
     MouseMoveCommand,
     RightClickCommand,
@@ -102,6 +106,7 @@ from jarvis.actions.system import (
     VolumeDownCommand,
     VolumeUpCommand,
 )
+from jarvis.core import config_store
 from jarvis.core.command_bus import CommandBus
 from jarvis.core.command_history import CommandHistory
 from jarvis.core.command_metrics import CommandMetricsRecorder
@@ -118,10 +123,14 @@ from jarvis.core.undo_redo import UndoRedoController
 from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
+from jarvis.hand_visualizer import draw_hand_overlay
 from jarvis.hud_keyboard import HUDKeyboard
-from jarvis.legend import build_legend_text
+from jarvis.legend import TITLE as LEGEND_TITLE
+from jarvis.legend import build_legend_entries
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
+from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
+from jarvis.settings_ui import SettingsWindow
 from jarvis.voice import VoiceJarvis
 from jarvis.voice_capture import VoiceListener
 
@@ -151,6 +160,8 @@ _MIGRATED_GESTURES = frozenset(
         "RIGHT_CLICK",
         "SCROLL_UP",
         "SCROLL_DOWN",
+        "SCROLL_LEFT",
+        "SCROLL_RIGHT",
         "ZOOM_IN",
         "ZOOM_OUT",
         "VOLUME_UP",
@@ -159,6 +170,82 @@ _MIGRATED_GESTURES = frozenset(
         "LOCK_SESSION",
     }
 )
+
+# TASK-063 (Fase 4, design.md §4.3): binding por default de cada sello Naruto
+# de 1 mano a una accion del vocabulario fijo que `_dispatch` ya entiende
+# (mismo camino que usa la voz) - `ProfileManager.get_gesture_binding()` ya
+# resuelve "override del perfil activo > este default > None" (TASK-024,
+# reusado tal cual, sin tocarlo). NARUTO_I -> LOCK_SESSION es intencional:
+# LOCK_SESSION es HOLD_REQUIRED, y el propio sello ya exige
+# config.NARUTO_SEAL_HOLD_SECONDS sostenido en GestureEngine antes de emitir
+# el evento - el binding nunca puede saltarse ese requisito porque el evento
+# mismo no existe hasta que el hold ya se cumplio.
+#
+# TASK-081 (Fase 8, spec.md #8.2/8.3): ampliado de "solo sellos" a TODO
+# gesto/tecla que la app puede producir - el settings screen exige que
+# CUALQUIER fila sea reasignable, no solo Naruto/JJK/comunes. Los 19 gestos
+# "clasicos" (los que ya existian antes de la Fase 4) se mapean a SI MISMOS
+# por default - reasignarlos es opcional, y sin tocar nada el comportamiento
+# es identico al de antes de esta fase (identidad = no-op semantico).
+GESTURE_DEFAULT_BINDINGS = {
+    "NARUTO_TORA": "SCREENSHOT",
+    "NARUTO_USHI": "UNDO",
+    "NARUTO_U": "REDO",
+    "NARUTO_UMA": "ZOOM_IN",
+    "NARUTO_HITSUJI": "MUTE",
+    "NARUTO_SARU": "KEYBOARD_TOGGLE",
+    "NARUTO_INU": "VOLUME_DOWN",
+    "NARUTO_I": "LOCK_SESSION",
+    # TASK-066 (Fase 5): sellos de 2 manos - mismo mecanismo, mismo camino de
+    # dispatch (_dispatch_naruto_seal ya distingue por prefijo "NARUTO_", sin
+    # importar si el evento vino de 1 o 2 manos).
+    "NARUTO_NE": "ZOOM_OUT",
+    "NARUTO_MI": "SCROLL_DOWN",
+    "NARUTO_TORI": "SCROLL_UP",
+    "NARUTO_KAI": "CLOSE_APP",  # "Release" - calza tematicamente con cerrar la app
+    "NARUTO_TATSU": "VOLUME_UP",
+    # TASK-070 (Fase 6): sellos JJK. El vocabulario fijo de acciones
+    # (VALID_ACTIONS, 14 en total) ya esta agotado por los 13 sellos Naruto
+    # de arriba - queda UNA sola accion sin usar (RIGHT_CLICK). Las otras 2
+    # reusan una accion ya asignada a otro sello (mismo mecanismo que
+    # permite reasignar cualquier binding por perfil - 2 gestos fisicos
+    # distintos apuntando al mismo comando por default no es un bug, es
+    # equivalente a 2 atajos de teclado para la misma accion).
+    "JJK_GOJO_DOMAIN": "RIGHT_CLICK",  # unica accion libre - Gojo, el mas prominente de los 3, se la queda
+    "JJK_SUKUNA": "SCREENSHOT",  # "snap" -> sacar una foto, mismo binding que Tora
+    "JJK_MEGUMI": "MUTE",  # invocacion sigilosa de sombras -> silenciar, mismo binding que Hitsuji
+    # TASK-073 (Fase 7): gestos comunes (no son "sellos", pero comparten el
+    # mismo mecanismo generico - ver _dispatch_naruto_seal). Vocabulario fijo
+    # ya agotado (ver comentario arriba), ambos reusan una accion existente.
+    "CLAP": "KEYBOARD_TOGGLE",  # "Clapper": aplaudir para prender/apagar algo - mismo binding que Saru
+    "KOREAN_HEART": "SCREENSHOT",  # pose clasica de foto -> Captura, mismo binding que Tora/Sukuna
+    # TASK-081 (Fase 8): los 19 gestos "clasicos" (Fases 1-3), identity por
+    # default. PINCH_DOWN/PINCH_UP siguen necesitando cam_xy para el click
+    # del teclado HUD/drag - eso lo sigue resolviendo `_dispatch_migrated`
+    # exactamente igual, la resolucion de binding no le saca ni le agrega
+    # nada a ESE camino cuando el default (identidad) esta vigente.
+    "PINCH_DOWN": "PINCH_DOWN",
+    "PINCH_UP": "PINCH_UP",
+    "RIGHT_CLICK": "RIGHT_CLICK",
+    "SCROLL_UP": "SCROLL_UP",
+    "SCROLL_DOWN": "SCROLL_DOWN",
+    "SCROLL_LEFT": "SCROLL_LEFT",
+    "SCROLL_RIGHT": "SCROLL_RIGHT",
+    "ZOOM_IN": "ZOOM_IN",
+    "ZOOM_OUT": "ZOOM_OUT",
+    "VOLUME_UP": "VOLUME_UP",
+    "VOLUME_DOWN": "VOLUME_DOWN",
+    "SCREENSHOT": "SCREENSHOT",
+    "LOCK_SESSION": "LOCK_SESSION",
+    "SILENCE": "SILENCE",
+    "KEYBOARD_TOGGLE": "KEYBOARD_TOGGLE",
+    "TOGGLE_ACTIVE": "TOGGLE_ACTIVE",
+    "CLOSE_APP": "CLOSE_APP",
+    "TOGGLE_MIRROR": "TOGGLE_MIRROR",
+    "TOGGLE_LEGEND": "TOGGLE_LEGEND",
+    "LEGEND_ALPHA_UP": "LEGEND_ALPHA_UP",
+    "LEGEND_ALPHA_DOWN": "LEGEND_ALPHA_DOWN",
+}
 
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:
 # MouseMove dispara ~30-60 veces por segundo).
@@ -171,18 +258,28 @@ class JarvisApp:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
-        self.profiles = ProfileManager()
+        # TASK-081 (Fase 8, spec.md #8.6): carga bindings/atajos/macros
+        # persistidos ANTES de que arranque el loop de camara - un archivo
+        # ausente o corrupto ya cae a {} (ver config_store.load_bindings()),
+        # asi que esto nunca puede bloquear el arranque ni dejar la app sin
+        # ProfileManager.
+        self.profiles = ProfileManager.from_dict(config_store.load_bindings())
 
         self.tracker = HandTracker(
             max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
         )
+        # TASK-060c (Fase 3B): PoseTracker solo se construye si esta habilitado -
+        # deshabilitado por default (costo de inferencia medido, ver config.py),
+        # asi que en el caso default no se paga ni el costo de construccion ni
+        # la descarga del modelo de pose.
+        self.pose_tracker = PoseTracker() if config.POSE_HAND_OWNERSHIP_ENABLED else None
         self.screen_w, self.screen_h = pyautogui.size()
 
         self.gestures = GestureEngine(smoothing_enabled=self.profiles.get_setting("smoothing_enabled"))
         self.keyboard = HUDKeyboard()
         self.voice = VoiceJarvis()
         self.overlay = ScreenOverlay()
-        self.overlay.init_legend(build_legend_text())
+        self.overlay.init_legend(build_legend_entries(), title=LEGEND_TITLE)
 
         self.feedback = FeedbackManager(voice=self.voice, hud=self.overlay)
 
@@ -204,7 +301,33 @@ class JarvisApp:
         self.llm_intent_resolver = LLMIntentResolver()
         self.voice_confidence_filter = ConfidenceFilter(minimum_confidence=_VOICE_MIN_CONFIDENCE)
 
+        # TASK-078/081 (Fase 8): SettingsWindow vive sobre el MISMO root de Tk
+        # que ScreenOverlay ya bombea cada frame (design.md §5.6) - nunca abre
+        # un segundo Tk()/mainloop. on_change persiste en disco de inmediato
+        # (spec.md #8.3: "Persists and takes effect immediately").
+        self.settings_window = SettingsWindow(
+            self.overlay._root,
+            self.profiles,
+            GESTURE_DEFAULT_BINDINGS,
+            voice_intent_resolver=self.voice_intent_resolver,
+            on_change=self._save_bindings,
+        )
+        self.overlay.init_gear_icon(on_click=self.settings_window.open)
+
+        # Hallazgo de camara real (José, 2026-08-30): la voz "no respondia"
+        # porque LLMIntentResolver.resolve() descarga el modelo GGUF (~1GB,
+        # primer uso) y lo carga de forma SINCRONICA - llamado directo desde
+        # _handle_voice_result() en el loop principal, eso congelaba TODA la
+        # app (camara incluida) sin ningun feedback visible durante la
+        # descarga/carga. Se mueve a un hilo de fondo, mismo patron que
+        # VoiceListener._transcribe (threading.Thread + queue.Queue no
+        # bloqueante) - VoiceIntentResolver.resolve() (match de frases, sin
+        # I/O) se queda sincronico, solo el fallback al LLM se mueve.
+        self._llm_intent_results = queue.Queue()
+        self._llm_resolving = False
+
         self.mirrored = config.MIRROR_CAMERA_DEFAULT
+        self._show_hand_overlay = False  # TASK-057: tecla 'l', apagado por default
         self.is_dragging = False
         self.should_quit = False
         self._last_screen_xy = None
@@ -254,6 +377,13 @@ class JarvisApp:
         elif gesture_type in ("SCROLL_UP", "SCROLL_DOWN"):
             amount = 12 if gesture_type == "SCROLL_UP" else -12
             self.command_bus.dispatch(ScrollCommand(amount))
+        elif gesture_type in ("SCROLL_LEFT", "SCROLL_RIGHT"):
+            # pyautogui.hscroll(): positivo desplaza el contenido a la
+            # derecha - "SCROLL_RIGHT" (el usuario pide ver mas a la
+            # derecha) usa un monto positivo, igual de natural que
+            # SCROLL_UP/ZOOM_IN siendo positivos arriba.
+            amount = 12 if gesture_type == "SCROLL_RIGHT" else -12
+            self.command_bus.dispatch(HScrollCommand(amount))
         elif gesture_type in ("ZOOM_IN", "ZOOM_OUT"):
             amount = 10 if gesture_type == "ZOOM_IN" else -10
             self.command_bus.dispatch(CanvasZoomCommand(amount))
@@ -358,6 +488,12 @@ class JarvisApp:
             self.overlay.adjust_legend_alpha(+0.1)
         elif event == "LEGEND_ALPHA_DOWN":
             self.overlay.adjust_legend_alpha(-0.1)
+        elif event == "UNDO":
+            self._trigger_undo()
+        elif event == "REDO":
+            self._trigger_redo()
+        elif event == "MUTE":
+            self.command_bus.dispatch(MuteCommand())
 
     def _toggle_mirror(self):
         self.mirrored = not self.mirrored
@@ -395,6 +531,9 @@ class JarvisApp:
     def _toggle_debug_hud(self):
         self.hud_renderer.debug = not self.hud_renderer.debug
 
+    def _toggle_hand_overlay(self):
+        self._show_hand_overlay = not self._show_hand_overlay
+
     # --- PHASE 14: voz STT + LLM (cableado en vivo) -------------------------------
 
     def _toggle_voice_listening(self):
@@ -420,28 +559,97 @@ class JarvisApp:
             )
             return
 
-        intent = self.voice_intent_resolver.resolve(text) or self.llm_intent_resolver.resolve(text)
-        if intent is None:
-            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+        intent = self.voice_intent_resolver.resolve(text)
+        if intent is not None:
+            self._dispatch_voice_action(intent.name)
             return
-        self._dispatch_voice_action(intent.name)
+
+        # Fallback al LLM: PUEDE implicar descargar (~1GB, primera vez) y
+        # cargar el modelo - nunca en el hilo principal (ver comentario en
+        # __init__). Si ya hay una resolucion LLM en curso, esta frase se
+        # descarta en vez de superponer una segunda llamada concurrente
+        # sobre la misma instancia de Llama (no garantizado thread-safe).
+        if self._llm_resolving:
+            self.feedback.notify("⚠ Todavía estoy pensando la frase anterior…", channels=("hud",), position=position)
+            return
+        self._llm_resolving = True
+        self.overlay.show_bubble("🧠 Pensando…", *position)
+        threading.Thread(target=self._resolve_llm_intent_async, args=(text,), daemon=True).start()
+
+    def _resolve_llm_intent_async(self, text):
+        try:
+            intent = self.llm_intent_resolver.resolve(text)
+        except Exception as exc:
+            self._llm_intent_results.put((text, None, str(exc)))
+            return
+        self._llm_intent_results.put((text, intent, None))
+
+    def _poll_llm_intent_results(self):
+        try:
+            text, intent, error = self._llm_intent_results.get_nowait()
+        except queue.Empty:
+            return
+        self._llm_resolving = False
+        position = self._feedback_position()
+        if error is not None:
+            self.feedback.notify(f"⚠ Error al interpretar la voz: {error}", channels=("hud",), position=position)
+        elif intent is None:
+            self.feedback.notify(f"⚠ Comando de voz no reconocido: “{text}”", channels=("hud",), position=position)
+        else:
+            self._dispatch_voice_action(intent.name)
 
     def _dispatch_voice_action(self, action_name):
         """action_name: validado por VoiceIntentResolver/LLMIntentResolver
-        (jarvis.llm_intent.VALID_ACTIONS). Reusa exactamente el mismo camino de
-        Command que el gesto equivalente cuando existe, asi que voz y gesto
-        disparando la misma accion se comportan identico (mismo feedback,
-        misma entrada en el historial de undo/redo)."""
-        if action_name == "UNDO":
-            self._trigger_undo()
-        elif action_name == "REDO":
-            self._trigger_redo()
-        elif action_name == "MUTE":
-            self.command_bus.dispatch(MuteCommand())
-        elif action_name in ("KEYBOARD_TOGGLE", "CLOSE_APP"):
-            self._dispatch(action_name, None, self._last_screen_xy)
-        elif action_name in _MIGRATED_GESTURES:
-            self._dispatch_migrated(action_name, None)
+        (jarvis.llm_intent.VALID_ACTIONS). Delegar en `_dispatch()` (TASK-081)
+        en vez de reimplementar el mismo chequeo: la voz nunca produce un
+        evento "clasico" crudo (SILENCE/TOGGLE_ACTIVE/etc, esos no son parte
+        de VALID_ACTIONS), asi que la unica diferencia real con un gesto es
+        que la voz no tiene cam_xy - se pasa None, igual que antes."""
+        self._dispatch(action_name, None, self._last_screen_xy)
+
+    def _save_bindings(self):
+        """TASK-081 (Fase 8, spec.md #8.6): `SettingsWindow` llama a esto
+        despues de CUALQUIER cambio (rebind, atajo nuevo, macro nueva) - la
+        propia `config_store.save_bindings()` ya escribe atomicamente."""
+        config_store.save_bindings(self.profiles.to_dict())
+
+    def _dispatch_macro_or_shortcut(self, action_name):
+        """TASK-081 (Fase 8): un binding puede apuntar a una macro o a un
+        atajo custom del perfil activo, ademas de al vocabulario fijo -
+        chequeado ANTES que `_dispatch()` porque ninguno de esos 2 nombres
+        puede colisionar con un evento/accion real (spec.md #8.3/8.4:
+        MACRO:<nombre> y el nombre de un atajo son namespaces separados,
+        elegidos por el usuario al crearlos en el settings screen). Devuelve
+        True si disparo algo, para que el llamador no siga con `_dispatch()`."""
+        macro_steps = self.profiles.active.macros.get(action_name)
+        if macro_steps is not None:
+            self.command_bus.dispatch(MacroCommand(action_name, build_macro_steps(macro_steps)))
+            return True
+        shortcut_combo = self.profiles.active.custom_shortcuts.get(action_name)
+        if shortcut_combo is not None:
+            self.command_bus.dispatch(HotkeyCommand(shortcut_combo))
+            return True
+        return False
+
+    def _dispatch_naruto_seal(self, event, cam_xy=None, screen_xy=None):
+        """TASK-063 (Fase 4), generalizado en TASK-081 (Fase 8) a TODO gesto
+        y tecla que la app puede producir, no solo sellos - nombre historico
+        conservado (las pruebas existentes lo llaman asi por su firma
+        original de 1 solo argumento, que sigue funcionando igual: cam_xy/
+        screen_xy son opcionales porque ningun sello los necesito nunca).
+        Resuelve el binding (override del perfil activo >
+        GESTURE_DEFAULT_BINDINGS > el propio evento, via
+        ProfileManager.get_gesture_binding() ya existente - TODO evento real
+        tiene un default identity o tematico, asi que ese ultimo caso es
+        puramente defensivo) y ejecuta: macro/atajo custom si el binding
+        apunta a uno, si no `_dispatch()` con el mismo cam_xy/screen_xy que
+        recibio el gesto original (PINCH_DOWN/UP los siguen necesitando)."""
+        action_name = self.profiles.get_gesture_binding(event, global_bindings=GESTURE_DEFAULT_BINDINGS)
+        if action_name is None:
+            action_name = event
+        if self._dispatch_macro_or_shortcut(action_name):
+            return
+        self._dispatch(action_name, cam_xy, screen_xy if screen_xy is not None else self._last_screen_xy)
 
     def _handle_key(self, key):
         if key == ord("q"):
@@ -464,6 +672,8 @@ class JarvisApp:
             self._toggle_debug_hud()
         elif key == ord("v"):
             self._toggle_voice_listening()
+        elif key == ord("l"):
+            self._toggle_hand_overlay()
 
     def run(self):
         self.voice.speak("Jarvis en línea.")
@@ -480,11 +690,23 @@ class JarvisApp:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hands = self.tracker.process(rgb, mirrored=self.mirrored)
 
+            if self.pose_tracker is not None:
+                pose_start = time.perf_counter()
+                pose_landmarks = self.pose_tracker.process(rgb)
+                self.telemetry.record("performance", "pose_inference_ms", (time.perf_counter() - pose_start) * 1000)
+                # TASK-060c: None (sin cuerpo trackeado este frame) deja `hands`
+                # sin tocar - cae al heuristico de TASK-056, que ya corre dentro
+                # de GestureEngine.process() de todas formas (design.md §3B.2:
+                # una falla de pose NUNCA debe dejar a la app sin responder).
+                owned_hands = filter_hands_by_pose_ownership(hands, pose_landmarks, w, h)
+                if owned_hands is not None:
+                    hands = owned_hands
+
             screen_xy, cam_xy, events = self.gestures.process(hands, w, h, self.screen_w, self.screen_h)
             self._last_screen_xy = screen_xy
 
             for event in events:
-                self._dispatch(event, cam_xy, screen_xy)
+                self._dispatch_naruto_seal(event, cam_xy, screen_xy)
 
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)
@@ -493,9 +715,13 @@ class JarvisApp:
             voice_result = self.voice_listener.poll_result()
             if voice_result is not None:
                 self._handle_voice_result(voice_result)
+            self._poll_llm_intent_results()
 
             if not self.gestures.active:
                 cv2.putText(frame, "PAUSADO", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            if self._show_hand_overlay and hands:
+                draw_hand_overlay(frame, hands, self.gestures.last_primary_landmarks, events[-1] if events else None)
 
             if self.hud_renderer.debug:
                 self.hud_renderer.render(

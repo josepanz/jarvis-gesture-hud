@@ -109,10 +109,24 @@ def main():
             app._handle_voice_result(("text", "subir volumen", 0.1))
             assert not mock_os.volume_up.called, "low-confidence voice result must be discarded"
 
-            # --- Voice dispatch: unmatched phrase falls through to the LLM resolver ---
+            # --- Voice dispatch: unmatched phrase falls through to the LLM
+            # resolver, on a BACKGROUND THREAD (TASK: fix real-camera finding
+            # "la voz no responde" - LLMIntentResolver.resolve() downloads
+            # ~1GB + loads a model on first use; calling it synchronously
+            # from here used to freeze the whole app). Poll until the
+            # background thread finishes instead of asserting immediately.
+            def _wait_for_llm_resolution(timeout=2.0):
+                deadline = time.time() + timeout
+                while app._llm_resolving and time.time() < deadline:
+                    time.sleep(0.01)
+                app._poll_llm_intent_results()
+
             with patch.object(app.llm_intent_resolver, "resolve", return_value=None) as mock_llm_resolve:
                 app._handle_voice_result(("text", "algo que no matchea ninguna frase", 0.95))
+                assert app._llm_resolving, "the LLM fallback must start on a background thread, not run inline"
+                _wait_for_llm_resolution()
                 assert mock_llm_resolve.called, "unmatched phrase should fall back to the LLM resolver"
+                assert not app._llm_resolving, "the busy flag should clear once the background thread finishes"
 
             # --- Voice dispatch: LLM-resolved action reaches the real Command path too ---
             from jarvis.core.intents import Intent
@@ -124,12 +138,82 @@ def main():
             ):
                 mock_os.reset_mock()
                 app._handle_voice_result(("text", "hazme el favor de silenciar todo", 0.95))
+                _wait_for_llm_resolution()
                 assert mock_os.volume_mute.called, "LLM-resolved MUTE should dispatch MuteCommand"
+
+            # --- TASK-063 (Fase 4): un sello Naruto de 1 mano, de punta a
+            # punta - deteccion real (GestureEngine + hold) -> dispatch real
+            # (binding por default) -> Command real.
+            import test_gesture_engine_regression as regr
+
+            pts = regr.naruto_i_hand()  # default: NARUTO_I -> LOCK_SESSION
+            hands = [regr.Hand(pts, "Right")]
+            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
+            for event in events:
+                if event.startswith("NARUTO_"):
+                    app._dispatch_naruto_seal(event)
+            assert not mock_os.lock_session.called, "no debe disparar antes de cumplirse el hold"
+
+            app.gestures._naruto_hold_start = time.time() - 1.0
+            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
+            assert "NARUTO_I" in events
+            for event in events:
+                if event.startswith("NARUTO_"):
+                    app._dispatch_naruto_seal(event)
+            assert mock_os.lock_session.called, "NARUTO_I deberia disparar LockSession (binding por default)"
+
+            # --- TASK-081 (Fase 8): settings screen de punta a punta -
+            # rebind real via SettingsWindow -> persiste en disco -> una
+            # instancia NUEVA de JarvisApp (arranque "de nuevo") lo carga y
+            # lo respeta. Redirige config_store a un archivo temporal (NUNCA
+            # tocar el bindings.json real del usuario en este check).
+            import tempfile
+
+            from jarvis.core import config_store
+
+            real_load, real_save = config_store.load_bindings, config_store.save_bindings
+            with tempfile.TemporaryDirectory() as tmp:
+                temp_path = Path(tmp) / "bindings.json"
+                with patch(
+                    "jarvis.core.config_store.load_bindings", side_effect=lambda path=temp_path: real_load(temp_path)
+                ), patch(
+                    "jarvis.core.config_store.save_bindings",
+                    side_effect=lambda data, path=temp_path: real_save(data, temp_path),
+                ):
+                    # --- gear icon abre la ventana real de settings ---
+                    assert app.settings_window._window is None
+                    app.overlay.pump()  # ver test_overlay.py: hace falta un update() completo antes del click sintetico
+                    app.overlay._gear_window.winfo_children()[0].event_generate("<Button-1>", when="now")
+                    app.overlay.pump()
+                    assert app.settings_window._window is not None, "clickear el engranaje debe abrir el settings"
+
+                    app.settings_window._on_rebind("NARUTO_TORA", "VOLUME_UP")
+                    assert temp_path.exists(), "el rebind deberia haber persistido de inmediato"
+
+                    mock_os.reset_mock()
+                    app._dispatch_naruto_seal("NARUTO_TORA")
+                    assert mock_os.volume_up.called, "el rebind deberia tomar efecto de inmediato, sin reiniciar"
+                    assert not mock_os.take_screenshot.called
+
+                    # No se construye un segundo JarvisApp real aca - 2 tk.Tk()
+                    # simultaneos en el mismo proceso no son confiables
+                    # (design.md §5.6 ya lo advierte para SettingsWindow, y se
+                    # confirmo en la practica: un segundo ScreenOverlay revienta
+                    # con TclError "image ... doesn't exist" al compartir
+                    # PhotoImage entre interpretes Tk distintos). Se ejercita
+                    # exactamente la misma linea que JarvisApp.__init__ usa,
+                    # sin repetir la construccion completa de la app.
+                    from jarvis.core.profiles import ProfileManager
+
+                    reloaded = ProfileManager.from_dict(config_store.load_bindings())
+                    assert reloaded.active.gesture_bindings.get("NARUTO_TORA") == "VOLUME_UP", (
+                        "una carga NUEVA (misma linea que JarvisApp.__init__) deberia ver el rebind persistido"
+                    )
 
             time.sleep(0.2)
             print(
                 "LIVE INTEGRATION OK: telemetry, history, undo/redo, profiles, debug HUD, "
-                "context, voice dispatch all verified"
+                "context, voice dispatch, Naruto seal dispatch, settings persistence all verified"
             )
         finally:
             app.overlay.close()
