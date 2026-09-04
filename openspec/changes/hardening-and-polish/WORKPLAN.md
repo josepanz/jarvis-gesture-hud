@@ -1507,7 +1507,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 - [x] H-09 el drag no depende del binding de PINCH_UP · commit: dc45474
 - [x] H-10 el rebinding no evade HOLD_REQUIRED · commit: a22c212 (opcion B: filtro en settings_ui, gate sigue posicional, documentado en ARCHITECTURE.md)
-- [ ] H-11 invalidar la pila de redo · commit: ______
+- [x] H-11 invalidar la pila de redo · commit: 7263e03
 - [ ] H-12 cerrar el micrófono al salir · commit: ______
 
 ### Workflow 3 — Motor de gestos
