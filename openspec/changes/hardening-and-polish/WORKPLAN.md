@@ -1515,7 +1515,7 @@ escribilo con lo que encontraste en vez de borrarla.
 - [x] H-05 resetear estado de una mano al perder la mano · commit: 84dd94b
 - [x] H-06 pinch fantasma del anular · commit: b260d07
 - [x] H-07 comentario del umbral de Sukuna · commit: 0728113
-- [ ] H-08 (opcional, solo si tocás esa función) bbox redundante — no aplica: H-05/H-06 no tocaron `filter_plausible_hands`
+- [x] H-08 bbox redundante · commit: 3c9529a
 
 ### Workflow 4 — Empaquetado y assets
 
