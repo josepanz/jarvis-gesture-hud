@@ -159,18 +159,32 @@ class SettingsWindowShortcutAndMacroTests(_RealTkTestCase):
 
     def test_a_captured_shortcut_becomes_available_as_a_rebind_target(self):
         self.profiles.active.custom_shortcuts["MY_SHORTCUT"] = "ctrl+alt+t"
-        self.assertIn("MY_SHORTCUT", self.window._rebind_target_options())
+        self.assertIn("MY_SHORTCUT", self.window._rebind_target_options("SCROLL_UP"))
 
     def test_a_saved_macro_becomes_available_as_a_rebind_target(self):
         self.profiles.active.macros["MACRO:greeting"] = [{"kind": "type-text", "value": "hola"}]
-        self.assertIn("MACRO:greeting", self.window._rebind_target_options())
+        self.assertIn("MACRO:greeting", self.window._rebind_target_options("SCROLL_UP"))
 
-    def test_rebind_target_options_include_every_valid_action(self):
+    def test_rebind_target_options_include_every_valid_action_for_a_hold_capable_row(self):
         from jarvis.llm_intent import VALID_ACTIONS
 
-        options = self.window._rebind_target_options()
+        options = self.window._rebind_target_options("NARUTO_I")  # sello con hold propio
         for action in VALID_ACTIONS:
             self.assertIn(action, options)
+
+    def test_rebind_target_options_exclude_hold_required_actions_for_an_instant_row(self):
+        # H-10: PINCH_DOWN es instantaneo (sin hold propio) - ofrecer
+        # LOCK_SESSION ahi dejaria bloquear la sesion con un pinch casual,
+        # evadiendo el hold de 1.5s que GestureEngine exige para el Shaka.
+        options = self.window._rebind_target_options("PINCH_DOWN")
+        self.assertNotIn("LOCK_SESSION", options)
+        self.assertIn("SCREENSHOT", options)  # el resto de VALID_ACTIONS sigue disponible
+
+    def test_pinch_down_row_combobox_does_not_offer_lock_session(self):
+        rows = _build_trigger_rows(GESTURE_DEFAULT_BINDINGS)
+        row_index = next(i for i, (event_name, _label, _icon_key) in enumerate(rows) if event_name == "PINCH_DOWN")
+        combo = self.window._table_frame.grid_slaves(row=row_index, column=2)[0]
+        self.assertNotIn("LOCK_SESSION", combo.cget("values"))
 
 
 if __name__ == "__main__":

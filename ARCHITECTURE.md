@@ -1496,6 +1496,54 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   at this point in `__init__` (built further down), so console/`logging` is
   the only channel available here; the HUD bubble path used elsewhere isn't
   an option for this particular failure.
+- **H-09 — releasing a drag no longer depends on the `PINCH_UP` binding.**
+  `_dispatch_migrated()`'s drag state machine matched on the *resolved*
+  action name, not the physical gesture — reassigning the `PINCH_UP` row in
+  Settings meant the physical release of the pinch never reached the branch
+  that calls `MouseButtonCommand(pressed=False)`, leaving the OS-level mouse
+  button held down with no way to release it short of restarting the app.
+  Fixed by moving the release to `_dispatch_naruto_seal()`, gated on the raw
+  `event` (`"PINCH_UP"`) rather than the binding-resolved `action_name`,
+  running before the binding is resolved — releasing the drag is now a
+  system invariant, not a reassignable action; the resolved action (if any)
+  still dispatches normally afterward. Verified by reproducing the stuck
+  state first (`is_dragging` stayed `True` after a reassigned `PINCH_UP`),
+  then confirming the fix in both directions (`PINCH_UP` reassigned,
+  `PINCH_DOWN` reassigned) plus the existing keyboard-click-doesn't-start-a-
+  drag behavior (`tests/test_naruto_seal_dispatch.py::PinchUpRebindDragCleanupTests`).
+- **H-10 — the Settings screen can no longer offer `LOCK_SESSION` as a
+  rebind target for a gesture without its own hold.** TASK-081 (Fase 8)
+  made every binding row reassignable to any `VALID_ACTIONS` entry,
+  including `LOCK_SESSION` (`HOLD_REQUIRED`). That silently broke the
+  guarantee documented above ("a `NARUTO_*` event is structurally incapable
+  of existing before its hold completes") for every OTHER row: rebinding, say,
+  `PINCH_DOWN` → `LOCK_SESSION` let a single, instantaneous pinch lock the
+  session with no hold at all, because `CommandBus` never checks
+  `HOLD_REQUIRED` itself (only `DESTRUCTIVE` is rejected there) — the whole
+  guarantee was positional (which physical events happened to route to
+  `LockSessionCommand` by default), not structural.
+  **Fix chosen (option B from the hardening audit, not the structural one):**
+  `settings_ui._rebind_target_options(event_name)` now excludes
+  `_HOLD_REQUIRED_ACTIONS` (`{"LOCK_SESSION"}`) unless `event_name` is in
+  `_HOLD_CAPABLE_EVENTS` — the fixed set of gestures whose own hold in
+  `GestureEngine` already gates them (`NARUTO_SEAL_HOLD_SECONDS`,
+  `NARUTO_TWOHAND_HOLD_SECONDS`, `LOCK_HOLD_SECONDS`,
+  `KOREAN_HEART_HOLD_SECONDS`). **This gate is still positional, not
+  structural** — it lives in the UI layer as a hardcoded event allowlist,
+  not in `CommandBus`/`GestureEvent` carrying real hold evidence
+  (`duration_ms`) end-to-end. Accepted deliberately: a structural fix would
+  require `GestureEngine` to attach real hold duration to every event it
+  emits and thread it through `_dispatch_naruto_seal()`/`CommandBus`, which
+  is a materially larger change to the probed-and-stable event pipeline
+  (convention: don't refactor `GestureEngine` without a demonstrated bug in
+  it) for a gap that's fully closed at the only place a user can create it
+  today (the Settings UI). A pre-existing `bindings.json` saved before this
+  fix with an already-invalid `LOCK_SESSION` rebind on a non-hold-capable
+  row is not retroactively stripped — out of scope for this fix. Verified in
+  `tests/test_settings_ui.py` (`_rebind_target_options("PINCH_DOWN")`
+  excludes `LOCK_SESSION`; the real `PINCH_DOWN` row's `ttk.Combobox` values
+  don't include it either; a hold-capable row like `NARUTO_I` still offers
+  every `VALID_ACTIONS` entry, unchanged).
 
 ## Known limitations
 

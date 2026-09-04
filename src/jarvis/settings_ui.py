@@ -49,6 +49,30 @@ _CLASSIC_EVENT_ICON_KEYS = {
     "LEGEND_ALPHA_DOWN": "key_legend_opacity",
 }
 
+# H-10: el gate de HOLD_REQUIRED (hoy solo LOCK_SESSION) es posicional, no
+# estructural (ver ARCHITECTURE.md, "Decisions & rationale") - vive en que
+# GestureEngine nunca emite estos eventos antes de sostener su propio hold
+# (config.NARUTO_SEAL_HOLD_SECONDS / NARUTO_TWOHAND_HOLD_SECONDS /
+# LOCK_HOLD_SECONDS / KOREAN_HEART_HOLD_SECONDS - ver gestures.py). Ofrecer
+# LOCK_SESSION como destino de un evento SIN hold propio (ej. PINCH_DOWN,
+# instantaneo) rompe esa garantia: el pinch casual bloquearia la sesion sin
+# ningun hold. Se filtra aca, en la UI, en vez de resolver esto de forma
+# estructural en CommandBus (que requeriria que GestureEvent cargue
+# evidencia real de duracion desde GestureEngine hasta el dispatcher - fuera
+# de alcance de este fix, ver H-10 en el WORKPLAN de hardening-and-polish).
+_HOLD_REQUIRED_ACTIONS = frozenset({"LOCK_SESSION"})
+_HOLD_CAPABLE_EVENTS = frozenset(
+    {
+        # sellos Naruto de 1 mano + JJK_MEGUMI: NARUTO_SEAL_HOLD_SECONDS
+        "NARUTO_TORA", "NARUTO_USHI", "NARUTO_U", "NARUTO_UMA", "NARUTO_HITSUJI",
+        "NARUTO_SARU", "NARUTO_INU", "NARUTO_I", "JJK_MEGUMI",
+        # sellos de 2 manos: NARUTO_TWOHAND_HOLD_SECONDS
+        "NARUTO_NE", "NARUTO_MI", "NARUTO_TORI", "NARUTO_KAI", "NARUTO_TATSU", "JJK_GOJO_DOMAIN",
+        # holds propios
+        "KOREAN_HEART", "LOCK_SESSION",
+    }
+)
+
 M1_M2_M3_HELP_TEXT = (
     "Teclas macro del teclado (M1/M2/M3...): esta app NO puede reconocerlas "
     "como una señal distinta - depende del software del fabricante del "
@@ -250,8 +274,12 @@ class SettingsWindow:
 
     # --- TASK-079: tabla de bindings ---------------------------------------------
 
-    def _rebind_target_options(self):
-        return sorted(VALID_ACTIONS) + sorted(self._profiles.active.custom_shortcuts) + sorted(
+    def _rebind_target_options(self, event_name):
+        """H-10: las acciones HOLD_REQUIRED (LOCK_SESSION) solo se ofrecen en
+        filas cuyo gesto de origen ya sostiene su propio hold - ver
+        `_HOLD_CAPABLE_EVENTS` arriba."""
+        actions = VALID_ACTIONS if event_name in _HOLD_CAPABLE_EVENTS else VALID_ACTIONS - _HOLD_REQUIRED_ACTIONS
+        return sorted(actions) + sorted(self._profiles.active.custom_shortcuts) + sorted(
             self._profiles.active.macros
         )
 
@@ -276,7 +304,6 @@ class SettingsWindow:
         self._icon_refs.clear()
         self._row_vars.clear()
 
-        options = self._rebind_target_options()
         for row_index, (event_name, label, icon_key) in enumerate(_build_trigger_rows(self._default_bindings)):
             photo = tk.PhotoImage(file=str(ensure_icon(icon_key)))
             self._icon_refs.append(photo)
@@ -291,6 +318,7 @@ class SettingsWindow:
             current = self._profiles.get_gesture_binding(event_name, global_bindings=self._default_bindings)
             var = tk.StringVar(value=current)
             self._row_vars[event_name] = var
+            options = self._rebind_target_options(event_name)
             combo = ttk.Combobox(self._table_frame, textvariable=var, values=options, width=22, state="readonly")
             combo.grid(row=row_index, column=2, padx=(6, 2), pady=2)
             combo.bind("<<ComboboxSelected>>", lambda _e, ev=event_name, v=var: self._on_rebind(ev, v.get()))
