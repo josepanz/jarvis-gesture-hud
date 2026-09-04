@@ -436,6 +436,12 @@ class JarvisApp:
         self.command_metrics.record_from_command_result(command, result)
         if name not in _CONTINUOUS_COMMANDS:
             self.history.record(command, result)
+            # H-11: un comando nuevo (no un undo/redo replay) invalida
+            # cualquier redo pendiente, como en cualquier undo/redo real -
+            # antes, un `y` (redo) despues de ejecutar algo nuevo re-ejecutaba
+            # el comando viejo que quedo colgado en `_redo_stack`.
+            if not self.undo_redo.is_replaying:
+                self.undo_redo.clear_redo()
 
         if name == "LockSession":
             if result.success:

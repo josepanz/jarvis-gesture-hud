@@ -284,6 +284,29 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
         self.assertFalse(self.app.is_dragging)
         self.mock_mouse_pyautogui.mouseUp.assert_called_once()
 
+    def test_h11_redo_stack_is_invalidated_by_a_new_command(self):
+        # H-11: ejecutar -> undo -> ejecutar OTRO (no relacionado) -> redo no
+        # debe hacer nada (antes: re-ejecutaba el comando viejo deshecho).
+        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.app._trigger_undo()
+        self.assertTrue(self.app.undo_redo.can_redo())
+
+        self.app._dispatch_naruto_seal("NARUTO_UMA")  # default: ZOOM_IN, no relacionado
+
+        self.assertFalse(self.app.undo_redo.can_redo())
+        self.mock_os.volume_up.reset_mock()
+        self.app._trigger_redo()
+        self.assertFalse(self.mock_os.volume_up.called)  # no revivio el VolumeUp viejo
+
+    def test_h11_no_regression_undo_then_immediate_redo_still_works(self):
+        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.app._trigger_undo()
+        self.mock_os.volume_up.reset_mock()
+
+        self.app._trigger_redo()
+
+        self.assertTrue(self.mock_os.volume_up.called)
+
     def test_no_regression_keyboard_click_still_does_not_start_a_drag(self):
         self.app.keyboard.visible = True
         space_pt = None

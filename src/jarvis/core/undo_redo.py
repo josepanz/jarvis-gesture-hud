@@ -22,12 +22,24 @@ class UndoRedoController:
         self._history = history
         self._undone_ids = set()
         self._redo_stack = []
+        # H-11: True mientras undo()/redo() ejecuta la accion inversa/repetida
+        # del propio comando - explicito, no una inferencia sobre si el
+        # dispatch vino o no del CommandBus (hoy undo()/redo() llaman
+        # command.undo()/command.execute() directo, sin pasar por el bus, asi
+        # que JarvisApp._on_command_result() nunca corre durante esta ventana
+        # - pero ese detalle de implementacion podria cambiar, y el flag deja
+        # la intencion escrita en vez de depender de eso en silencio).
+        self._replaying = False
 
     def undo(self):
         entry = self._find_last_undoable()
         if entry is None:
             return CommandResult.rejected(message="nothing to undo")
-        result = entry.command.undo()
+        self._replaying = True
+        try:
+            result = entry.command.undo()
+        finally:
+            self._replaying = False
         if result.success:
             self._undone_ids.add(entry.command_id)
             self._redo_stack.append(entry)
@@ -37,7 +49,11 @@ class UndoRedoController:
         if not self._redo_stack:
             return CommandResult.rejected(message="nothing to redo")
         entry = self._redo_stack.pop()
-        result = entry.command.execute()
+        self._replaying = True
+        try:
+            result = entry.command.execute()
+        finally:
+            self._replaying = False
         if result.success:
             self._undone_ids.discard(entry.command_id)
         else:
@@ -49,6 +65,20 @@ class UndoRedoController:
 
     def can_redo(self):
         return bool(self._redo_stack)
+
+    @property
+    def is_replaying(self):
+        """True durante la ejecucion de undo()/redo() sobre el comando
+        original - JarvisApp._on_command_result() lo usa para no invalidar
+        el redo stack ante un dispatch que no es realmente "nuevo"."""
+        return self._replaying
+
+    def clear_redo(self):
+        """H-11: un comando genuinamente nuevo invalida cualquier redo
+        pendiente - como todo undo/redo real. Llamado desde
+        JarvisApp._on_command_result(), nunca desde aca mismo (undo() ya
+        hace su propio push a `_redo_stack`, que esto destruiria)."""
+        self._redo_stack = []
 
     def _find_last_undoable(self):
         for entry in reversed(self._history.entries()):
