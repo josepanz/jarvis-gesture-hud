@@ -802,6 +802,17 @@ class JarvisApp:
             self.perf_metrics.record_fps(self._last_fps)
             self.context_tracker.get()  # cached (0.5s TTL) - cheap, keeps context "live"
 
+        # H-12: salir con 'q' sin haber vuelto a apretar 'v' dejaba el
+        # sounddevice.InputStream abierto (el microfono tomado mas alla de la
+        # vida de la app) - self.voice_listener siempre existe (construido en
+        # __init__), pero es defensivo por las mismas 2 razones que el resto
+        # del shutdown: las dependencias de voz son opcionales (no siempre
+        # instaladas) y un fallo aca no puede impedir que la app termine.
+        if self.voice_listener is not None and self.voice_listener.recording:
+            try:
+                self.voice_listener.stop()
+            except Exception:
+                logging.exception("fallo al cerrar el stream de microfono al salir")
         self.overlay.close()
         self.cap.release()
         cv2.destroyAllWindows()
