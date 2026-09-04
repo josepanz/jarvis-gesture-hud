@@ -1466,6 +1466,25 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   replaced, so they survive regardless. Also added `RecursionError` and
   `MemoryError` to the exceptions `load_bindings()` quarantines, alongside
   the existing `JSONDecodeError`/`OSError`/`UnicodeDecodeError`.
+- **H-03 — model downloads are now atomic and size-verified.**
+  `hand_tracker.py`/`pose_tracker.py`/`llm_intent.py` each had their own
+  `_ensure_model()`: download straight to the final filename if it doesn't
+  exist yet. An interrupted download (wifi drop, app closed, disk full)
+  left a partial file *at the final name*, which the next startup found and
+  handed to a native parser (MediaPipe / `llama.cpp`) as if complete —
+  opaque failure or a native crash, with "delete the file by hand" as the
+  only recovery. Fixed with one shared helper,
+  `jarvis.downloads.download_atomically()`, used by all three callers
+  instead of three copies of the same logic (this project already extracted
+  `paths.py` for exactly this reason — not duplicating it again): download
+  to `<dest>.part`, verify the size against `Content-Length` when the
+  server reports one, `os.replace()` to the final name only on success, and
+  delete the `.part` on any failure. No stable hash exists for these
+  artifacts (the MediaPipe URLs resolve "latest", and the Hugging Face GGUF
+  URL doesn't publish a fixed checksum), so verification is size-only by
+  design — documented in the module docstring rather than pretending it's
+  stronger than it is; this is a robustness fix, not a defense against a
+  realistic attacker in this offline, personal-use project.
 
 ## Known limitations
 

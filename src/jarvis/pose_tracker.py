@@ -12,12 +12,12 @@ ambiguedad que esta fase existe para eliminar (design.md §3B.1).
 
 import math
 import time
-import urllib.request
 
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 
 from jarvis import config
+from jarvis.downloads import download_atomically
 from jarvis.paths import assets_dir
 
 MODEL_URL = (
@@ -32,11 +32,7 @@ RIGHT_WRIST = 16
 
 
 def _ensure_model():
-    model_path = assets_dir() / "pose_landmarker_lite.task"
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    if not model_path.exists():
-        urllib.request.urlretrieve(MODEL_URL, model_path)
-    return model_path
+    return download_atomically(MODEL_URL, assets_dir() / "pose_landmarker_lite.task")
 
 
 class PoseTracker:

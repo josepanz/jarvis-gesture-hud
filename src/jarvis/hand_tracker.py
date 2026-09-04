@@ -6,12 +6,12 @@ de mediapipe 0.10.30 — solo queda la API Tasks, que requiere descargar un mode
 """
 
 import time
-import urllib.request
 from collections import namedtuple
 
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 
+from jarvis.downloads import download_atomically
 from jarvis.paths import assets_dir
 
 MODEL_URL = (
@@ -27,11 +27,7 @@ _HANDEDNESS_SWAP = {"Left": "Right", "Right": "Left"}
 
 
 def _ensure_model():
-    model_path = assets_dir() / "hand_landmarker.task"
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    if not model_path.exists():
-        urllib.request.urlretrieve(MODEL_URL, model_path)
-    return model_path
+    return download_atomically(MODEL_URL, assets_dir() / "hand_landmarker.task")
 
 
 class HandTracker:

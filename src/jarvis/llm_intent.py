@@ -26,9 +26,9 @@ when that finds nothing.
 import json
 import re
 import time
-import urllib.request
 
 from jarvis.core.intents import Intent
+from jarvis.downloads import download_atomically
 from jarvis.paths import assets_dir
 
 MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
@@ -68,11 +68,7 @@ _JSON_RE = re.compile(r"\{[^{}]*\}")
 
 
 def _ensure_model_path():
-    model_path = assets_dir() / MODEL_FILENAME
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    if not model_path.exists():
-        urllib.request.urlretrieve(MODEL_URL, model_path)
-    return model_path
+    return download_atomically(MODEL_URL, assets_dir() / MODEL_FILENAME)
 
 
 class LLMIntentResolver:
