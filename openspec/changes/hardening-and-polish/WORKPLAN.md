@@ -1505,7 +1505,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ### Workflow 2 — Dispatch y rebinding
 
-- [ ] H-09 el drag no depende del binding de PINCH_UP · commit: ______
+- [x] H-09 el drag no depende del binding de PINCH_UP · commit: dc45474
 - [ ] H-10 el rebinding no evade HOLD_REQUIRED · commit: ______
 - [ ] H-11 invalidar la pila de redo · commit: ______
 - [ ] H-12 cerrar el micrófono al salir · commit: ______
