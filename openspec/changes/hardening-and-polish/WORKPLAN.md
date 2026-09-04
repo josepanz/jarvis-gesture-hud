@@ -1513,7 +1513,7 @@ escribilo con lo que encontraste en vez de borrarla.
 ### Workflow 3 — Motor de gestos
 
 - [x] H-05 resetear estado de una mano al perder la mano · commit: 84dd94b
-- [ ] H-06 pinch fantasma del anular · commit: ______
+- [x] H-06 pinch fantasma del anular · commit: b260d07
 - [ ] H-07 comentario del umbral de Sukuna · commit: ______
 - [ ] H-08 (opcional, solo si tocás esa función) bbox redundante
 
