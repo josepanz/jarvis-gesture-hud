@@ -459,6 +459,28 @@ class GestureEngine:
         best = min(hands, key=lambda hnd: math.hypot(hnd.landmarks[8].x - px, hnd.landmarks[8].y - py))
         return best.landmarks
 
+    def _reset_single_hand_state(self):
+        """H-05: resetea todo el estado de gestos de UNA mano - se llama cuando no
+        hay mano en cuadro o la app esta en pausa (`not self.active or not hands`).
+        Sin esto, un hold viejo (lock_start_time, _naruto_hold_start,
+        _korean_heart_hold_start) sobrevive intacto a la ausencia de mano y se
+        completa instantaneamente al primer cuadro en que la mano vuelve, sin
+        cumplir su hold real - la misma clase de bug que la rama de 2 manos ya
+        evita en `_process_two_hand_gestures`. NARUTO_SEAL_MISS_TOLERANCE no
+        aplica aca: esa tolerancia es para el parpadeo de clasificacion CON la
+        mano presente, no para la ausencia de mano."""
+        self.was_pinching = False
+        self.was_right_pinching = False
+        self.scroll_baseline = None
+        self.prev_zoom_y = None
+        self.prev_pinky_y = None
+        self.lock_start_time = None
+        self._pinch_streak = {"index": 0, "middle": 0, "ring": 0, "pinky": 0}
+        self._naruto_hold_seal = None
+        self._naruto_hold_start = None
+        self._naruto_miss_streak = 0
+        self._korean_heart_hold_start = None
+
     def _process_two_hand_gestures(self, hands, w, h, now):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
         two_hand_active). two_hand_active (TASK-055b) es la condicion geometrica cruda
@@ -647,6 +669,7 @@ class GestureEngine:
 
         if not self.active or not hands:
             self.last_primary_landmarks = None
+            self._reset_single_hand_state()
             return None, None, events
 
         pts = self._pick_primary(hands)

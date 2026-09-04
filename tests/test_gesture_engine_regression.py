@@ -1637,5 +1637,79 @@ class KoreanHeartTests(unittest.TestCase):
                 self.assertNotIn("KOREAN_HEART", events, f"{name} unexpectedly produced KOREAN_HEART: {events}")
 
 
+class HandLossStateResetTests(unittest.TestCase):
+    """H-05: process() volvia temprano (mano perdida, o app en pausa) SIN
+    resetear ningun estado de una mano - un hold viejo (lock_start_time,
+    _naruto_hold_start, _korean_heart_hold_start) sobrevivia intacto y
+    completaba instantaneamente al primer cuadro con la mano de vuelta, sin
+    cumplir su hold real. La rama de 2 manos (pause_hold_start, etc.) ya
+    reseteaba correctamente; esta es la asimetria que le faltaba a la de 1
+    mano."""
+
+    def test_shaka_survives_hand_loss_does_not_lock_on_return(self):
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0  # ya supera LOCK_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)  # la mano sale de cuadro
+        _, _, events = process(engine, shaka_hand())  # misma Shaka de vuelta
+        self.assertNotIn("LOCK_SESSION", events)  # no dispara en el primer cuadro
+
+    def test_shaka_locks_after_a_full_new_hold_following_hand_loss(self):
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        process(engine, shaka_hand())  # rearranca el hold en este cuadro
+        engine.lock_start_time = time.time() - 2.0  # completa un hold nuevo entero
+        _, _, events = process(engine, shaka_hand())
+        self.assertIn("LOCK_SESSION", events)
+
+    def test_naruto_seal_survives_hand_loss_does_not_complete_on_return(self):
+        engine = GestureEngine()
+        pts = naruto_tora_hand()
+        process(engine, pts)
+        engine._naruto_hold_start = time.time() - 2.0  # ya supera NARUTO_SEAL_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, pts)
+        self.assertEqual(events, [])
+
+    def test_korean_heart_survives_hand_loss_does_not_complete_on_return(self):
+        engine = GestureEngine()
+        pts = korean_heart_hand()
+        process(engine, pts)
+        engine._korean_heart_hold_start = time.time() - 2.0  # ya supera KOREAN_HEART_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, pts)
+        self.assertNotIn("KOREAN_HEART", events)
+
+    def test_scroll_baseline_recaptures_after_hand_loss_no_spurious_scroll(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.2))  # base vieja, lejos de donde vuelve
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, scroll_hand(cy=0.5))  # primer cuadro de vuelta = nueva base
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_pause_mid_hold_resets_the_hold_on_resume(self):
+        engine = GestureEngine()
+        pts = naruto_tora_hand()
+        process(engine, pts)
+        engine._naruto_hold_start = time.time() - 2.0
+        engine.active = False
+        engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)  # en pausa, no procesa gestos de 1 mano
+        engine.active = True
+        _, _, events = process(engine, pts)  # reanuda: el hold tiene que arrancar de cero
+        self.assertEqual(events, [])
+
+    def test_a_normal_continuous_hold_still_fires_without_hand_loss(self):
+        # No-regresion: sin perder la mano en el medio, el hold sigue
+        # completando exactamente igual que antes de este fix.
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, shaka_hand())
+        self.assertIn("LOCK_SESSION", events)
+
+
 if __name__ == "__main__":
     unittest.main()
