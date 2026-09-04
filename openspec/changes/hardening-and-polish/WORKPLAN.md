@@ -1506,7 +1506,7 @@ escribilo con lo que encontraste en vez de borrarla.
 ### Workflow 2 — Dispatch y rebinding
 
 - [x] H-09 el drag no depende del binding de PINCH_UP · commit: dc45474
-- [ ] H-10 el rebinding no evade HOLD_REQUIRED · commit: ______
+- [x] H-10 el rebinding no evade HOLD_REQUIRED · commit: a22c212 (opcion B: filtro en settings_ui, gate sigue posicional, documentado en ARCHITECTURE.md)
 - [ ] H-11 invalidar la pila de redo · commit: ______
 - [ ] H-12 cerrar el micrófono al salir · commit: ______
 
