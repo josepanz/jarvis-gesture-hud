@@ -89,7 +89,7 @@ NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
 # posponer TODA verificacion en camara a esa fase, en vez de una por fase
 # como en Fase 4).
 JJK_SUKUNA_CONTACT_THRESHOLD = 15  # mas ajustado que PINCH_RIGHT_CLICK (20): un snap es un toque decidido, no un roce casual
-JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~51px en menique)
+JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~19.2px en medio, el dedo real que alimenta este detector via d_thumb_middle)
 # Hallazgo de camara real (José, 2026-08-30): "el chasquido tardo en
 # responder" - subido de 0.35 a 0.6s. Un snap DELIBERADO frente a una
 # webcam (no un chasquido veloz de verdad) probablemente tarda mas de 350ms
