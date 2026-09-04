@@ -18,7 +18,7 @@ from mediapipe.tasks.python import vision
 
 from jarvis import config
 from jarvis.downloads import download_atomically
-from jarvis.paths import assets_dir
+from jarvis.paths import writable_assets_dir
 
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
@@ -32,7 +32,7 @@ RIGHT_WRIST = 16
 
 
 def _ensure_model():
-    return download_atomically(MODEL_URL, assets_dir() / "pose_landmarker_lite.task")
+    return download_atomically(MODEL_URL, writable_assets_dir() / "pose_landmarker_lite.task")
 
 
 class PoseTracker:

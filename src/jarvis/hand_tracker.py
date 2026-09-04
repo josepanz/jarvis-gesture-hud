@@ -12,7 +12,7 @@ import mediapipe as mp
 from mediapipe.tasks.python import vision
 
 from jarvis.downloads import download_atomically
-from jarvis.paths import assets_dir
+from jarvis.paths import writable_assets_dir
 
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -27,7 +27,7 @@ _HANDEDNESS_SWAP = {"Left": "Right", "Right": "Left"}
 
 
 def _ensure_model():
-    return download_atomically(MODEL_URL, assets_dir() / "hand_landmarker.task")
+    return download_atomically(MODEL_URL, writable_assets_dir() / "hand_landmarker.task")
 
 
 class HandTracker:

@@ -130,7 +130,7 @@ from jarvis.legend import TITLE as LEGEND_TITLE
 from jarvis.legend import build_legend_entries
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
-from jarvis.paths import assets_dir
+from jarvis.paths import writable_assets_dir
 from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
 from jarvis.settings_ui import SettingsWindow
 from jarvis.voice import VoiceJarvis
@@ -286,7 +286,7 @@ class JarvisApp:
             _logger.error(
                 "no se pudo descargar/cargar el modelo de manos - revisá la conexión "
                 "a internet (el archivo va a %s): %s",
-                assets_dir(),
+                writable_assets_dir(),
                 exc,
             )
             raise SystemExit(1) from exc

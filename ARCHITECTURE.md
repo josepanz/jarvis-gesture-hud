@@ -380,7 +380,8 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   `mp.solutions.hands` API from Windows wheels starting at mediapipe 0.10.30 (confirmed
   on this machine — `dir(mp)` no longer exposes `solutions` even at 0.10.35). `hand_tracker.py`
   wraps `HandLandmarker` instead, which requires downloading a `.task` model file once
-  (cached under `assets/`, and resolved correctly inside a frozen `.exe` via `sys._MEIPASS`).
+  (cached under `assets/` in development; see the H-13 entry below for how this resolves
+  inside a frozen `.exe`).
 - **Fixed two direction bugs while re-implementing scroll/zoom.** The original script
   compared a camera-frame pixel coordinate against a screen-resolution coordinate to
   decide scroll/zoom direction — meaningless once the two use different scales. The
@@ -1544,6 +1545,27 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   excludes `LOCK_SESSION`; the real `PINCH_DOWN` row's `ttk.Combobox` values
   don't include it either; a hold-capable row like `NARUTO_I` still offers
   every `VALID_ACTIONS` entry, unchanged).
+
+- **H-13: split `assets_dir()` into `bundled_assets_dir()` / `writable_assets_dir()`.**
+  `assets_dir()` returned `sys._MEIPASS / "assets"` inside a frozen onefile `.exe`. That
+  directory is correct for reading assets actually packaged into the bundle, but
+  PyInstaller's onefile mode extracts `_MEIPASS` fresh to a temp dir on every launch and
+  deletes it on exit — so anything the app *writes* there (generated gesture icons,
+  runtime-downloaded models: `hand_landmarker.task`, `pose_landmarker_lite.task`, the
+  ~1GB voice LLM GGUF) was silently lost every time the app closed, and regenerated or
+  re-downloaded on the next launch. Not a live bug yet (voice isn't packaged into the
+  `.exe` today), but a time bomb for whenever it is. Fix: `bundled_assets_dir()` keeps
+  the old `_MEIPASS`-when-frozen behavior for read-only packaged assets (currently
+  unused by any caller, but kept as the correct primitive for future bundled assets);
+  `writable_assets_dir()` resolves to `~/.jarvis-gesture-hud/assets` when frozen (same
+  user-directory convention `jarvis.core.config_store` already uses for
+  `bindings.json`), and to the repo's `assets/` in development, unchanged. Every
+  existing caller (`hand_tracker`, `pose_tracker`, `llm_intent`, `gesture_icons`, and
+  the startup error-log path in `main.py`) writes or downloads into its target, so all
+  of them moved to `writable_assets_dir()`. Verified in `tests/test_paths.py` with
+  `sys.frozen`/`sys._MEIPASS` mocked: the bundled path resolves under the fake
+  `_MEIPASS`, the writable path never does and always lands under
+  `~/.jarvis-gesture-hud`; in dev mode both still resolve to `assets/` as before.
 
 ## Known limitations
 

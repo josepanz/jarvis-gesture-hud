@@ -13,7 +13,7 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
-from jarvis.paths import assets_dir
+from jarvis.paths import writable_assets_dir
 
 ICON_SIZE = 48
 
@@ -369,7 +369,7 @@ def ensure_icon(key):
     """Devuelve el Path del PNG cacheado para `key`, generandolo si es la
     primera vez (spec.md #3.1: "same lazy-generate-and-cache pattern as the
     MediaPipe model download")."""
-    path = assets_dir() / "gesture_icons" / f"{key}.png"
+    path = writable_assets_dir() / "gesture_icons" / f"{key}.png"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         _render_icon(ICON_SPECS[key]).save(path)
