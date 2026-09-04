@@ -1431,6 +1431,26 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   - 594 tests total (+17 over Fase 8's 577), all green; both manual integration
     scripts updated and passing (the live one now also exercises the async
     LLM-fallback path with a controllable mock instead of assuming it works).
+- **H-01 — a malformed macro/shortcut can no longer crash the camera loop.**
+  Root cause: `build_macro_steps()` (in `actions/macro.py`) ran as an argument
+  expression of `self.command_bus.dispatch(...)` inside
+  `_dispatch_macro_or_shortcut()` — evaluated *before* entering `CommandBus`,
+  so the bus's own try/except (which protects every other dispatch path)
+  never saw the `ValueError` it raises for an unknown step `kind`. The
+  exception propagated up through `_dispatch_naruto_seal()` to the
+  unprotected `for event in events:` loop in `run()` and killed the process.
+  Verified by writing a failing test first
+  (`tests/test_dispatch_error_isolation.py`) that reproduced exactly this.
+  Fixed in three layers, matching the task's "verify before fixing" and
+  "defense in depth" discipline: (1) `_dispatch_macro_or_shortcut()` now
+  builds the steps inside a try/except and reports failure via
+  `FeedbackManager` instead of raising; (2) `run()`'s event-dispatch loop
+  now catches and logs per-event, so one bad gesture can't take down the
+  rest of the frame or the camera; (3) `ProfileManager.from_dict()` now
+  discards (with a log) any persisted macro whose steps aren't shaped like
+  valid macro steps, reusing `build_macro_steps()` itself as the validator
+  instead of duplicating the kind vocabulary — a broken binding on disk is
+  now preferable to a broken startup.
 
 ## Known limitations
 

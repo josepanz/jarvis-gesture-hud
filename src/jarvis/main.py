@@ -81,6 +81,7 @@ Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
   su estructura interna es riesgo real por cero cambio de comportamiento.
 """
 
+import logging
 import queue
 import threading
 import time
@@ -623,7 +624,21 @@ class JarvisApp:
         True si disparo algo, para que el llamador no siga con `_dispatch()`."""
         macro_steps = self.profiles.active.macros.get(action_name)
         if macro_steps is not None:
-            self.command_bus.dispatch(MacroCommand(action_name, build_macro_steps(macro_steps)))
+            # H-01: build_macro_steps() lanza ValueError/TypeError/AttributeError
+            # ante datos malformados (kind desconocido, pasos que no son una
+            # lista de dicts) - eso ocurre ANTES de entrar a CommandBus.dispatch(),
+            # asi que el try/except del bus nunca lo ve. Una macro rota no puede
+            # tumbar el loop de camara: se avisa al usuario y se sigue.
+            try:
+                steps = build_macro_steps(macro_steps)
+            except (ValueError, TypeError, AttributeError) as exc:
+                self.feedback.notify(
+                    f"⚠ Macro «{action_name}» inválida: {exc}",
+                    channels=("hud",),
+                    position=self._feedback_position(),
+                )
+                return True
+            self.command_bus.dispatch(MacroCommand(action_name, steps))
             return True
         shortcut_combo = self.profiles.active.custom_shortcuts.get(action_name)
         if shortcut_combo is not None:
@@ -706,7 +721,14 @@ class JarvisApp:
             self._last_screen_xy = screen_xy
 
             for event in events:
-                self._dispatch_naruto_seal(event, cam_xy, screen_xy)
+                # H-01: defensa en profundidad - un gesto individual que falla
+                # (dato corrupto no contemplado por ninguna validacion previa)
+                # no puede tumbar el resto de los eventos de este cuadro ni el
+                # loop de camara.
+                try:
+                    self._dispatch_naruto_seal(event, cam_xy, screen_xy)
+                except Exception:
+                    logging.exception("fallo al despachar el evento de gesto %r", event)
 
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)

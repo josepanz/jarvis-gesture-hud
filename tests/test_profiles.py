@@ -198,6 +198,48 @@ class ProfileManagerToFromDictTests(unittest.TestCase):
                 self.assertEqual(pm.active.name, "default")
                 self.assertEqual(pm.active.gesture_bindings, {})
 
+    def test_from_dict_discards_macro_with_unknown_step_kind(self):
+        # H-01: un bindings.json editado a mano/corrupto no debe impedir el
+        # arranque - la macro invalida se descarta, no rompe from_dict().
+        data = {
+            "schema_version": 1,
+            "profiles": {"default": {"macros": {"MACRO:rota": [{"kind": "no-existe"}]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.macros, {})
+
+    def test_from_dict_discards_macro_with_non_list_steps(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {"default": {"macros": {"MACRO:rota": "no-soy-una-lista"}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.macros, {})
+
+    def test_from_dict_keeps_valid_macro_and_discards_invalid_sibling(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {
+                "default": {
+                    "macros": {
+                        "MACRO:ok": [{"kind": "press-key", "value": "a"}],
+                        "MACRO:rota": [{"kind": "no-existe"}],
+                    }
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(list(pm.active.macros.keys()), ["MACRO:ok"])
+
+    def test_from_dict_discards_macro_for_a_non_default_profile_too(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {"gaming": {"macros": {"MACRO:rota": [{"kind": "no-existe"}]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.macros, {})
+
 
 if __name__ == "__main__":
     unittest.main()

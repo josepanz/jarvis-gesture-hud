@@ -12,9 +12,12 @@ relative to current behavior, which is what "Existing default behavior preserved
 (TASK-023) actually requires without touching GestureEngine itself.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from jarvis import config
+
+_logger = logging.getLogger("jarvis.profiles")
 
 SUGGESTED_PROFILE_NAMES = ("default", "coding", "gaming", "presentation", "media")
 
@@ -203,10 +206,29 @@ def _profile_to_dict(profile):
     }
 
 
+def _valid_macros(macros_data):
+    """H-01: descarta, con log, cualquier macro cuyos pasos no tengan una
+    forma ejecutable (kind desconocido, pasos que no son una lista de
+    dicts) - un binding roto en el arranque es preferible a un arranque
+    roto. Reusa build_macro_steps() como validador en vez de duplicar acá
+    el vocabulario de kinds de macro.py."""
+    from jarvis.actions.macro import build_macro_steps
+
+    valid = {}
+    for name, steps in macros_data.items():
+        try:
+            build_macro_steps(steps)
+        except (ValueError, TypeError, AttributeError) as exc:
+            _logger.warning("descartando macro %r con pasos invalidos (%s): %r", name, exc, steps)
+            continue
+        valid[name] = list(steps)
+    return valid
+
+
 def _apply_persisted_fields(profile, data):
     profile.gesture_bindings.update(data.get("gesture_bindings") or {})
     profile.custom_shortcuts.update(data.get("custom_shortcuts") or {})
-    profile.macros.update({name: list(steps) for name, steps in (data.get("macros") or {}).items()})
+    profile.macros.update(_valid_macros(data.get("macros") or {}))
 
 
 def _profile_from_dict(name, data):
@@ -214,5 +236,5 @@ def _profile_from_dict(name, data):
         name=name,
         gesture_bindings=dict(data.get("gesture_bindings") or {}),
         custom_shortcuts=dict(data.get("custom_shortcuts") or {}),
-        macros={macro_name: list(steps) for macro_name, steps in (data.get("macros") or {}).items()},
+        macros=_valid_macros(data.get("macros") or {}),
     )
