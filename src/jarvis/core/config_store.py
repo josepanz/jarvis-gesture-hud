@@ -28,7 +28,7 @@ def load_bindings(path=CONFIG_FILE):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError, RecursionError, MemoryError):
         _preserve_corrupt_file(path)
         return {}
     return data if isinstance(data, dict) else {}

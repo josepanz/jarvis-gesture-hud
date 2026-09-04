@@ -1,9 +1,11 @@
 """Tests for TASK-074 (Fase 8): jarvis.core.config_store."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -43,6 +45,29 @@ class CorruptFileTests(unittest.TestCase):
             path = Path(tmp) / "bindings.json"
             path.write_text("[1, 2, 3]", encoding="utf-8")
             self.assertEqual(config_store.load_bindings(path=path), {})
+
+    def test_recursion_error_during_parse_is_quarantined_like_corrupt_json(self):
+        # H-02: JSON patologicamente anidado puede hacer que json.load()
+        # lance RecursionError en vez de JSONDecodeError - antes no estaba
+        # en la lista de excepciones que disparan la cuarentena.
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bindings.json"
+            path.write_text("{}", encoding="utf-8")
+            with patch.object(json, "load", side_effect=RecursionError("maximum recursion depth exceeded")):
+                result = config_store.load_bindings(path=path)
+            self.assertEqual(result, {})
+            self.assertFalse(path.exists())
+            self.assertEqual(len(list(Path(tmp).glob("bindings.json.bak-*"))), 1)
+
+    def test_memory_error_during_parse_is_quarantined_like_corrupt_json(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bindings.json"
+            path.write_text("{}", encoding="utf-8")
+            with patch.object(json, "load", side_effect=MemoryError()):
+                result = config_store.load_bindings(path=path)
+            self.assertEqual(result, {})
+            self.assertFalse(path.exists())
+            self.assertEqual(len(list(Path(tmp).glob("bindings.json.bak-*"))), 1)
 
 
 class AtomicWriteTests(unittest.TestCase):

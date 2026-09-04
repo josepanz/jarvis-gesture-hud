@@ -206,6 +206,20 @@ def _profile_to_dict(profile):
     }
 
 
+def _validated_dict_field(data, key):
+    """H-02: `data[key]` si es un dict; si no (JSON sintacticamente valido
+    pero con el tipo equivocado - p. ej. `gesture_bindings` guardado como
+    lista), lo descarta con un log y cae al default de codigo ({}) en vez
+    de dejar que el `.update()`/`.items()` de mas arriba explote."""
+    value = data.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _logger.warning("descartando campo persistido %r de tipo invalido: %r", key, value)
+        return {}
+    return value
+
+
 def _valid_macros(macros_data):
     """H-01: descarta, con log, cualquier macro cuyos pasos no tengan una
     forma ejecutable (kind desconocido, pasos que no son una lista de
@@ -226,15 +240,15 @@ def _valid_macros(macros_data):
 
 
 def _apply_persisted_fields(profile, data):
-    profile.gesture_bindings.update(data.get("gesture_bindings") or {})
-    profile.custom_shortcuts.update(data.get("custom_shortcuts") or {})
-    profile.macros.update(_valid_macros(data.get("macros") or {}))
+    profile.gesture_bindings.update(_validated_dict_field(data, "gesture_bindings"))
+    profile.custom_shortcuts.update(_validated_dict_field(data, "custom_shortcuts"))
+    profile.macros.update(_valid_macros(_validated_dict_field(data, "macros")))
 
 
 def _profile_from_dict(name, data):
     return Profile(
         name=name,
-        gesture_bindings=dict(data.get("gesture_bindings") or {}),
-        custom_shortcuts=dict(data.get("custom_shortcuts") or {}),
-        macros=_valid_macros(data.get("macros") or {}),
+        gesture_bindings=dict(_validated_dict_field(data, "gesture_bindings")),
+        custom_shortcuts=dict(_validated_dict_field(data, "custom_shortcuts")),
+        macros=_valid_macros(_validated_dict_field(data, "macros")),
     )

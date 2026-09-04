@@ -240,6 +240,55 @@ class ProfileManagerToFromDictTests(unittest.TestCase):
         pm.switch_to("gaming")
         self.assertEqual(pm.active.macros, {})
 
+    def test_from_dict_does_not_raise_for_wrong_types_with_valid_json(self):
+        # H-02: JSON sintacticamente valido con tipos equivocados no debe
+        # explotar mas arriba del filtro de config_store (que solo atrapa
+        # JSON invalido/errores de I/O, no tipos incorrectos).
+        cases = (
+            {"schema_version": 1, "profiles": {"default": {"macros": "no-soy-un-dict"}}},
+            {"schema_version": 1, "profiles": {"default": {"macros": {"m": 42}}}},
+            {"schema_version": 1, "profiles": "tampoco-soy-un-dict"},
+            {"profiles": {"default": {"gesture_bindings": ["lista", "no", "dict"]}}},
+        )
+        for data in cases:
+            with self.subTest(data=data):
+                pm = ProfileManager.from_dict(data)
+                self.assertEqual(pm.active.name, "default")
+
+    def test_from_dict_with_wrong_type_gesture_bindings_falls_back_to_empty(self):
+        data = {"schema_version": 1, "profiles": {"default": {"gesture_bindings": ["lista", "no", "dict"]}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.gesture_bindings, {})
+
+    def test_from_dict_with_wrong_type_custom_shortcuts_falls_back_to_empty(self):
+        data = {"schema_version": 1, "profiles": {"default": {"custom_shortcuts": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.custom_shortcuts, {})
+
+    def test_from_dict_mixed_valid_and_invalid_types_keeps_the_valid_field(self):
+        # Una macro valida y una invalida en el mismo perfil: se conserva la
+        # valida y se descarta la invalida, sin perder ninguna otra.
+        data = {
+            "schema_version": 1,
+            "profiles": {
+                "default": {
+                    "gesture_bindings": {"NARUTO_TORA": "SCREENSHOT"},
+                    "custom_shortcuts": "tipo-incorrecto",
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.gesture_bindings, {"NARUTO_TORA": "SCREENSHOT"})
+        self.assertEqual(pm.active.custom_shortcuts, {})
+
+    def test_from_dict_with_wrong_types_preserves_default_profile_safe_settings(self):
+        # Regresion explicita: sensitivity/cooldowns/dwell del perfil default
+        # nunca vienen del disco y tienen que sobrevivir aunque otros campos
+        # persistidos tengan tipos incorrectos.
+        data = {"schema_version": 1, "profiles": {"default": {"macros": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.get_setting("cursor_sensitivity"), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

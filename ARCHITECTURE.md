@@ -1451,6 +1451,21 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   valid macro steps, reusing `build_macro_steps()` itself as the validator
   instead of duplicating the kind vocabulary — a broken binding on disk is
   now preferable to a broken startup.
+- **H-02 — syntactically-valid JSON with the wrong field types no longer
+  crashes startup.** `config_store.load_bindings()` already quarantined
+  invalid JSON and I/O errors, but a `bindings.json` with e.g.
+  `"gesture_bindings"` saved as a list instead of a dict passed that filter
+  and blew up later in `ProfileManager.from_dict()`'s
+  `dict.update()`/`.items()` calls — `from_dict()`'s own docstring promised
+  it "never raises on malformed data", which was only true for missing
+  keys, not wrong types. Fixed with `_validated_dict_field()`: each
+  persisted field (`gesture_bindings`, `custom_shortcuts`, the dict `macros`
+  is built from) is checked to be a dict before use, discarded with a log
+  and replaced by `{}` otherwise — the seeded `"default"` profile's
+  code-only settings (sensitivity/cooldowns/dwell) are merged into, never
+  replaced, so they survive regardless. Also added `RecursionError` and
+  `MemoryError` to the exceptions `load_bindings()` quarantines, alongside
+  the existing `JSONDecodeError`/`OSError`/`UnicodeDecodeError`.
 
 ## Known limitations
 
