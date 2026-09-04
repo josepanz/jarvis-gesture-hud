@@ -328,9 +328,10 @@ def filter_plausible_hands(hands, w, h):
     gestos, de 1 o 2 manos. Si quedan mas de 2 plausibles se queda con las 2
     mas grandes (HandLandmarker ya limita a config.MAX_HANDS, esto deja el
     criterio explicito sin depender de eso)."""
-    plausible = [hand for hand in hands if _bbox_area_fraction(hand.landmarks, w, h) >= config.MIN_HAND_AREA_FRACTION]
-    plausible.sort(key=lambda hand: _bbox_area_fraction(hand.landmarks, w, h), reverse=True)
-    return plausible[:2]
+    scored = [(hand, _bbox_area_fraction(hand.landmarks, w, h)) for hand in hands]
+    plausible = [(hand, area) for hand, area in scored if area >= config.MIN_HAND_AREA_FRACTION]
+    plausible.sort(key=lambda pair: pair[1], reverse=True)
+    return [hand for hand, _ in plausible[:2]]
 
 
 def hands_plausibly_same_person(h1, h2, w, h):
