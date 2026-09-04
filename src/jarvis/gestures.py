@@ -709,7 +709,20 @@ class GestureEngine:
         # disparaban juntos ("se confunde"). Gana el dedo con distancia mas chica
         # (el pellizco mas ajustado, el mas probable de ser intencional); en un
         # empate exacto gana el primero listado abajo (orden fijo, deterministico).
-        _ring_pinch_threshold = max(config.PINCH_SCREENSHOT, config.PINCH_ZOOM)
+        #
+        # H-06: el anular tiene DOS acciones posibles (screenshot con el indice
+        # recogido, zoom con el indice extendido) con umbrales distintos - antes
+        # competia siempre con max(SCREENSHOT, ZOOM)=25, el umbral MAS LAXO de
+        # los dos, sin importar cual de las dos poses tenia en verdad. En la
+        # banda 20-25px con el indice recogido eso lo dejaba "activo" (gana la
+        # prioridad por distancia mas chica que el menique) sin cumplir el
+        # umbral real de ninguna de sus dos acciones (screenshot pide <20,
+        # zoom pide indice extendido) - cero eventos ese cuadro, y de paso se
+        # comia el evento legitimo del menique (volumen). El anular ahora
+        # compite solo con el umbral que su pose actual puede alcanzar de
+        # verdad.
+        _index_extended = index.y < pts[6].y
+        _ring_pinch_threshold = config.PINCH_ZOOM if _index_extended else config.PINCH_SCREENSHOT
         _pinch_candidates = [
             ("index", d_thumb_index, config.PINCH_CLICK),
             ("middle", d_thumb_middle, config.PINCH_RIGHT_CLICK),

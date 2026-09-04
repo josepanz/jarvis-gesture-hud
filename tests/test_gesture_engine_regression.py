@@ -144,6 +144,30 @@ def volume_hand(cx=0.5, cy=0.5, pinky_y=None):
     return pts
 
 
+def ring_pinky_ghost_hand(cx=0.5, cy=0.5, pinky_y=None, d_thumb_ring_px=20.5, d_thumb_pinky_px=21.0):
+    """H-06: el anular queda a `d_thumb_ring_px` del pulgar (por defecto en la
+    banda 20-25px: activo para el viejo max(PINCH_SCREENSHOT, PINCH_ZOOM)=25,
+    pero por debajo del umbral real de NINGUNA de sus dos acciones con el
+    indice recogido - screenshot pide <20, zoom pide indice extendido) y el
+    menique a `d_thumb_pinky_px` (por defecto un pellizco de volumen genuino,
+    mas lejos que el anular pero bajo PINCH_VOLUME=28 - la colision numerica
+    verificada en H-06). Pulgar/anular/menique se mueven juntos en Y (mismo
+    patron que volume_hand) para poder variar `pinky_y` y probar la direccion
+    del volumen sin alterar ninguna de las dos distancias al pulgar."""
+    y = cy if pinky_y is None else pinky_y
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, y, 0)
+    pts[20] = Landmark(cx + d_thumb_pinky_px / W, y, 0)
+    pts[18] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx, cy + 0.1, 0)  # indice recogido (tip por debajo del pip)
+    pts[6] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[10] = Landmark(cx + 0.15, cy - 0.15, 0)
+    pts[16] = Landmark(cx + d_thumb_ring_px / W, y, 0)
+    pts[14] = Landmark(cx, y, 0)
+    return pts
+
+
 def screenshot_hand(cx=0.5, cy=0.5):
     pts = flat(cx, cy)
     pts[4] = Landmark(cx, cy, 0)
@@ -485,6 +509,38 @@ class VolumeTests(unittest.TestCase):
         process(engine, volume_hand(pinky_y=0.35))
         _, _, events = process(engine, volume_hand(pinky_y=0.5))
         self.assertIn("VOLUME_DOWN", events)
+
+
+class RingPinchPriorityBandTests(unittest.TestCase):
+    """H-06: el anular ya no puede ganar pinch_winner con un umbral que su
+    pose actual no puede disparar - antes de este fix, la banda 20-25px con
+    el indice recogido dejaba al anular "activo" (max(SCREENSHOT, ZOOM)=25)
+    sin cumplir el umbral real de ninguna de sus dos acciones, ganandole la
+    prioridad al menique y comiendose el evento de volumen legitimo."""
+
+    def test_band_with_index_curled_produces_volume_event_instead_of_nothing(self):
+        confirm_hand = ring_pinky_ghost_hand(pinky_y=0.5, d_thumb_ring_px=20.5)
+        engine = GestureEngine()
+        confirm_pinch(engine, confirm_hand)
+        process(engine, confirm_hand)
+        _, _, events = process(engine, ring_pinky_ghost_hand(pinky_y=0.35, d_thumb_ring_px=20.5))
+        self.assertIn("VOLUME_UP", events)
+
+    def test_band_with_index_curled_never_fires_screenshot_or_zoom(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, ring_pinky_ghost_hand(d_thumb_ring_px=20.5))
+        self.assertNotIn("SCREENSHOT", events)
+        self.assertNotIn("ZOOM_IN", events)
+        self.assertNotIn("ZOOM_OUT", events)
+
+    def test_never_two_pinch_families_fire_in_the_same_frame(self):
+        confirm_hand = ring_pinky_ghost_hand(pinky_y=0.5, d_thumb_ring_px=20.5)
+        engine = GestureEngine()
+        confirm_pinch(engine, confirm_hand)
+        process(engine, confirm_hand)
+        _, _, events = process(engine, ring_pinky_ghost_hand(pinky_y=0.35, d_thumb_ring_px=20.5))
+        fired = [e for e in events if e in ("SCREENSHOT", "ZOOM_IN", "ZOOM_OUT", "VOLUME_UP", "VOLUME_DOWN")]
+        self.assertEqual(fired, ["VOLUME_UP"])
 
 
 class ScreenshotTests(unittest.TestCase):
