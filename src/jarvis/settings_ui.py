@@ -305,9 +305,14 @@ class SettingsWindow:
         self._row_vars.clear()
 
         for row_index, (event_name, label, icon_key) in enumerate(_build_trigger_rows(self._default_bindings)):
-            photo = tk.PhotoImage(file=str(ensure_icon(icon_key)))
-            self._icon_refs.append(photo)
-            tk.Label(self._table_frame, image=photo, bg=BG).grid(row=row_index, column=0, padx=(2, 6), pady=2)
+            icon_path = ensure_icon(icon_key)
+            # H-14: ensure_icon() devuelve None si no pudo generar/cachear el
+            # icono (fallo de escritura) - la fila se muestra sin icono en vez
+            # de crashear la ventana de settings.
+            if icon_path is not None:
+                photo = tk.PhotoImage(file=str(icon_path))
+                self._icon_refs.append(photo)
+                tk.Label(self._table_frame, image=photo, bg=BG).grid(row=row_index, column=0, padx=(2, 6), pady=2)
 
             name_label = tk.Label(
                 self._table_frame, text=label, bg=BG, fg=FG, font=("Consolas", 10), anchor="w", width=40

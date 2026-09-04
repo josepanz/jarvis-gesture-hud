@@ -1566,6 +1566,33 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   `sys.frozen`/`sys._MEIPASS` mocked: the bundled path resolves under the fake
   `_MEIPASS`, the writable path never does and always lands under
   `~/.jarvis-gesture-hud`; in dev mode both still resolve to `assets/` as before.
+- **H-14/H-15/H-16/H-17: robustify gesture icon generation.** `gesture_icons.ensure_icon()`
+  had two related gaps: no error handling around `mkdir()`/`Image.save()` (a permissions
+  error or full disk during `JarvisApp.__init__` → `build_legend_entries()` crashed the
+  whole app on startup, over a purely cosmetic feature), and a non-atomic write
+  (`exists()` check then `save()` straight to the final path — an interrupted save left a
+  partial PNG at the final name, cached as "done" forever after). Fix: `ensure_icon()` now
+  writes to a `.tmp` sibling and `os.replace()`s it into place (same pattern as
+  `config_store.py`/`downloads.py`), and wraps the whole write in `try/except OSError`,
+  logging and returning `None` on failure instead of propagating. `None` means "no icon
+  for this legend/settings row, not a broken app" — `overlay.init_legend()` and
+  `settings_ui._refresh_bindings_table()` both skip the `tk.PhotoImage` for a `None`
+  entry and still render the text row. **H-16 (pre-generating/bundling icons at build
+  time) was deliberately NOT done**: it was already marked optional in the hardening
+  audit ("hacelo solo si H-13 quedó cerrado... ahorra el trabajo en el primer arranque"),
+  and H-13 already makes the writable icon cache survive across frozen-app restarts —
+  the only thing H-16 would still buy is skipping icon generation on the very first-ever
+  launch (a sub-second, one-time cost drawing ~30 small procedural glyphs), which doesn't
+  justify the added build-time complexity (spec-time icon generation + a bundled-vs-writable
+  lookup in `ensure_icon()`). **H-17**: `generate_all_icons()` stays — it's a real test
+  utility (`tests/test_gesture_icons.py` uses it to assert every `ICON_SPECS` key
+  produces a distinct file), not dead code, just not something the running app itself
+  calls (it fetches icons one at a time, on demand, per legend/settings row). Verified in
+  `tests/test_gesture_icons.py` (mocked `_render_icon().save` raising `OSError`: returns
+  `None`, no `.tmp` file left behind; an interrupted save never leaves a file at the final
+  name; a successful icon is reused without a second `_render_icon` call),
+  `tests/test_overlay.py` and `tests/test_settings_ui.py` (a `None` icon path renders the
+  row without crashing).
 
 ## Known limitations
 

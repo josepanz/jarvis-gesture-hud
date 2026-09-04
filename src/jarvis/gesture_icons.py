@@ -9,11 +9,15 @@ a requirements.txt) - se muestra despues via `tkinter.PhotoImage(file=...)`,
 sin necesitar `PIL.ImageTk`.
 """
 
+import logging
 import math
+import os
 
 from PIL import Image, ImageDraw, ImageFont
 
 from jarvis.paths import writable_assets_dir
+
+_logger = logging.getLogger("jarvis.gesture_icons")
 
 ICON_SIZE = 48
 
@@ -368,13 +372,34 @@ def _render_icon(spec):
 def ensure_icon(key):
     """Devuelve el Path del PNG cacheado para `key`, generandolo si es la
     primera vez (spec.md #3.1: "same lazy-generate-and-cache pattern as the
-    MediaPipe model download")."""
+    MediaPipe model download"). `None` si no se pudo generar ni cachear (H-14):
+    la leyenda es una ayuda visual, un fallo de escritura (permisos, disco
+    lleno, directorio de solo lectura) nunca puede impedir que la app arranque
+    - los llamadores (`legend.py`, `settings_ui.py`) degradan a una entrada
+    sin icono en ese caso."""
     path = writable_assets_dir() / "gesture_icons" / f"{key}.png"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        _render_icon(ICON_SPECS[key]).save(path)
+    if path.exists():
+        return path
+    # H-15: escritura atomica (temp en el mismo directorio + os.replace),
+    # mismo patron que config_store.py/downloads.py - dos procesos generando
+    # el mismo icono a la vez, o un `save()` interrumpido, no dejan nunca un
+    # PNG parcial ocupando el nombre final (que un `ensure_icon()` posterior
+    # cachearia para siempre via el chequeo `path.exists()` de arriba).
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _render_icon(ICON_SPECS[key]).save(tmp_path, format="PNG")
+        os.replace(tmp_path, path)
+    except OSError:
+        _logger.error("no se pudo generar/guardar el icono '%s' en %s", key, path, exc_info=True)
+        tmp_path.unlink(missing_ok=True)
+        return None
     return path
 
 
 def generate_all_icons():
+    """Genera y cachea los iconos de todas las keys conocidas. Sin uso fuera
+    de `tests/test_gesture_icons.py` (H-17): utilitaria de test/build, no del
+    codigo de la app en runtime (que solo pide un icono a la vez via
+    `ensure_icon`, on-demand, por entrada de leyenda)."""
     return {key: ensure_icon(key) for key in ICON_SPECS}

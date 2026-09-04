@@ -12,6 +12,7 @@ import sys
 import tkinter as tk
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -147,6 +148,14 @@ class SettingsWindowBindingsTableTests(_RealTkTestCase):
         first_window = self.window._window
         self.window.open()
         self.assertIs(self.window._window, first_window)
+
+    def test_a_missing_icon_does_not_crash_the_table_refresh(self):
+        # H-14: ensure_icon() puede devolver None (fallo de escritura) - la
+        # fila correspondiente debe construirse igual, sin icono.
+        with patch("jarvis.settings_ui.ensure_icon", return_value=None):
+            self.window._refresh_bindings_table()
+        self.assertEqual(len(self.window._row_vars), len(GESTURE_DEFAULT_BINDINGS))
+        self.assertEqual(self.window._icon_refs, [])
 
 
 class SettingsWindowShortcutAndMacroTests(_RealTkTestCase):

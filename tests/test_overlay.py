@@ -51,5 +51,21 @@ class GearIconTests(unittest.TestCase):
         self.assertGreater(win.winfo_y(), sh // 2)
 
 
+class LegendMissingIconTests(unittest.TestCase):
+    """H-14: gesture_icons.ensure_icon() puede devolver None (fallo de
+    escritura) - la leyenda debe mostrar esa fila sin icono, no crashear."""
+
+    def setUp(self):
+        self.overlay = ScreenOverlay()
+        self.addCleanup(self.overlay.close)
+
+    def test_none_icon_path_does_not_crash_and_still_shows_the_row(self):
+        entries = [("Gesto sin icono", "Accion", None)]
+        self.overlay.init_legend(entries, title="Test")
+        self.overlay.pump()
+        self.assertTrue(self.overlay._legend_window.winfo_exists())
+        self.assertEqual(self.overlay._legend_icons, [])
+
+
 if __name__ == "__main__":
     unittest.main()
