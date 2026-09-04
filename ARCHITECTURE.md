@@ -1485,6 +1485,17 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   design — documented in the module docstring rather than pretending it's
   stronger than it is; this is a robustness fix, not a defense against a
   realistic attacker in this offline, personal-use project.
+- **H-04 — a network failure on first startup no longer prints a raw
+  traceback.** Constructing `HandTracker`/`PoseTracker` in `JarvisApp.__init__`
+  can trigger the H-03 model download; if that fails (no connection, DNS,
+  etc.) the exception used to propagate straight out of `__init__` as an
+  unhandled traceback. Now wrapped in a try/except that logs an actionable
+  message via `logging.getLogger("jarvis.main")` (naming the model download
+  location from `paths.assets_dir()`) and raises `SystemExit(1)` — a clean
+  exit code instead of a stack trace. The `ScreenOverlay` doesn't exist yet
+  at this point in `__init__` (built further down), so console/`logging` is
+  the only channel available here; the HUD bubble path used elsewhere isn't
+  an option for this particular failure.
 
 ## Known limitations
 

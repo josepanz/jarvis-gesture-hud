@@ -130,6 +130,7 @@ from jarvis.legend import TITLE as LEGEND_TITLE
 from jarvis.legend import build_legend_entries
 from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
+from jarvis.paths import assets_dir
 from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
 from jarvis.settings_ui import SettingsWindow
 from jarvis.voice import VoiceJarvis
@@ -252,6 +253,8 @@ GESTURE_DEFAULT_BINDINGS = {
 # MouseMove dispara ~30-60 veces por segundo).
 _CONTINUOUS_COMMANDS = frozenset({"MouseMove"})
 
+_logger = logging.getLogger("jarvis.main")
+
 
 class JarvisApp:
     def __init__(self):
@@ -266,14 +269,27 @@ class JarvisApp:
         # ProfileManager.
         self.profiles = ProfileManager.from_dict(config_store.load_bindings())
 
-        self.tracker = HandTracker(
-            max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
-        )
-        # TASK-060c (Fase 3B): PoseTracker solo se construye si esta habilitado -
-        # deshabilitado por default (costo de inferencia medido, ver config.py),
-        # asi que en el caso default no se paga ni el costo de construccion ni
-        # la descarga del modelo de pose.
-        self.pose_tracker = PoseTracker() if config.POSE_HAND_OWNERSHIP_ENABLED else None
+        # H-04: un fallo de red en el primer arranque (descarga del modelo,
+        # ver H-03) no puede terminar en un traceback crudo. El overlay
+        # TODAVIA no existe aca (se construye mas abajo), asi que el unico
+        # canal posible para el mensaje es la consola/logging.
+        try:
+            self.tracker = HandTracker(
+                max_hands=config.MAX_HANDS, min_detection_confidence=0.7, min_tracking_confidence=0.7
+            )
+            # TASK-060c (Fase 3B): PoseTracker solo se construye si esta habilitado -
+            # deshabilitado por default (costo de inferencia medido, ver config.py),
+            # asi que en el caso default no se paga ni el costo de construccion ni
+            # la descarga del modelo de pose.
+            self.pose_tracker = PoseTracker() if config.POSE_HAND_OWNERSHIP_ENABLED else None
+        except Exception as exc:
+            _logger.error(
+                "no se pudo descargar/cargar el modelo de manos - revisá la conexión "
+                "a internet (el archivo va a %s): %s",
+                assets_dir(),
+                exc,
+            )
+            raise SystemExit(1) from exc
         self.screen_w, self.screen_h = pyautogui.size()
 
         self.gestures = GestureEngine(smoothing_enabled=self.profiles.get_setting("smoothing_enabled"))
