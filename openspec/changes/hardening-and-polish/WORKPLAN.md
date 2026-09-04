@@ -1500,7 +1500,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 - [x] H-01 macro malformada no tumba el loop · commit: b0ee9e4
 - [x] H-02 bindings.json corrupto no impide arrancar · commit: 2ffcec1
-- [ ] H-03 descarga atómica y verificada de modelos · commit: ______
+- [x] H-03 descarga atómica y verificada de modelos · commit: 75c12f3
 - [ ] H-04 mensaje accionable si falla la carga del modelo · commit: ______
 
 ### Workflow 2 — Dispatch y rebinding
