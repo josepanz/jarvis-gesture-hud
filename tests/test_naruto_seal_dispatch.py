@@ -241,5 +241,63 @@ class HoldRequiredGatingTests(_AppTestCase):
         self.assertTrue(self.mock_os.lock_session.called)  # recien ahora, con el hold cumplido
 
 
+class PinchUpRebindDragCleanupTests(_AppTestCase):
+    """H-09: soltar el drag es un invariante del sistema (sobre el evento
+    fisico), no una accion reasignable via el binding de PINCH_UP."""
+
+    def test_reassigning_pinch_up_still_releases_the_drag(self):
+        self.app.profiles.active.gesture_bindings["PINCH_UP"] = "SCREENSHOT"
+
+        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertTrue(self.app.is_dragging)
+
+        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)  # el invariante suelta el boton igual
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+        self.assertTrue(self.mock_os.take_screenshot.called)  # la accion reasignada tambien corre
+
+    def test_reassigning_pinch_down_never_starts_a_drag(self):
+        self.app.profiles.active.gesture_bindings["PINCH_DOWN"] = "SCREENSHOT"
+
+        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)
+        self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
+
+        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)  # nunca arranco, nada que soltar
+
+    def test_both_reassigned_is_dragging_never_ends_up_true(self):
+        self.app.profiles.active.gesture_bindings["PINCH_DOWN"] = "SCREENSHOT"
+        self.app.profiles.active.gesture_bindings["PINCH_UP"] = "VOLUME_UP"
+
+        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)
+        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)
+
+    def test_no_regression_unbound_pinch_cycle_behaves_as_before(self):
+        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertTrue(self.app.is_dragging)
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+
+        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.assertFalse(self.app.is_dragging)
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+
+    def test_no_regression_keyboard_click_still_does_not_start_a_drag(self):
+        self.app.keyboard.visible = True
+        space_pt = None
+        for key, (x1, y1, x2, y2) in self.app.keyboard._key_rects():
+            if key == "SPACE":
+                space_pt = ((x1 + x2) // 2, (y1 + y2) // 2)
+        self.assertIsNotNone(space_pt)
+
+        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=space_pt, screen_xy=(500, 400))
+
+        self.mock_kb_pyautogui.press.assert_called_once_with("space")
+        self.assertFalse(self.app.is_dragging)
+        self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
+
+
 if __name__ == "__main__":
     unittest.main()

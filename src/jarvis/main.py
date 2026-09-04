@@ -674,7 +674,19 @@ class JarvisApp:
         tiene un default identity o tematico, asi que ese ultimo caso es
         puramente defensivo) y ejecuta: macro/atajo custom si el binding
         apunta a uno, si no `_dispatch()` con el mismo cam_xy/screen_xy que
-        recibio el gesto original (PINCH_DOWN/UP los siguen necesitando)."""
+        recibio el gesto original (PINCH_DOWN/UP los siguen necesitando).
+
+        H-09: soltar el boton del mouse al llegar un PINCH_UP fisico es un
+        invariante del sistema, no una accion reasignable - corre ANTES de
+        resolver el binding, sobre `event` (el gesto crudo), no sobre
+        `action_name`. Si la resolucion dependiera del binding, reasignar la
+        fila PINCH_UP a otra accion dejaba el boton del mouse apretado a
+        nivel de SO para siempre (el evento fisico de soltar el pinch nunca
+        entraba a la rama que lo suelta)."""
+        if event == "PINCH_UP" and self.is_dragging:
+            self.command_bus.dispatch(MouseButtonCommand(pressed=False))
+            self.is_dragging = False
+
         action_name = self.profiles.get_gesture_binding(event, global_bindings=GESTURE_DEFAULT_BINDINGS)
         if action_name is None:
             action_name = event
