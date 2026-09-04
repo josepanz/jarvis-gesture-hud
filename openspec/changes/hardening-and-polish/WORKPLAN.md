@@ -1520,7 +1520,7 @@ escribilo con lo que encontraste en vez de borrarla.
 ### Workflow 4 — Empaquetado y assets
 
 - [x] H-13 separar assets empaquetados de escribibles · commit: 40afcba
-- [ ] H-14/15/16/17 generación de iconos robusta y atómica · commit: ______
+- [x] H-14/15/16/17 generación de iconos robusta y atómica · commit: a5a2dcc (H-16 evaluada y descartada: opcional, H-13 ya resuelve la perdida de cache entre arranques)
 
 ### Workflow 5 — CI/CD, dependencias y limpieza
 
