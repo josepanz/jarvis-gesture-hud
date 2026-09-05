@@ -1544,7 +1544,7 @@ escribilo con lo que encontraste en vez de borrarla.
 ### Workflow 8 — Gestos que faltan (después del 7)
 
 - [x] C-01 dwell-click opcional · commit: b534abf
-- [ ] C-02 doble click re-anclado (**requiere A-01 hecho**) · commit: ______
+- [x] C-02 doble click re-anclado (**requiere A-01 hecho**) · commit: 50d6a2c
 - [ ] C-03 swipe con puño (hacelo último: mayor riesgo de colisión) · commit: ______
 
 ### Workflow 6 — Cámara real (requiere a José)
