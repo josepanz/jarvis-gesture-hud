@@ -1,4 +1,6 @@
-"""KeyboardInputProvider (TASK-046). Adapts a raw key-code source (e.g.
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+KeyboardInputProvider (TASK-046). Adapts a raw key-code source (e.g.
 `cv2.waitKey(1) & 0xFF`, as jarvis.main.JarvisApp already uses) to the
 InputProvider contract.
 

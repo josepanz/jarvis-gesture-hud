@@ -1,4 +1,6 @@
-"""Context model (TASK-026, spec.md #23).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+Context model (TASK-026, spec.md #23).
 
 "Context SHALL contain: active_application, window_title, mode, profile,
 timestamp." Frozen, validated dataclass - same style as GestureEvent/Intent.

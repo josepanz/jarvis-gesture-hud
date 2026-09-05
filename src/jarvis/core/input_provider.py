@@ -1,4 +1,6 @@
-"""InputProvider (TASK-044, spec.md #37, design.md #21).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+InputProvider (TASK-044, spec.md #37, design.md #21).
 
 "The architecture SHALL introduce a conceptual interface: InputProvider.
 Implementations: GestureInputProvider, KeyboardInputProvider, VoiceInputProvider,

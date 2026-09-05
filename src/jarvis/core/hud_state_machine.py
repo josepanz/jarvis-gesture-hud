@@ -1,4 +1,6 @@
-"""HUDStateMachine (TASK-029, spec.md #31, design.md #17).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+HUDStateMachine (TASK-029, spec.md #31, design.md #17).
 
 States per spec.md #31: IDLE, TRACKING, GESTURE_DETECTED, CONFIRMING, EXECUTING,
 SUCCESS, ERROR, PAUSED (`LISTENING` is explicitly future voice support, spec.md

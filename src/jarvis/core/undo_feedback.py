@@ -1,4 +1,6 @@
-"""Undo feedback rendering (TASK-043, tasks.md: "HUD SHALL display: UNDO,
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+Undo feedback rendering (TASK-043, tasks.md: "HUD SHALL display: UNDO,
 command name, result").
 
 Rendering counterpart, same style as PHASE 7/8's hud_feedback.py / debug_telemetry.py

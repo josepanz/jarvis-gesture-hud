@@ -1594,6 +1594,40 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   `tests/test_overlay.py` and `tests/test_settings_ui.py` (a `None` icon path renders the
   row without crashing).
 
+## Dormant / PoC modules
+
+`src/jarvis/core/` has more modules than the live pipeline imports — most were built to
+tick off an OpenSpec checklist item whose `spec.md` assumed a different architecture (a
+classifier emitting several candidate gestures with per-frame confidence; `GestureEngine`
+is a boolean/threshold detector). Audited by Opus (2026-09-04, `hardening-and-polish`
+WORKPLAN.md §9): a module gets wired only when production code had already reimplemented
+its idea by hand — that's the signal the abstraction was actually needed. Everything else
+stays a declared, tested proof of concept instead of ambiguous dead-looking code.
+
+Pinned by `tests/test_poc_modules.py`: every module below carries a one-line
+`PoC / no cableado (...)` marker in its docstring, and the test fails the moment one is
+imported from outside `core/` (or from another non-PoC `core/` module) without this table
+being updated first — `grep -rn "PoC / no cableado" src/` is the fast way to check "what's
+actually live" without re-deriving it from imports by hand.
+
+| Module | Decision | Why |
+|---|---|---|
+| `context.py` | PoC | `resolve_contextual_intent()` (see below) takes plain strings, not a `Context` — building the dataclass would be ceremony with no consumer, the same anti-pattern already rejected for `Intent` (see Decisions). |
+| `gesture_state_machine.py`, `conflict_resolver.py` | PoC | Assume a classifier producing candidates + confidence per frame that doesn't exist and isn't planned — no real input to consume. |
+| `input_provider.py` + `gesture_input_provider.py`/`keyboard_input_provider.py`/`voice_input_provider.py` | PoC | Abstraction for a camera-loop rewrite nobody asked for. The real convergence (camera/keyboard/voice → the same action) is already achieved via `Command`/`CommandBus`. |
+| `intent_resolution.py` | PoC | Duplicates the action→`Command` mapping `main.py._dispatch()` already does and that works. |
+| `hud_state_machine.py` | PoC | A second HUD state model; the simple one (`overlay.py`/`legend.py`) is the one actually running. Two models coexisting is worse than one. |
+| `undo_feedback.py` | PoC (superseded) | `main.py._trigger_undo()` already does this better: Spanish labels via an overlay bubble, vs. this module's `"UNDO VolumeUp: OK"` (English, drawn on the camera frame). Wiring it would be a UX regression. |
+
+Wired despite once being in this same "dormant" bucket (same audit, §9): `cooldown.py`
+(A-01, `GestureEngine.cooldowns`), `debounce.py` (A-02, `GestureEngine._pinch_debouncers`
++ `MissToleranceCounter`), and `contextual_bindings.py` (A-03, consumed by
+`main.py._dispatch_bound_event()`) — in each case production code had already reimplemented
+the same idea by hand, which is exactly the signal the table above treats as "not wired."
+`double_click.py`/`swipe.py`/`dwell.py` are a separate, non-PoC category: WORKPLAN.md §10
+schedules them to be wired (workflow 8), so they aren't in the pinned set above and don't
+carry the marker.
+
 ## Known limitations
 
 - **Click-through is only guaranteed on Windows.** On macOS/Linux, the legend and bubble

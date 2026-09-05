@@ -1,4 +1,6 @@
-"""VoiceInputProvider (TASK-047): interface only, per tasks.md: "Create only the
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+VoiceInputProvider (TASK-047): interface only, per tasks.md: "Create only the
 interface. Do NOT implement STT yet."
 
 Matches this project's standing decision (ROADMAP.md / ARCHITECTURE.md "Future

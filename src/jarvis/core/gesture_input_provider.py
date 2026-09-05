@@ -1,4 +1,6 @@
-"""GestureInputProvider (TASK-045). Adapts the EXISTING jarvis.hand_tracker.HandTracker
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+GestureInputProvider (TASK-045). Adapts the EXISTING jarvis.hand_tracker.HandTracker
 + jarvis.gestures.GestureEngine (both untouched) to the InputProvider contract -
 does not change their behavior at all, just wraps their output as GestureEvent
 instances.
