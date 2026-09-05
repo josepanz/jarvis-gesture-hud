@@ -826,6 +826,52 @@ class ClickCooldownIndependenceTests(unittest.TestCase):
         self.assertIn("PINCH_DOWN", events)
 
 
+def index_and_middle_concurrent_pinch_hand(cx=0.5, cy=0.5):
+    """A-02 (WORKPLAN.md §9) regression fixture: index AND middle both under
+    their OWN pinch threshold in the same frame - index closer, so it wins
+    pinch_winner every frame while middle keeps accruing its own confirm streak
+    "in the background." Ring/pinky pushed far away so only these two compete."""
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.002, cy, 0)  # index: closest, wins pinch_winner
+    pts[6] = Landmark(cx + 0.05, cy, 0)
+    pts[12] = Landmark(cx + 0.005, cy, 0)  # middle: also under threshold, but farther
+    pts[10] = Landmark(cx + 0.05, cy, 0)
+    pts[16] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[14] = Landmark(cx + 0.15, cy - 0.15, 0)
+    pts[20] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[18] = Landmark(cx + 0.15, cy - 0.15, 0)
+    return pts
+
+
+class PinchDebouncerIndependenceTests(unittest.TestCase):
+    """A-02 (WORKPLAN.md §9): the pinch-family confirm streak must track EACH
+    finger independently. A single ConsecutiveFrameDebouncer instance shared
+    across all 4 fingers (instead of one instance per finger) would see a
+    different "key" every time the candidate loop moves to the next finger
+    WITHIN THE SAME FRAME and reset the shared streak on every iteration -
+    nothing would ever confirm. This proves progress genuinely accrues per
+    finger, independently of which one is currently winning pinch_winner."""
+
+    def test_middle_keeps_confirming_while_index_is_winning(self):
+        engine = GestureEngine()
+        pts = index_and_middle_concurrent_pinch_hand()
+        # Frame 1: both under their own threshold, neither confirmed yet
+        # (PINCH_CONFIRM_FRAMES=2).
+        _, _, events1 = process(engine, pts)
+        self.assertEqual(events1, [])
+        # Frame 2: both confirmed now, but index is closer and wins - only
+        # PINCH_DOWN fires. Middle's own streak reached the confirm threshold
+        # too, it just isn't the winner this frame.
+        _, _, events2 = process(engine, pts)
+        self.assertEqual(events2, ["PINCH_DOWN"])
+        # Frame 3: index releases, middle is now the only active candidate.
+        # RIGHT_CLICK fires on this VERY frame, with no extra warmup - proof
+        # middle's confirm streak was never reset by index's activity.
+        _, _, events3 = process(engine, right_click_hand())
+        self.assertIn("RIGHT_CLICK", events3)
+
+
 def two_hand_process(engine, primary_pts, other_pts):
     """primary_pts listed first so _pick_primary picks it on a cold-start
     engine (no established _primary_pos yet)."""

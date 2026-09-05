@@ -22,6 +22,7 @@ import time
 
 from jarvis import config
 from jarvis.core.cooldown import CooldownRegistry
+from jarvis.core.debounce import ConsecutiveFrameDebouncer, MissToleranceCounter
 from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
@@ -401,11 +402,16 @@ class GestureEngine:
             clock=time.time,
         )
 
-        # Cuantos frames seguidos lleva cada dedo por debajo de su umbral de pinch -
-        # confirmado (config.PINCH_CONFIRM_FRAMES) recien entra a competir por
-        # pinch_winner. Absorbe el ruido de un solo frame (mano relajada moviendose
-        # cerca del umbral, medido en camara real - ver config.py).
-        self._pinch_streak = {"index": 0, "middle": 0, "ring": 0, "pinky": 0}
+        # TASK: A-02 (WORKPLAN.md §9) - una instancia POR DEDO, no una compartida:
+        # ConsecutiveFrameDebouncer.observe() resetea la racha cuando cambia la
+        # clave observada, asi que un solo debouncer para los 4 dedos haria que se
+        # pisen entre si. confirma tras config.PINCH_CONFIRM_FRAMES frames seguidos
+        # bajo el umbral - absorbe el ruido de un solo frame (mano relajada
+        # moviendose cerca del umbral, medido en camara real - ver config.py).
+        self._pinch_debouncers = {
+            name: ConsecutiveFrameDebouncer(config.PINCH_CONFIRM_FRAMES)
+            for name in ("index", "middle", "ring", "pinky")
+        }
 
         self.pause_hold_start = None
         self.close_hold_start = None
@@ -419,11 +425,13 @@ class GestureEngine:
 
         self._naruto_hold_seal = None  # TASK-062: que sello se esta sosteniendo ahora (o None)
         self._naruto_hold_start = None
-        self._naruto_miss_streak = 0  # frames seguidos sin match mientras se sostenia un sello
+        # A-02: tolerancia de fallos - sobrevive NARUTO_SEAL_MISS_TOLERANCE frames
+        # seguidos de parpadeo de clasificacion sin tirar el hold en curso.
+        self._naruto_miss_tolerance = MissToleranceCounter(config.NARUTO_SEAL_MISS_TOLERANCE)
 
         self._twohand_seal_hold_name = None  # TASK-064/065: sello de 2 manos sostenido ahora (o None)
         self._twohand_seal_hold_start = None
-        self._twohand_seal_miss_streak = 0
+        self._twohand_seal_miss_tolerance = MissToleranceCounter(config.NARUTO_SEAL_MISS_TOLERANCE)
 
         # TASK-069 (Fase 6): snap de Sukuna - primer uso de ImpulseDetector,
         # alimentado con d_thumb_middle SIN el gate de pinch_winner (necesita
@@ -498,10 +506,11 @@ class GestureEngine:
         self.prev_zoom_y = None
         self.prev_pinky_y = None
         self.lock_start_time = None
-        self._pinch_streak = {"index": 0, "middle": 0, "ring": 0, "pinky": 0}
+        for _debouncer in self._pinch_debouncers.values():
+            _debouncer.reset()
         self._naruto_hold_seal = None
         self._naruto_hold_start = None
-        self._naruto_miss_streak = 0
+        self._naruto_miss_tolerance.reset()
         self._korean_heart_hold_start = None
 
     def _process_two_hand_gestures(self, hands, w, h, now):
@@ -528,7 +537,7 @@ class GestureEngine:
             self.meta_consumed = False
             self._twohand_seal_hold_name = None
             self._twohand_seal_hold_start = None
-            self._twohand_seal_miss_streak = 0
+            self._twohand_seal_miss_tolerance.reset()
             return events, False, False, False
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
@@ -655,13 +664,11 @@ class GestureEngine:
             elif now - self._twohand_seal_hold_start > config.NARUTO_TWOHAND_HOLD_SECONDS:
                 events.append(_twohand_seal)
                 self._twohand_seal_hold_start = None
-            self._twohand_seal_miss_streak = 0
+            self._twohand_seal_miss_tolerance.observe(True)
         elif self._twohand_seal_hold_name is not None:
-            self._twohand_seal_miss_streak += 1
-            if self._twohand_seal_miss_streak > config.NARUTO_SEAL_MISS_TOLERANCE:
+            if not self._twohand_seal_miss_tolerance.observe(False):
                 self._twohand_seal_hold_name = None
                 self._twohand_seal_hold_start = None
-                self._twohand_seal_miss_streak = 0
 
         # CLAP se emite recien aca, una vez conocida la jerarquia completa de
         # gestos de 2 manos (Naruto/JJK/shaka/puños/pinch-zoom ya excluidos -
@@ -756,15 +763,12 @@ class GestureEngine:
         # umbral no alcanza - un pinch recien "confirma" tras PINCH_CONFIRM_FRAMES
         # frames seguidos, para no reaccionar al ruido de la mano relajada pasando
         # cerca del umbral en un movimiento normal.
-        for _name, _dist, _threshold in _pinch_candidates:
-            if _dist < _threshold:
-                self._pinch_streak[_name] = min(self._pinch_streak[_name] + 1, config.PINCH_CONFIRM_FRAMES)
-            else:
-                self._pinch_streak[_name] = 0
+        _pinch_confirmed = {
+            _name: self._pinch_debouncers[_name].observe(_name if _dist < _threshold else None)
+            for _name, _dist, _threshold in _pinch_candidates
+        }
         _active_pinches = [
-            (name, dist)
-            for name, dist, threshold in _pinch_candidates
-            if dist < threshold and self._pinch_streak[name] >= config.PINCH_CONFIRM_FRAMES
+            (name, dist) for name, dist, threshold in _pinch_candidates if dist < threshold and _pinch_confirmed[name]
         ]
         pinch_winner = min(_active_pinches, key=lambda p: p[1])[0] if _active_pinches else None
 
@@ -925,13 +929,11 @@ class GestureEngine:
             elif now - self._naruto_hold_start > config.NARUTO_SEAL_HOLD_SECONDS:
                 events.append(_naruto_seal)
                 self._naruto_hold_start = None
-            self._naruto_miss_streak = 0
+            self._naruto_miss_tolerance.observe(True)
         elif self._naruto_hold_seal is not None:
-            self._naruto_miss_streak += 1
-            if self._naruto_miss_streak > config.NARUTO_SEAL_MISS_TOLERANCE:
+            if not self._naruto_miss_tolerance.observe(False):
                 self._naruto_hold_seal = None
                 self._naruto_hold_start = None
-                self._naruto_miss_streak = 0
 
         # TASK-072 (Fase 7): Korean finger heart. Pulgar cerca del PRIMER
         # nudillo del indice (landmark 6), NO de la punta (eso ya es
