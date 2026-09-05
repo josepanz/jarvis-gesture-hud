@@ -48,7 +48,7 @@ class Profile:
     # TASK-075 (Fase 8, design.md §5.2): {nombre_de_atajo: "ctrl+alt+t"} y
     # {"MACRO:<nombre>": [pasos]} - un gesture_bindings[event] puede apuntar
     # a una clave de cualquiera de los 2 (ademas de al vocabulario fijo de
-    # VALID_ACTIONS), resuelto en main.py._dispatch_gesture_event().
+    # VALID_ACTIONS), resuelto en main.py._dispatch_bound_event().
     custom_shortcuts: dict = field(default_factory=dict)
     macros: dict = field(default_factory=dict)
 

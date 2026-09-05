@@ -109,7 +109,7 @@ Camera (640x480) -> MediaPipe HandLandmarker -> EMA filter -> GestureEngine -> e
 ### `src/jarvis/core/` — OpenSpec foundation (PHASE 1)
 
 - **`events.py`** — `GestureEvent`: frozen, validated dataclass per spec.md #2.1 (`gesture_type`, `hand`, `confidence` in [0,1], `position`, `velocity`, `duration_ms`, `timestamp`, `source`, `state` restricted to the 8 documented values, `metadata`, auto-generated `id`).
-- **`intents.py`** — `Intent`: frozen, validated dataclass per spec.md #2.2 (`name`, `source`, `confidence`, `timestamp`, `context`, `parameters`, `metadata`). Built and tested, but **not constructed anywhere in the live dispatch path yet** — see Decisions below for why.
+- **`intents.py`** — `Intent`: frozen, validated dataclass per spec.md #2.2 (`name`, `source`, `confidence`, `timestamp`, `context`, `parameters`, `metadata`). Built and tested; **constructed and dispatched on the voice path** (`VoiceIntentResolver.resolve()`/`LLMIntentResolver.resolve()`, Phase 14) — the camera/gesture path still uses `GestureEvent` instead, not `Intent` — see Decisions below for why.
 - **`commands.py`** — `Command` (ABC: `metadata` property, `can_execute()`, `execute()`, optional `undo()`/`redo()`), `CommandMetadata` (name + safety level, one of `SAFE`/`CONFIRM_REQUIRED`/`HOLD_REQUIRED`/`DESTRUCTIVE`), `CommandResult` (`success`, `status` restricted to `EXECUTED`/`REJECTED`/`ERROR` with cross-field consistency validation, `message`, `duration_ms`, `error`, `metadata`, with `.ok()`/`.rejected()`/`.failed()` factories).
 - **`command_bus.py`** — `CommandBus.dispatch(command) -> CommandResult`: validate -> reject `DESTRUCTIVE` outright (spec.md #27) -> `can_execute()` -> `execute()` -> result, every step guarded so a bad command can never crash the caller. Logs via stdlib `logging`; fills in `duration_ms` if the command didn't report one; optional `on_result(command, result)` hook for feedback/telemetry, itself exception-guarded.
 - **`feedback.py`** — `FeedbackManager`: adapter over the *existing* `VoiceJarvis`/`ScreenOverlay` (doesn't reimplement TTS or the HUD), channels `hud`/`tts`/`sound`/`silent` per spec.md #30, per-channel enable/disable, never raises.
@@ -308,10 +308,11 @@ budgets, so the answer is no.
 ## Development
 
 - **Run the tests**: `python -m unittest discover -s tests -v` (stdlib `unittest`,
-  zero new test dependencies, 422 tests, ~0.8s total including the handful that
-  construct a real `HandLandmarker`). One file is
-  deliberately excluded from discovery — `tests/manual_main_integration_check.py`
-  (constructs a real `VoiceJarvis`/`ScreenOverlay`) — run it directly:
+  zero new test dependencies, 724 tests, ~16s total including the handful that
+  construct a real `HandLandmarker`). Files matching `tests/manual_*.py` are
+  deliberately excluded from discovery — e.g. `tests/manual_main_integration_check.py`
+  (constructs a real `VoiceJarvis`/`ScreenOverlay`) and
+  `tests/manual_live_integration_check.py` — run them directly:
   `python tests/manual_main_integration_check.py`.
 - **Adding a new OpenSpec task's module**: follow the pattern established since
   PHASE 1 — a frozen, validated `@dataclass` for data models (see
@@ -325,8 +326,11 @@ budgets, so the answer is no.
 - **Before calling a task done**: compile (`python -m py_compile ...`), run the
   full suite, re-run the one-line `GestureEngine` regression smoke check that's
   been used since PHASE 2 (construct a flat-hand fixture, confirm
-  `screen_xy == (336, 189)` and `events == ["PINCH_DOWN"]`), and boot the real app
-  briefly (`python run.py`, no hand in frame, confirm no traceback in the log).
+  `screen_xy == (240, 135)` — the current `EMA_ALPHA` — and `events == []` on a
+  single call; a pinch only confirms after `PINCH_CONFIRM_FRAMES` consecutive
+  frames (TASK-055/1.5, refactored onto `ConsecutiveFrameDebouncer` by A-02),
+  see `tests/test_gesture_engine_regression.py`), and boot the real app briefly
+  (`python run.py`, no hand in frame, confirm no traceback in the log).
 - **OpenSpec docs**: `openspec/changes/multimodal-interaction-core/{proposal,spec,
   design,tasks,apply}.md`. `tasks.md` is the live checklist — check boxes off as
   work lands, and where the source doc gave no acceptance criteria, add a short,
@@ -439,16 +443,27 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   condition on whichever hand `_pick_primary` treated as active, firing `LOCK_SESSION`
   in the same frame as `CLOSE_APP`. Fixed by suppressing the single-hand lock check while
   `both_shaka` is true — caught via synthetic-landmark unit testing, not observed live.
-- **`GestureEvent` is constructed for the migrated discrete gestures; `Intent` is not
-  constructed anywhere yet, despite TASK-006's flow diagram naming both.** Without a
-  real IntentEngine (not a foundation task — no task creates one) to consume it, an
-  `Intent` built at each of the 11 dispatch sites would be created and immediately
-  discarded, which is ceremony without function and contradicts "Implementation MUST
-  be minimal." The `gesture_type -> Command` mapping in `main.py._dispatch_migrated()`
-  *is* the intent-resolution logic today, just not reified as a separate object.
-  Reconsider once a real `IntentEngine`/`ContextEngine` exists to read `Intent.context`
-  meaningfully (Phase 6) — at that point promoting this to real `Intent` construction
-  is a small, mechanical change.
+- **`GestureEvent` is constructed for the migrated discrete gestures; `Intent` was not
+  constructed anywhere for a long stretch of this project's history, despite TASK-006's
+  flow diagram naming both — that gap has since closed on the voice path (H-25,
+  WORKPLAN.md §7, `hardening-and-polish`: this doc had gone stale after Phase 14 wired
+  voice control in).** Without a real IntentEngine (not a foundation task — no task
+  creates one) to consume it, an `Intent` built at each of the 11 *gesture* dispatch
+  sites would be created and immediately discarded, which is ceremony without function
+  and contradicts "Implementation MUST be minimal" — the `gesture_type -> Command`
+  mapping in `main.py._dispatch_migrated()`/`_dispatch_bound_event()` *is* the
+  intent-resolution logic for gestures today, just not reified as a separate object,
+  and that reasoning still holds for the camera path. The voice path is a genuine
+  exception, and predates neither the reasoning above nor a real `IntentEngine`:
+  `VoiceIntentResolver.resolve()` and `LLMIntentResolver.resolve()` both build and
+  return a real `Intent` (`core/voice_intent_resolver.py`, `llm_intent.py`), and
+  `main.py._handle_voice_result()`/`_poll_llm_intent_results()` read `intent.name`
+  straight into `_dispatch_voice_action()` → real dispatch — because voice already had
+  a natural place to attach `Intent.confidence`/`.source` that gesture events don't
+  (each phrase/utterance genuinely carries its own confidence and free-form parameters,
+  unlike a boolean-threshold gesture match), so it didn't need to wait for a full
+  IntentEngine to earn its construction. Camera-path promotion is still deferred to
+  a real `IntentEngine`/`ContextEngine` reading `Intent.context` meaningfully.
 - **Continuous mouse movement skips `GestureEvent` entirely and goes straight to
   `MouseMoveCommand`**, per spec.md #15 ("Continuous signals MUST NOT be forced
   through the same execution model as discrete gestures"). Measured overhead of the
