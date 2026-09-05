@@ -21,6 +21,7 @@ import math
 import time
 
 from jarvis import config
+from jarvis.core.cooldown import CooldownRegistry
 from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
@@ -29,6 +30,16 @@ META_ACTIONS = {
     3: "LEGEND_ALPHA_UP",
     4: "LEGEND_ALPHA_DOWN",
 }
+
+# TASK: A-01 (WORKPLAN.md §9) - nombres de accion para CooldownRegistry. Constantes,
+# no strings sueltos en cada sitio de uso: un typo en un string literal desactivaria
+# el cooldown en silencio (CooldownRegistry.try_fire de una accion no registrada
+# nunca bloquea).
+COOLDOWN_CLICK = "click"
+COOLDOWN_RIGHT_CLICK = "right_click"
+COOLDOWN_SCREENSHOT = "screenshot"
+COOLDOWN_KEYBOARD_TOGGLE = "keyboard_toggle"
+COOLDOWN_SILENCE = "silence"
 
 
 def _interp(value, in_min, in_max, out_min, out_max):
@@ -373,11 +384,22 @@ class GestureEngine:
         self.prev_zoom_y = None
         self.prev_pinky_y = None
         self.lock_start_time = None
-        self.last_click_time = 0.0
-        self.last_right_click_time = 0.0
-        self.last_screenshot_time = 0.0
-        self.last_toggle_time = 0.0
-        self.last_silence_time = 0.0
+        # TASK: A-01 (WORKPLAN.md §9) - antes 5 campos `last_*_time` ad hoc, uno por
+        # accion, cada uno comparado a mano contra su propia constante *_COOLDOWN de
+        # config.py. clock=time.time porque GestureEngine entero corre sobre
+        # time.time() (el `now` de process()), no time.monotonic (default de
+        # CooldownRegistry) - preservar esa semantica exacta es lo que mantiene los
+        # tests que manipulan el tiempo funcionando igual.
+        self.cooldowns = CooldownRegistry(
+            {
+                COOLDOWN_CLICK: config.CLICK_COOLDOWN,
+                COOLDOWN_RIGHT_CLICK: config.RIGHT_CLICK_COOLDOWN,
+                COOLDOWN_SCREENSHOT: config.SCREENSHOT_COOLDOWN,
+                COOLDOWN_KEYBOARD_TOGGLE: config.KEYBOARD_TOGGLE_COOLDOWN,
+                COOLDOWN_SILENCE: config.SILENCE_COOLDOWN,
+            },
+            clock=time.time,
+        )
 
         # Cuantos frames seguidos lleva cada dedo por debajo de su umbral de pinch -
         # confirmado (config.PINCH_CONFIRM_FRAMES) recien entra a competir por
@@ -764,20 +786,17 @@ class GestureEngine:
         # TASK-055b: suprimidos mientras la otra mano esta en un gesto de 2 manos -
         # antes corrian igual sobre la mano "primaria" sin importar la otra mano.
         if not two_hand_active and fingers_extended and d_thumb_pinky_mcp < config.SILENCE_TUCK_MAX:
-            if now - self.last_silence_time > config.SILENCE_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_SILENCE):
                 events.append("SILENCE")
-                self.last_silence_time = now
         elif not two_hand_active and fingers_extended and d_thumb_index > config.PALM_OPEN_MIN_SPREAD:
-            if now - self.last_toggle_time > config.KEYBOARD_TOGGLE_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_KEYBOARD_TOGGLE):
                 events.append("KEYBOARD_TOGGLE")
-                self.last_toggle_time = now
 
         # Screenshot: pulgar+anular pinch con índice y meñique recogidos
         screenshot_pinch = not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_SCREENSHOT
         if screenshot_pinch and index.y > pts[6].y and pinky.y > pts[18].y:
-            if now - self.last_screenshot_time > config.SCREENSHOT_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_SCREENSHOT):
                 events.append("SCREENSHOT")
-                self.last_screenshot_time = now
 
         # Zoom: pulgar+anular pinch con índice extendido, dirección por movimiento vertical del anular
         elif not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
@@ -951,14 +970,13 @@ class GestureEngine:
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click
         # de paso con la mano que termina siendo "primaria".
         is_pinching = pinch_winner == "index" and d_thumb_index < config.PINCH_CLICK and not suppress_pinch
-        if is_pinching and not self.was_pinching and now - self.last_click_time > config.CLICK_COOLDOWN:
+        if is_pinching and not self.was_pinching and self.cooldowns.try_fire(COOLDOWN_CLICK):
             events.append("PINCH_DOWN")
-            self.last_click_time = now
         elif not is_pinching and self.was_pinching:
             events.append("PINCH_UP")
         self.was_pinching = is_pinching
 
-        # Click derecho (edge-triggered). Cooldown propio (last_right_click_time) -
+        # Click derecho (edge-triggered). Cooldown propio (COOLDOWN_RIGHT_CLICK) -
         # antes compartia last_click_time con el click izquierdo, asi que un click
         # izquierdo reciente podia "tragarse" un click derecho genuino y no
         # ambiguo hecho poco despues (encontrado documentando TASK-055, arreglado
@@ -967,13 +985,8 @@ class GestureEngine:
         is_right_pinching = (
             not two_hand_active and pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
         )
-        if (
-            is_right_pinching
-            and not self.was_right_pinching
-            and now - self.last_right_click_time > config.RIGHT_CLICK_COOLDOWN
-        ):
+        if is_right_pinching and not self.was_right_pinching and self.cooldowns.try_fire(COOLDOWN_RIGHT_CLICK):
             events.append("RIGHT_CLICK")
-            self.last_right_click_time = now
         self.was_right_pinching = is_right_pinching
 
         return screen_xy, cam_xy, events
