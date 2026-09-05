@@ -1545,7 +1545,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 - [x] C-01 dwell-click opcional · commit: b534abf
 - [x] C-02 doble click re-anclado (**requiere A-01 hecho**) · commit: 50d6a2c
-- [ ] C-03 swipe con puño (hacelo último: mayor riesgo de colisión) · commit: ______
+- [x] C-03 swipe con puño (hacelo último: mayor riesgo de colisión) · commit: 5547406
 
 ### Workflow 6 — Cámara real (requiere a José)
 
