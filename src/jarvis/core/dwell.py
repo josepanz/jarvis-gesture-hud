@@ -5,9 +5,10 @@ configured duration. Default: dwell.duration_ms = 600. During dwell the HUD SHAL
 display progress. Movement beyond cancel_distance cancels dwell."
 
 Standalone, tested detector + a pure `draw_dwell_progress()` rendering helper (so
-"HUD progress displayed" has a real, working implementation) - NOT wired into
-main.py's camera loop. No action in this app is currently bound to a dwell gesture,
-so there is nothing concrete to trigger yet.
+"HUD progress displayed" has a real, working implementation). Wired into
+`GestureEngine` (C-01, WORKPLAN.md §10, `hardening-and-polish`) behind
+`config.DWELL_CLICK_ENABLED` (opt-in, off by default) - see gestures.py's
+`process()` for the gate.
 """
 
 import math

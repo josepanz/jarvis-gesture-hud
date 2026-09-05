@@ -53,6 +53,10 @@ ENTRIES = [
     # sin hold); corazón coreano exige config.KOREAN_HEART_HOLD_SECONDS.
     ("Aplauso (2 manos, acercar y separar)", "Teclado HUD", "clap"),
     ("Corazón coreano (pulgar+índice, sostenido)", "Captura", "korean_heart"),
+    # C-01 (WORKPLAN.md §10, workflow 8): dwell-click, apagado por defecto
+    # (config.DWELL_CLICK_ENABLED) - la fila existe igual para que sea
+    # reasignable desde el settings apenas se habilite.
+    ("Índice quieto sobre el objetivo (dwell)", "Click izquierdo", "dwell_click"),
 ]
 
 

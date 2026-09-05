@@ -49,7 +49,8 @@ _EXPECTED_TEXT = (
     "Sello Sukuna (chasquido pulgar-medio)         →  Captura\n"
     "Sello Megumi (índice+medio+anular)            →  Silenciar sistema\n"
     "Aplauso (2 manos, acercar y separar)          →  Teclado HUD\n"
-    "Corazón coreano (pulgar+índice, sostenido)    →  Captura"
+    "Corazón coreano (pulgar+índice, sostenido)    →  Captura\n"
+    "Índice quieto sobre el objetivo (dwell)       →  Click izquierdo"
 )
 
 

@@ -1593,6 +1593,36 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   name; a successful icon is reused without a second `_render_icon` call),
   `tests/test_overlay.py` and `tests/test_settings_ui.py` (a `None` icon path renders the
   row without crashing).
+- **C-01: dwell-click (WORKPLAN.md §10, workflow 8).** `jarvis.core.dwell.DwellDetector`
+  was built (TASK-021) and tested but never wired — no action mapped to it, so there was
+  nothing concrete to trigger. Wired now as a new `DWELL_CLICK` event: point the index
+  finger and hold it still (normalized-coordinate stillness, `cancel_distance`-gated,
+  same detector used as-is) to fire a full left click (`MouseButtonCommand(True)` then
+  `(False)` — a click, not a drag: dwell has no hand-shape of its own to "keep holding",
+  unlike `PINCH_DOWN`). **Opt-in, off by default** (`config.DWELL_CLICK_ENABLED = False`):
+  with no shape gate at all, an always-on dwell would click every time a relaxed hand
+  happened to sit still (e.g. resting on the desk) — its only real gate is stillness, so
+  it has to be a deliberate choice, not a default. **Duration raised from the module's
+  own default (600ms) to `config.DWELL_DURATION_MS = 900`** (reasoned, not camera-measured
+  yet — see V-08): `DwellDetector.DEFAULT_DURATION_MS` is *exactly*
+  `NARUTO_SEAL_HOLD_SECONDS * 1000`, so holding any one-hand seal for its own hold would
+  have completed a same-duration dwell in the same instant. Suspended (with an explicit
+  `reset()`, not just an ignored read — otherwise progress keeps accumulating underneath)
+  whenever another candidate is active: `pinch_winner is not None`, `two_hand_active`, or a
+  Naruto/JJK one-hand seal hold in progress (`self._naruto_hold_seal is not None`) — the
+  last one is the concrete fix for the exact collision above. App pause doesn't need its
+  own check here: `process()` already returns early and resets all one-hand state
+  (`_reset_single_hand_state()`, H-05) before this code ever runs. Verified in
+  `tests/test_gesture_engine_regression.py::DwellClickTests`: off by default never fires
+  (regression pin); on + still completes once; moving past `cancel_distance` resets
+  progress; holding `NARUTO_TORA` past its own hold never also completes dwell even past
+  `DWELL_DURATION_MS`; paused never completes it. `tests/test_naruto_seal_dispatch.py::DwellClickDispatchTests`
+  covers the dispatch side: a plain `DWELL_CLICK` fires a full click without starting a
+  drag, and one landing on the HUD virtual keyboard presses the key instead (same branching
+  `PINCH_DOWN` already does). The existing `draw_dwell_progress()` ring is wired into
+  `main.py.run()`'s frame loop (drawn at `cam_xy`, the camera-space point — not the
+  normalized coordinates the detector itself tracks internally) whenever the flag is on and
+  progress is non-zero.
 
 ## Dormant / PoC modules
 
@@ -1621,12 +1651,13 @@ actually live" without re-deriving it from imports by hand.
 
 Wired despite once being in this same "dormant" bucket (same audit, §9): `cooldown.py`
 (A-01, `GestureEngine.cooldowns`), `debounce.py` (A-02, `GestureEngine._pinch_debouncers`
-+ `MissToleranceCounter`), and `contextual_bindings.py` (A-03, consumed by
-`main.py._dispatch_bound_event()`) — in each case production code had already reimplemented
-the same idea by hand, which is exactly the signal the table above treats as "not wired."
-`double_click.py`/`swipe.py`/`dwell.py` are a separate, non-PoC category: WORKPLAN.md §10
-schedules them to be wired (workflow 8), so they aren't in the pinned set above and don't
-carry the marker.
++ `MissToleranceCounter`), `contextual_bindings.py` (A-03, consumed by
+`main.py._dispatch_bound_event()`), and now `dwell.py` (C-01, `GestureEngine._dwell_detector`,
+opt-in behind `config.DWELL_CLICK_ENABLED`) — in each case production code had already
+reimplemented the same idea by hand, or (dwell) WORKPLAN.md §10 scheduled the wiring
+outright. `double_click.py`/`swipe.py` are still the same non-PoC "scheduled" category:
+WORKPLAN.md §10 schedules them for workflow 8 too, so they aren't in the pinned set above
+and don't carry the marker.
 
 ## Known limitations
 

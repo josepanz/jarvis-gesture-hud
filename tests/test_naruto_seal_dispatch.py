@@ -322,5 +322,31 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
         self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
 
 
+class DwellClickDispatchTests(_AppTestCase):
+    """C-01 (WORKPLAN.md §10, workflow 8): DWELL_CLICK dispatch (no lo emite
+    GestureEngine aca - se prueba a nivel de _dispatch_bound_event, con el
+    evento ya resuelto, igual que el resto de este archivo)."""
+
+    def test_default_binding_fires_a_full_click_not_a_drag(self):
+        self.app._dispatch_bound_event("DWELL_CLICK", cam_xy=(10, 10), screen_xy=(500, 400))
+
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+        self.assertFalse(self.app.is_dragging)  # no arranca un drag - es un click completo
+
+    def test_dwell_click_on_the_hud_keyboard_presses_the_key_instead(self):
+        self.app.keyboard.visible = True
+        space_pt = None
+        for key, (x1, y1, x2, y2) in self.app.keyboard._key_rects():
+            if key == "SPACE":
+                space_pt = ((x1 + x2) // 2, (y1 + y2) // 2)
+        self.assertIsNotNone(space_pt)
+
+        self.app._dispatch_bound_event("DWELL_CLICK", cam_xy=space_pt, screen_xy=(500, 400))
+
+        self.mock_kb_pyautogui.press.assert_called_once_with("space")
+        self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
+
+
 if __name__ == "__main__":
     unittest.main()

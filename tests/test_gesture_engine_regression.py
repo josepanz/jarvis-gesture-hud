@@ -14,6 +14,7 @@ import time
 import unittest
 from collections import namedtuple
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -1811,6 +1812,83 @@ class HandLossStateResetTests(unittest.TestCase):
         engine.lock_start_time = time.time() - 2.0
         _, _, events = process(engine, shaka_hand())
         self.assertIn("LOCK_SESSION", events)
+
+
+def pointer_only_hand(cx=0.5, cy=0.5):
+    """flat() con el pulgar bien separado del indice: a diferencia de
+    flat() a secas (pellizca "por construccion", d_thumb_index=0 - ver
+    NarutoOneHandSealTests), esta jamas confirma un pinch aunque se procese
+    2+ veces seguidas, asi que sirve como mano neutral de verdad para
+    DwellClickTests (dwell no tiene forma propia, pero SI se suspende si
+    pinch_winner queda activo)."""
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx - 0.3, cy, 0)
+    return pts
+
+
+class DwellClickTests(unittest.TestCase):
+    """C-01 (WORKPLAN.md §10, workflow 8): dwell-click - apuntar y sostener
+    quieto, sin pinch. Opt-in (config.DWELL_CLICK_ENABLED, apagado por
+    defecto)."""
+
+    def test_disabled_by_default_never_fires(self):
+        # No-regresion: el estado por defecto es apagado, asi que toda la
+        # suite existente (que nunca prende el flag) tiene que seguir
+        # identica - incluso con el indice quieto el tiempo suficiente para
+        # completar el dwell si estuviera prendido.
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        process(engine, pts)
+        engine._dwell_detector._start_time = time.time() - 1.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("DWELL_CLICK", events)
+
+    def test_enabled_and_still_fires_once_on_completion(self):
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts)
+            engine._dwell_detector._start_time = time.time() - 1.0  # > DWELL_DURATION_MS (900ms)
+            _, _, events = process(engine, pts)
+            self.assertEqual(events, ["DWELL_CLICK"])
+            # despues de disparar, no vuelve a disparar sin moverse y volver
+            # a quedarse quieto - el reset() interno reinicia la cuenta.
+            _, _, events2 = process(engine, pts)
+            self.assertNotIn("DWELL_CLICK", events2)
+
+    def test_moving_past_cancel_distance_resets_progress(self):
+        engine = GestureEngine()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pointer_only_hand(0.5, 0.5))
+            engine._dwell_detector._start_time = time.time() - 1.0  # completaria si no se moviera
+            process(engine, pointer_only_hand(0.9, 0.9))  # se mueve mas alla de cancel_distance
+            self.assertEqual(engine.dwell_progress, 0.0)
+            _, _, events = process(engine, pointer_only_hand(0.9, 0.9))
+            self.assertNotIn("DWELL_CLICK", events)
+
+    def test_holding_a_seal_never_completes_dwell(self):
+        # Colision critica documentada: DwellDetector.DEFAULT_DURATION_MS
+        # (600ms) coincide EXACTAMENTE con NARUTO_SEAL_HOLD_SECONDS*1000 -
+        # sostener un sello no puede completar tambien el dwell.
+        engine = GestureEngine()
+        pts = naruto_tora_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            _, _, events = hold_naruto(engine, pts)
+            self.assertIn("NARUTO_TORA", events)
+            self.assertNotIn("DWELL_CLICK", events)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            _, _, events2 = process(engine, pts)
+            self.assertNotIn("DWELL_CLICK", events2)
+
+    def test_paused_never_completes_dwell(self):
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            engine.active = False
+            _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+            self.assertNotIn("DWELL_CLICK", events)
 
 
 if __name__ == "__main__":

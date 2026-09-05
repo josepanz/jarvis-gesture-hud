@@ -23,6 +23,7 @@ import time
 from jarvis import config
 from jarvis.core.cooldown import CooldownRegistry
 from jarvis.core.debounce import ConsecutiveFrameDebouncer, MissToleranceCounter
+from jarvis.core.dwell import DwellDetector
 from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
@@ -457,6 +458,14 @@ class GestureEngine:
 
         self._korean_heart_hold_start = None  # TASK-072: mismo mecanismo que LOCK_SESSION
 
+        # C-01 (WORKPLAN.md §10): dwell-click. clock=time.time (no el
+        # time.monotonic default de DwellDetector) por el mismo motivo que
+        # CooldownRegistry arriba - GestureEngine entero corre sobre
+        # time.time(), y los tests manipulan el reloj escribiendo directo
+        # sobre atributos internos (ver tests/test_gesture_engine_regression.py).
+        self._dwell_detector = DwellDetector(duration_ms=config.DWELL_DURATION_MS, clock=time.time)
+        self.dwell_progress = 0.0  # publico: main.py lo lee para dibujar draw_dwell_progress()
+
     @staticmethod
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
@@ -512,6 +521,8 @@ class GestureEngine:
         self._naruto_hold_start = None
         self._naruto_miss_tolerance.reset()
         self._korean_heart_hold_start = None
+        self._dwell_detector.reset()
+        self.dwell_progress = 0.0
 
     def _process_two_hand_gestures(self, hands, w, h, now):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
@@ -990,5 +1001,25 @@ class GestureEngine:
         if is_right_pinching and not self.was_right_pinching and self.cooldowns.try_fire(COOLDOWN_RIGHT_CLICK):
             events.append("RIGHT_CLICK")
         self.was_right_pinching = is_right_pinching
+
+        # C-01 (WORKPLAN.md §10): dwell-click - opt-in, sin forma de mano
+        # propia (opera sobre el indice normalizado, igual que el puntero).
+        # Suspendido (con reset() explicito, no solo ignorado - si no, el
+        # progreso sigue acumulando por debajo) mientras cualquier otro
+        # candidato este activo: un pinch, un hold de sello NARUTO_/JJK_ en
+        # curso, o un gesto de 2 manos. "La app en pausa" ya esta cubierto -
+        # ese caso ni siquiera llega aca (return temprano + _reset_single_hand_state()).
+        if config.DWELL_CLICK_ENABLED:
+            if pinch_winner is not None or two_hand_active or self._naruto_hold_seal is not None:
+                self._dwell_detector.reset()
+                self.dwell_progress = 0.0
+            else:
+                self.dwell_progress = self._dwell_detector.update(index.x, index.y)
+                if self.dwell_progress >= 1.0:
+                    events.append("DWELL_CLICK")
+                    self._dwell_detector.reset()
+                    self.dwell_progress = 0.0
+        else:
+            self.dwell_progress = 0.0
 
         return screen_xy, cam_xy, events

@@ -182,6 +182,11 @@ ICON_SPECS = {
         "pinch": ("thumb", "index"),
         "glyph": "heart",
     },
+    # C-01 (WORKPLAN.md §10, workflow 8): dwell-click. Misma forma que
+    # "pointer" (solo el indice extendido, sin pellizco) a proposito - el
+    # gesto en si no tiene forma propia, se distingue de "pointer" unicamente
+    # por el glyph de anillo (la misma metafora visual que draw_dwell_progress()).
+    "dwell_click": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "dwell_ring"},
 }
 
 
@@ -319,6 +324,14 @@ def _draw_heart(draw, box):
     draw.polygon([(cx - r * 2, y0 + r * 1.2), (cx + r * 2, y0 + r * 1.2), (cx, y1)], fill=_GLYPH_COLOR)
 
 
+def _draw_dwell_ring(draw, box):
+    # C-01: mismo lenguaje visual que draw_dwell_progress() (anillo de
+    # progreso) - un anillo estatico simple, sin "progreso" real (esto es un
+    # icono de referencia, no el HUD en vivo).
+    x0, y0, x1, y1 = box
+    draw.ellipse([x0 + 1, y0 + 1, x1 - 1, y1 - 1], outline=_GLYPH_COLOR, width=2)
+
+
 GLYPH_DRAWERS = {
     "arrow_up_down": _draw_arrow_up_down,
     "zoom": _draw_zoom,
@@ -331,6 +344,7 @@ GLYPH_DRAWERS = {
     "snap": _draw_snap,
     "clap_burst": _draw_clap_burst,
     "heart": _draw_heart,
+    "dwell_ring": _draw_dwell_ring,
 }
 
 _GLYPH_BOX = (ICON_SIZE - 15, 2, ICON_SIZE - 2, 15)  # esquina superior derecha

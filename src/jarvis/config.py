@@ -168,3 +168,16 @@ HUD_KEY_WIDTH = 52
 # TASK-057 (Fase 2): overlay toggleable de landmarks/cuadrante de mano.
 HAND_OVERLAY_PRIMARY_COLOR = (0, 255, 0)  # mano primaria (BGR, verde)
 HAND_OVERLAY_OTHER_COLOR = (120, 120, 120)  # cualquier otra mano detectada (BGR, gris)
+
+# C-01 (WORKPLAN.md §10, workflow 8): dwell-click - apuntar y sostener, sin
+# pinch. Apagado por defecto: DwellDetector no exige ninguna forma de mano
+# propia, asi que con esto siempre activo dejar la mano quieta (ej. apoyada
+# en el escritorio) clickearia sola - su unico gate real es la quietud.
+DWELL_CLICK_ENABLED = False
+# Mas largo que NARUTO_SEAL_HOLD_SECONDS*1000 (600ms) a proposito:
+# DwellDetector.DEFAULT_DURATION_MS (600) coincide EXACTAMENTE con ese hold -
+# sostener cualquier sello de 1 mano completaria tambien el dwell en el mismo
+# instante. Razonado, no medido en camara todavia (ver V-08): el numero final
+# tiene que ser comodo de completar a proposito e incomodo de completar sin
+# querer.
+DWELL_DURATION_MS = 900

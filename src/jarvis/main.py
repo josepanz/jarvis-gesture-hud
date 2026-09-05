@@ -116,6 +116,7 @@ from jarvis.core.confidence import ConfidenceFilter, format_confidence
 from jarvis.core.context_tracker import ForegroundApplicationTracker
 from jarvis.core.contextual_bindings import resolve_contextual_intent
 from jarvis.core.contextual_hud import ContextualHudRenderer
+from jarvis.core.dwell import draw_dwell_progress
 from jarvis.core.events import GestureEvent
 from jarvis.core.feedback import FeedbackManager
 from jarvis.core.gesture_metrics import GestureMetricsRecorder
@@ -172,6 +173,10 @@ _MIGRATED_GESTURES = frozenset(
         "VOLUME_DOWN",
         "SCREENSHOT",
         "LOCK_SESSION",
+        # C-01 (WORKPLAN.md §10, workflow 8): dwell-click - termina en un
+        # click real (Command/CommandBus), entra por el mismo camino migrado
+        # que PINCH_DOWN/UP.
+        "DWELL_CLICK",
     }
 )
 
@@ -230,6 +235,10 @@ GESTURE_DEFAULT_BINDINGS = {
     # nada a ESE camino cuando el default (identidad) esta vigente.
     "PINCH_DOWN": "PINCH_DOWN",
     "PINCH_UP": "PINCH_UP",
+    # C-01 (WORKPLAN.md §10, Fase 8/workflow 8): dwell-click, identidad por
+    # default como cualquier gesto "clasico" - reasignable desde el settings
+    # como el resto de esta lista.
+    "DWELL_CLICK": "DWELL_CLICK",
     "RIGHT_CLICK": "RIGHT_CLICK",
     "SCROLL_UP": "SCROLL_UP",
     "SCROLL_DOWN": "SCROLL_DOWN",
@@ -414,6 +423,16 @@ class JarvisApp:
             self.command_bus.dispatch(ScreenshotCommand())
         elif gesture_type == "LOCK_SESSION":
             self.command_bus.dispatch(LockSessionCommand())
+        elif gesture_type == "DWELL_CLICK":
+            # C-01: click completo (down+up), no un drag - dwell no tiene
+            # forma de mano propia para "seguir sosteniendo", asi que no
+            # arranca self.is_dragging como PINCH_DOWN.
+            key_action = self.keyboard.handle_click(cam_xy)
+            if key_action is not None:
+                self._dispatch_key_action(key_action)
+            else:
+                self.command_bus.dispatch(MouseButtonCommand(pressed=True))
+                self.command_bus.dispatch(MouseButtonCommand(pressed=False))
 
     def _dispatch_key_action(self, key_action):
         if key_action.kind == "layout":
@@ -780,6 +799,11 @@ class JarvisApp:
             if screen_xy:
                 self._dispatch_mouse_move(screen_xy)
                 self.keyboard.draw(frame, cam_xy)
+                # C-01: anillo de progreso del dwell - draw_dwell_progress()
+                # se dibuja con cam_xy (espacio de camara), no con las
+                # coordenadas normalizadas que usa el detector internamente.
+                if config.DWELL_CLICK_ENABLED and self.gestures.dwell_progress > 0:
+                    draw_dwell_progress(frame, cam_xy, self.gestures.dwell_progress)
 
             voice_result = self.voice_listener.poll_result()
             if voice_result is not None:
