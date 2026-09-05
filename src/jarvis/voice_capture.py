@@ -38,7 +38,7 @@ class VoiceListener:
         self._language = language
         self._model = None  # lazy-loaded on first transcription, not at construction
         self._recording = False
-        self._frames = []
+        self._frames = queue.Queue()
         self._stream = None
         self._results = queue.Queue()
 
@@ -55,13 +55,16 @@ class VoiceListener:
             return
         import sounddevice as sd
 
-        self._frames = []
+        self._frames = queue.Queue()
         self._recording = True
         self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", callback=self._on_audio)
         self._stream.start()
 
     def _on_audio(self, indata, frames, time_info, status):
-        self._frames.append(indata.copy())
+        """Runs on sounddevice's own callback thread. queue.Queue (not a plain
+        list) so this never races the main thread draining it in stop() -
+        same cross-thread mechanism this module already uses for _results."""
+        self._frames.put(indata.copy())
 
     def stop(self):
         """Stops recording and transcribes in a background thread so the caller
@@ -73,8 +76,13 @@ class VoiceListener:
         self._stream.stop()
         self._stream.close()
         self._stream = None
-        audio = np.concatenate(self._frames, axis=0).flatten() if self._frames else np.zeros(0, dtype="float32")
-        self._frames = []
+        frames = []
+        while True:
+            try:
+                frames.append(self._frames.get_nowait())
+            except queue.Empty:
+                break
+        audio = np.concatenate(frames, axis=0).flatten() if frames else np.zeros(0, dtype="float32")
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
 
     def _transcribe(self, audio):
