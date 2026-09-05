@@ -1,5 +1,5 @@
 """Tests for TASK-063 (Fase 4): dispatch de sellos Naruto de 1 mano a
-comandos reales, via `JarvisApp._dispatch_naruto_seal()`.
+comandos reales, via `JarvisApp._dispatch_bound_event()`.
 
 Misma tecnica de mocking que `tests/manual_main_integration_check.py`
 (cv2.VideoCapture/HandTracker/pyautogui/CrossPlatformOS mockeados) para poder
@@ -93,28 +93,28 @@ class _AppTestCase(unittest.TestCase):
 
 class DefaultBindingTests(_AppTestCase):
     def test_default_binding_dispatches_the_right_command(self):
-        self.app._dispatch_naruto_seal("NARUTO_TORA")  # default: SCREENSHOT
+        self.app._dispatch_bound_event("NARUTO_TORA")  # default: SCREENSHOT
         self.assertTrue(self.mock_os.take_screenshot.called)
 
     def test_twohand_seal_default_binding_dispatches_the_right_command(self):
-        # TASK-066 (Fase 5): mismo _dispatch_naruto_seal, sin importar si el
+        # TASK-066 (Fase 5): mismo _dispatch_bound_event, sin importar si el
         # evento vino de 1 o 2 manos (distingue solo por el prefijo NARUTO_).
-        self.app._dispatch_naruto_seal("NARUTO_KAI")  # default: CLOSE_APP
+        self.app._dispatch_bound_event("NARUTO_KAI")  # default: CLOSE_APP
         self.assertTrue(self.app.should_quit)
 
     def test_jjk_seal_default_binding_dispatches_the_right_command(self):
-        # TASK-070 (Fase 6): mismo _dispatch_naruto_seal, extendido al
+        # TASK-070 (Fase 6): mismo _dispatch_bound_event, extendido al
         # prefijo JJK_ en run() - la resolucion del binding en si nunca miro
         # el prefijo, asi que este test alcanza para cubrir los 3 sellos JJK.
-        self.app._dispatch_naruto_seal("JJK_GOJO_DOMAIN")  # default: RIGHT_CLICK
+        self.app._dispatch_bound_event("JJK_GOJO_DOMAIN")  # default: RIGHT_CLICK
         self.mock_mouse_pyautogui.rightClick.assert_called_once()
 
     def test_common_gesture_default_binding_dispatches_the_right_command(self):
         # TASK-073 (Fase 7): CLAP/KOREAN_HEART no llevan prefijo NARUTO_/JJK_
         # - run() ahora rutea por pertenencia a GESTURE_DEFAULT_BINDINGS, no
-        # por prefijo (ver comentario de _dispatch_naruto_seal), asi que
-        # _dispatch_naruto_seal en si los maneja identico.
-        self.app._dispatch_naruto_seal("KOREAN_HEART")  # default: SCREENSHOT
+        # por prefijo (ver comentario de _dispatch_bound_event), asi que
+        # _dispatch_bound_event en si los maneja identico.
+        self.app._dispatch_bound_event("KOREAN_HEART")  # default: SCREENSHOT
         self.assertTrue(self.mock_os.take_screenshot.called)
 
     def test_every_default_binding_is_a_known_dispatchable_action(self):
@@ -149,7 +149,7 @@ class ProfileOverrideTests(_AppTestCase):
         self.app.profiles.register(override)
         self.app.profiles.switch_to("custom")
 
-        self.app._dispatch_naruto_seal("NARUTO_TORA")
+        self.app._dispatch_bound_event("NARUTO_TORA")
 
         self.assertFalse(self.mock_os.take_screenshot.called)  # el default NO se uso
         self.assertTrue(self.mock_os.volume_up.called)  # gano el override
@@ -161,7 +161,7 @@ class ClassicGestureRebindTests(_AppTestCase):
     es reasignable, con identidad como default (spec.md #8.3)."""
 
     def test_an_unmodified_classic_gesture_behaves_exactly_as_before(self):
-        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.app._dispatch_bound_event("VOLUME_UP")
         self.assertTrue(self.mock_os.volume_up.called)
 
     def test_a_classic_gesture_can_be_reassigned_to_a_different_action(self):
@@ -169,7 +169,7 @@ class ClassicGestureRebindTests(_AppTestCase):
         self.app.profiles.register(override)
         self.app.profiles.switch_to("custom")
 
-        self.app._dispatch_naruto_seal("SCROLL_UP", cam_xy=(1, 1), screen_xy=(2, 2))
+        self.app._dispatch_bound_event("SCROLL_UP", cam_xy=(1, 1), screen_xy=(2, 2))
 
         self.assertTrue(self.mock_os.take_screenshot.called)
 
@@ -179,7 +179,7 @@ class MacroAndShortcutDispatchTests(_AppTestCase):
         self.app.profiles.active.gesture_bindings["NARUTO_TORA"] = "MY_SHORTCUT"
         self.app.profiles.active.custom_shortcuts["MY_SHORTCUT"] = "ctrl+alt+t"
 
-        self.app._dispatch_naruto_seal("NARUTO_TORA")
+        self.app._dispatch_bound_event("NARUTO_TORA")
 
         self.mock_macro_pyautogui.hotkey.assert_called_once_with("ctrl", "alt", "t")
         self.assertFalse(self.mock_os.take_screenshot.called)  # no cayo al default
@@ -191,7 +191,7 @@ class MacroAndShortcutDispatchTests(_AppTestCase):
             {"kind": "press-key", "value": "enter"},
         ]
 
-        self.app._dispatch_naruto_seal("NARUTO_TORA")
+        self.app._dispatch_bound_event("NARUTO_TORA")
 
         self.mock_kb_pyautogui.write.assert_called_once_with("hola")
         self.mock_kb_pyautogui.press.assert_called_once_with("enter")
@@ -202,7 +202,7 @@ class UnboundSealTests(_AppTestCase):
     def test_unbound_seal_is_a_safe_no_op(self):
         # Ningun seal real se llama asi - simula un evento sin binding ni de
         # perfil ni default.
-        self.app._dispatch_naruto_seal("NARUTO_DOES_NOT_EXIST")  # no debe lanzar
+        self.app._dispatch_bound_event("NARUTO_DOES_NOT_EXIST")  # no debe lanzar
         self.assertFalse(self.mock_os.take_screenshot.called)
         self.assertFalse(self.mock_os.lock_session.called)
         self.assertFalse(self.mock_os.volume_up.called)
@@ -229,7 +229,7 @@ class HoldRequiredGatingTests(_AppTestCase):
         _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
         for event in events:
             if event.startswith("NARUTO_"):
-                self.app._dispatch_naruto_seal(event)
+                self.app._dispatch_bound_event(event)
         self.assertFalse(self.mock_os.lock_session.called)  # todavia no se cumplio el hold
 
         engine._naruto_hold_start = time.time() - 1.0
@@ -237,7 +237,7 @@ class HoldRequiredGatingTests(_AppTestCase):
         self.assertIn("NARUTO_I", events)
         for event in events:
             if event.startswith("NARUTO_"):
-                self.app._dispatch_naruto_seal(event)
+                self.app._dispatch_bound_event(event)
         self.assertTrue(self.mock_os.lock_session.called)  # recien ahora, con el hold cumplido
 
 
@@ -248,10 +248,10 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
     def test_reassigning_pinch_up_still_releases_the_drag(self):
         self.app.profiles.active.gesture_bindings["PINCH_UP"] = "SCREENSHOT"
 
-        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertTrue(self.app.is_dragging)
 
-        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)  # el invariante suelta el boton igual
         self.mock_mouse_pyautogui.mouseUp.assert_called_once()
         self.assertTrue(self.mock_os.take_screenshot.called)  # la accion reasignada tambien corre
@@ -259,39 +259,39 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
     def test_reassigning_pinch_down_never_starts_a_drag(self):
         self.app.profiles.active.gesture_bindings["PINCH_DOWN"] = "SCREENSHOT"
 
-        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)
         self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
 
-        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)  # nunca arranco, nada que soltar
 
     def test_both_reassigned_is_dragging_never_ends_up_true(self):
         self.app.profiles.active.gesture_bindings["PINCH_DOWN"] = "SCREENSHOT"
         self.app.profiles.active.gesture_bindings["PINCH_UP"] = "VOLUME_UP"
 
-        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)
-        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)
 
     def test_no_regression_unbound_pinch_cycle_behaves_as_before(self):
-        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertTrue(self.app.is_dragging)
         self.mock_mouse_pyautogui.mouseDown.assert_called_once()
 
-        self.app._dispatch_naruto_seal("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_UP", cam_xy=(10, 10), screen_xy=(500, 400))
         self.assertFalse(self.app.is_dragging)
         self.mock_mouse_pyautogui.mouseUp.assert_called_once()
 
     def test_h11_redo_stack_is_invalidated_by_a_new_command(self):
         # H-11: ejecutar -> undo -> ejecutar OTRO (no relacionado) -> redo no
         # debe hacer nada (antes: re-ejecutaba el comando viejo deshecho).
-        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.app._dispatch_bound_event("VOLUME_UP")
         self.app._trigger_undo()
         self.assertTrue(self.app.undo_redo.can_redo())
 
-        self.app._dispatch_naruto_seal("NARUTO_UMA")  # default: ZOOM_IN, no relacionado
+        self.app._dispatch_bound_event("NARUTO_UMA")  # default: ZOOM_IN, no relacionado
 
         self.assertFalse(self.app.undo_redo.can_redo())
         self.mock_os.volume_up.reset_mock()
@@ -299,7 +299,7 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
         self.assertFalse(self.mock_os.volume_up.called)  # no revivio el VolumeUp viejo
 
     def test_h11_no_regression_undo_then_immediate_redo_still_works(self):
-        self.app._dispatch_naruto_seal("VOLUME_UP")
+        self.app._dispatch_bound_event("VOLUME_UP")
         self.app._trigger_undo()
         self.mock_os.volume_up.reset_mock()
 
@@ -315,7 +315,7 @@ class PinchUpRebindDragCleanupTests(_AppTestCase):
                 space_pt = ((x1 + x2) // 2, (y1 + y2) // 2)
         self.assertIsNotNone(space_pt)
 
-        self.app._dispatch_naruto_seal("PINCH_DOWN", cam_xy=space_pt, screen_xy=(500, 400))
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=space_pt, screen_xy=(500, 400))
 
         self.mock_kb_pyautogui.press.assert_called_once_with("space")
         self.assertFalse(self.app.is_dragging)

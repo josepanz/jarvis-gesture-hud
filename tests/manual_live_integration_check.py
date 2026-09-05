@@ -151,7 +151,7 @@ def main():
             _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
             for event in events:
                 if event.startswith("NARUTO_"):
-                    app._dispatch_naruto_seal(event)
+                    app._dispatch_bound_event(event)
             assert not mock_os.lock_session.called, "no debe disparar antes de cumplirse el hold"
 
             app.gestures._naruto_hold_start = time.time() - 1.0
@@ -159,7 +159,7 @@ def main():
             assert "NARUTO_I" in events
             for event in events:
                 if event.startswith("NARUTO_"):
-                    app._dispatch_naruto_seal(event)
+                    app._dispatch_bound_event(event)
             assert mock_os.lock_session.called, "NARUTO_I deberia disparar LockSession (binding por default)"
 
             # --- TASK-081 (Fase 8): settings screen de punta a punta -
@@ -191,7 +191,7 @@ def main():
                     assert temp_path.exists(), "el rebind deberia haber persistido de inmediato"
 
                     mock_os.reset_mock()
-                    app._dispatch_naruto_seal("NARUTO_TORA")
+                    app._dispatch_bound_event("NARUTO_TORA")
                     assert mock_os.volume_up.called, "el rebind deberia tomar efecto de inmediato, sin reiniciar"
                     assert not mock_os.take_screenshot.called
 

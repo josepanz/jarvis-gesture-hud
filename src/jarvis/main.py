@@ -199,7 +199,7 @@ GESTURE_DEFAULT_BINDINGS = {
     "NARUTO_INU": "VOLUME_DOWN",
     "NARUTO_I": "LOCK_SESSION",
     # TASK-066 (Fase 5): sellos de 2 manos - mismo mecanismo, mismo camino de
-    # dispatch (_dispatch_naruto_seal ya distingue por prefijo "NARUTO_", sin
+    # dispatch (_dispatch_bound_event ya distingue por prefijo "NARUTO_", sin
     # importar si el evento vino de 1 o 2 manos).
     "NARUTO_NE": "ZOOM_OUT",
     "NARUTO_MI": "SCROLL_DOWN",
@@ -217,7 +217,7 @@ GESTURE_DEFAULT_BINDINGS = {
     "JJK_SUKUNA": "SCREENSHOT",  # "snap" -> sacar una foto, mismo binding que Tora
     "JJK_MEGUMI": "MUTE",  # invocacion sigilosa de sombras -> silenciar, mismo binding que Hitsuji
     # TASK-073 (Fase 7): gestos comunes (no son "sellos", pero comparten el
-    # mismo mecanismo generico - ver _dispatch_naruto_seal). Vocabulario fijo
+    # mismo mecanismo generico - ver _dispatch_bound_event). Vocabulario fijo
     # ya agotado (ver comentario arriba), ambos reusan una accion existente.
     "CLAP": "KEYBOARD_TOGGLE",  # "Clapper": aplaudir para prender/apagar algo - mismo binding que Saru
     "KOREAN_HEART": "SCREENSHOT",  # pose clasica de foto -> Captura, mismo binding que Tora/Sukuna
@@ -668,14 +668,13 @@ class JarvisApp:
             return True
         return False
 
-    def _dispatch_naruto_seal(self, event, cam_xy=None, screen_xy=None):
+    def _dispatch_bound_event(self, event, cam_xy=None, screen_xy=None):
         """TASK-063 (Fase 4), generalizado en TASK-081 (Fase 8) a TODO gesto
-        y tecla que la app puede producir, no solo sellos - nombre historico
-        conservado (las pruebas existentes lo llaman asi por su firma
-        original de 1 solo argumento, que sigue funcionando igual: cam_xy/
-        screen_xy son opcionales porque ningun sello los necesito nunca).
-        Resuelve el binding (override del perfil activo >
-        GESTURE_DEFAULT_BINDINGS > el propio evento, via
+        y tecla que la app puede producir, no solo sellos - de ahi el nombre
+        (H-24: se llamaba `_dispatch_naruto_seal` por su origen en Fase 4,
+        cuando solo despachaba sellos Naruto; un alias de compatibilidad con
+        ese nombre queda mas abajo). Resuelve el binding (override del
+        perfil activo > GESTURE_DEFAULT_BINDINGS > el propio evento, via
         ProfileManager.get_gesture_binding() ya existente - TODO evento real
         tiene un default identity o tematico, asi que ese ultimo caso es
         puramente defensivo) y ejecuta: macro/atajo custom si el binding
@@ -699,6 +698,12 @@ class JarvisApp:
         if self._dispatch_macro_or_shortcut(action_name):
             return
         self._dispatch(action_name, cam_xy, screen_xy if screen_xy is not None else self._last_screen_xy)
+
+    # H-24: alias historico - _dispatch_bound_event se llamo
+    # _dispatch_naruto_seal hasta Fase 8, cuando paso a resolver TODO evento
+    # (37+), no solo sellos Naruto. Conservado por si algun script manual o
+    # de terceros todavia lo invoca por el nombre viejo.
+    _dispatch_naruto_seal = _dispatch_bound_event
 
     def _handle_key(self, key):
         if key == ord("q"):
@@ -760,7 +765,7 @@ class JarvisApp:
                 # no puede tumbar el resto de los eventos de este cuadro ni el
                 # loop de camara.
                 try:
-                    self._dispatch_naruto_seal(event, cam_xy, screen_xy)
+                    self._dispatch_bound_event(event, cam_xy, screen_xy)
                 except Exception:
                     logging.exception("fallo al despachar el evento de gesto %r", event)
 
