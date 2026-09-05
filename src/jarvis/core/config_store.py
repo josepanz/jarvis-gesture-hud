@@ -9,6 +9,7 @@ guarda" y "que se guarda".
 
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -46,10 +47,19 @@ def save_bindings(data, path=CONFIG_FILE):
     """Escritura atomica: escribe a un archivo temporal en el MISMO
     directorio y luego `os.replace()` - un crash a mitad de escritura no
     puede corromper el archivo bueno anterior (rename es atomico dentro del
-    mismo filesystem)."""
+    mismo filesystem).
+
+    H-23: el temporal se genera con `tempfile.mkstemp()` (nombre unico por
+    PID/contador del SO) en vez de un nombre fijo - dos instancias de Jarvis
+    guardando a la vez ya no se pisan el temporal entre si."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp_path, path)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise

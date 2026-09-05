@@ -1,6 +1,7 @@
 """Tests for TASK-074 (Fase 8): jarvis.core.config_store."""
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -76,6 +77,33 @@ class AtomicWriteTests(unittest.TestCase):
             path = Path(tmp) / "bindings.json"
             config_store.save_bindings({"a": 1}, path=path)
             self.assertEqual(list(Path(tmp).iterdir()), [path])
+
+    def test_temp_file_name_is_unique_per_call(self):
+        """H-23: dos instancias guardando a la vez no deben pisarse el
+        temporal - antes era un nombre fijo (`bindings.json.tmp`)."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bindings.json"
+            seen_tmp_paths = []
+            original_replace = os.replace
+
+            def spy_replace(src, dst):
+                seen_tmp_paths.append(str(src))
+                return original_replace(src, dst)
+
+            with patch("jarvis.core.config_store.os.replace", side_effect=spy_replace):
+                config_store.save_bindings({"a": 1}, path=path)
+                config_store.save_bindings({"a": 2}, path=path)
+
+            self.assertEqual(len(seen_tmp_paths), 2)
+            self.assertNotEqual(seen_tmp_paths[0], seen_tmp_paths[1])
+
+    def test_failed_write_cleans_up_its_own_temp_file(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bindings.json"
+            with patch("jarvis.core.config_store.os.replace", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    config_store.save_bindings({"a": 1}, path=path)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_save_creates_the_parent_directory_if_missing(self):
         with TemporaryDirectory() as tmp:
