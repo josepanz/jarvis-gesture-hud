@@ -672,9 +672,8 @@ class JarvisApp:
         """TASK-063 (Fase 4), generalizado en TASK-081 (Fase 8) a TODO gesto
         y tecla que la app puede producir, no solo sellos - de ahi el nombre
         (H-24: se llamaba `_dispatch_naruto_seal` por su origen en Fase 4,
-        cuando solo despachaba sellos Naruto; un alias de compatibilidad con
-        ese nombre queda mas abajo). Resuelve el binding (override del
-        perfil activo > GESTURE_DEFAULT_BINDINGS > el propio evento, via
+        cuando solo despachaba sellos Naruto). Resuelve el binding (override
+        del perfil activo > GESTURE_DEFAULT_BINDINGS > el propio evento, via
         ProfileManager.get_gesture_binding() ya existente - TODO evento real
         tiene un default identity o tematico, asi que ese ultimo caso es
         puramente defensivo) y ejecuta: macro/atajo custom si el binding
@@ -698,12 +697,6 @@ class JarvisApp:
         if self._dispatch_macro_or_shortcut(action_name):
             return
         self._dispatch(action_name, cam_xy, screen_xy if screen_xy is not None else self._last_screen_xy)
-
-    # H-24: alias historico - _dispatch_bound_event se llamo
-    # _dispatch_naruto_seal hasta Fase 8, cuando paso a resolver TODO evento
-    # (37+), no solo sellos Naruto. Conservado por si algun script manual o
-    # de terceros todavia lo invoca por el nombre viejo.
-    _dispatch_naruto_seal = _dispatch_bound_event
 
     def _handle_key(self, key):
         if key == ord("q"):
