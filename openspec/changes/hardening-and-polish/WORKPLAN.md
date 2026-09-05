@@ -1525,7 +1525,7 @@ escribilo con lo que encontraste en vez de borrarla.
 ### Workflow 5 — CI/CD, dependencias y limpieza
 
 - [x] H-18 gate de tests antes del release · commit: e64a734
-- [ ] H-19 pinear dependencias · commit: ______
+- [x] H-19 pinear dependencias · commit: b6d6d3b
 - [ ] H-20 cache de pip en CI · commit: ______
 - [ ] H-21 subprocess en vez de os.system · commit: ______
 - [ ] H-22 sincronizar el buffer de audio · commit: ______
