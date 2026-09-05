@@ -1526,7 +1526,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 - [x] H-18 gate de tests antes del release · commit: e64a734
 - [x] H-19 pinear dependencias · commit: b6d6d3b
-- [ ] H-20 cache de pip en CI · commit: ______
+- [x] H-20 cache de pip en CI · commit: e9294f8
 - [ ] H-21 subprocess en vez de os.system · commit: ______
 - [ ] H-22 sincronizar el buffer de audio · commit: ______
 - [ ] H-23 (agrupar) temp único en config_store
