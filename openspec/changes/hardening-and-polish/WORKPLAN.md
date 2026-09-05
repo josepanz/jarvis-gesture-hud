@@ -1529,7 +1529,7 @@ escribilo con lo que encontraste en vez de borrarla.
 - [x] H-20 cache de pip en CI · commit: e9294f8
 - [x] H-21 subprocess en vez de os.system · commit: 5c1abc8 (tests/test_os_native.py no existia, se creo — el original citado en la tarea nunca se habia escrito)
 - [x] H-22 sincronizar el buffer de audio · commit: bf5da43 (queue.Queue, mismo mecanismo que _results)
-- [ ] H-23 (agrupar) temp único en config_store — pendiente: ningún otro commit de este workflow tocó `config_store.py`, y la tarea prohíbe explícitamente abrirle un commit propio. Queda para agruparse la próxima vez que se toque ese archivo (nótese que `gesture_icons.py` tiene el mismo patrón de temp fijo, ver H-15/a5a2dcc, mismo riesgo)
+- [x] H-23 temp único en config_store · commit: ea34a8f (a pedido explícito de José se cerró con commit propio en vez de esperar a agrupar; `gesture_icons.py` queda con el mismo patrón de temp fijo, H-15/a5a2dcc, sin tocar — fuera de alcance de esta tarea)
 - [x] H-24 renombrar `_dispatch_naruto_seal` · commit: 71f0170 (nombre nuevo: `_dispatch_bound_event`; alias viejo sacado en bdf04a6 tras confirmar por grep que no queda ningun uso real, proyecto sin consumidores externos)
 - [ ] H-25 actualizar docs + entradas de Decisions · commit: ______ ← **último de todos**
 
