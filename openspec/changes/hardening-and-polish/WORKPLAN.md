@@ -1535,7 +1535,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ### Workflow 7 — Unificación de arquitectura (después de 1–5)
 
-- [ ] A-01 cooldowns en `CooldownRegistry` · commit: ______
+- [x] A-01 cooldowns en `CooldownRegistry` · commit: 5cfb786
 - [ ] A-02 debounce + tolerancia de fallos unificados (**requiere H-05 hecho**) · commit: ______
 - [ ] A-03 bindings por aplicación en foco (**requiere H-09 y H-24 hechos**) · commit: ______
 - [ ] A-03b (opcional, solo si José lo pide) persistir y editar reglas por app
