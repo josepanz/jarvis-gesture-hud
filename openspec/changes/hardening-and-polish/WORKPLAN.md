@@ -1539,7 +1539,7 @@ escribilo con lo que encontraste en vez de borrarla.
 - [x] A-02 debounce + tolerancia de fallos unificados (**requiere H-05 hecho**) · commit: b2d113f
 - [x] A-03 bindings por aplicación en foco (**requiere H-09 y H-24 hechos**) · commit: 4f81ff3
 - [ ] A-03b (opcional, solo si José lo pide) persistir y editar reglas por app
-- [ ] B-01 pinear el conjunto PoC con un test · commit: ______
+- [x] B-01 pinear el conjunto PoC con un test · commit: 2056716
 
 ### Workflow 8 — Gestos que faltan (después del 7)
 
