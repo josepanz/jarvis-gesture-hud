@@ -161,12 +161,13 @@ class ProfileManager:
         return value if value is not None else _SAFE_DEFAULTS["dwell_duration_ms"]
 
     # TASK-075 (Fase 8, design.md §5.2/spec.md §8.6): (de)serializacion a/desde
-    # el schema versionado que persiste `jarvis.core.config_store`. Solo
-    # gesture_bindings/custom_shortcuts/macros se persisten - sensitivity/
-    # cooldowns/dwell/hud/context_rules siguen siendo solo-codigo por ahora
-    # (spec.md #8 no pide persistirlos, y `apply.md` §14 pide no inventar una
-    # segunda representacion en memoria para lo que SI se persiste: este
-    # metodo lee directo de los `Profile` ya vivos, no de una copia aparte).
+    # el schema versionado que persiste `jarvis.core.config_store`.
+    # gesture_bindings/custom_shortcuts/macros/context_rules (A-03b) se
+    # persisten - sensitivity/cooldowns/dwell/hud siguen siendo solo-codigo por
+    # ahora (spec.md #8 no los pide persistidos, y `apply.md` §14 pide no
+    # inventar una segunda representacion en memoria para lo que SI se
+    # persiste: este metodo lee directo de los `Profile` ya vivos, no de una
+    # copia aparte).
     def to_dict(self):
         return {
             "schema_version": SCHEMA_VERSION,
@@ -195,7 +196,13 @@ class ProfileManager:
         return manager
 
 
-SCHEMA_VERSION = 1
+# A-03b (WORKPLAN.md §9, `hardening-and-polish`): 1 -> 2, se agrega
+# context_rules a lo persistido. Un archivo v1 no tiene esa clave -
+# _validated_dict_field() ya trata una clave ausente como {} (ver mas abajo),
+# asi que un archivo v1 sigue leyendose igual, sin necesidad de una rama por
+# version: la compatibilidad hacia atras es gratis por como ya funciona el
+# resto de los campos opcionales de este dict.
+SCHEMA_VERSION = 2
 
 
 def _profile_to_dict(profile):
@@ -203,6 +210,7 @@ def _profile_to_dict(profile):
         "gesture_bindings": dict(profile.gesture_bindings),
         "custom_shortcuts": dict(profile.custom_shortcuts),
         "macros": {name: list(steps) for name, steps in profile.macros.items()},
+        "context_rules": {app: dict(bindings) for app, bindings in profile.context_rules.items()},
     }
 
 
@@ -239,10 +247,29 @@ def _valid_macros(macros_data):
     return valid
 
 
+def _valid_context_rules(rules_data):
+    """A-03b: valida `{app_name: {gesture_type: action_name}}` - cada entrada
+    de app tiene que ser un dict a su vez. `_validated_dict_field()` ya
+    garantiza que `rules_data` en si es un dict, pero JSON sintacticamente
+    valido permite igual `{"notepad.exe": ["no", "es", "un", "dict"]}`: eso
+    pasa ese primer filtro y explota mas arriba, en
+    `resolve_contextual_intent()` (`app_bindings.get(gesture_type)` sobre algo
+    sin `.get()`). Descarta solo la entrada de app invalida - mismo criterio
+    que `_valid_macros()` con una macro rota."""
+    valid = {}
+    for app_name, bindings in rules_data.items():
+        if not isinstance(bindings, dict):
+            _logger.warning("descartando context_rules de la app %r de tipo invalido: %r", app_name, bindings)
+            continue
+        valid[app_name] = dict(bindings)
+    return valid
+
+
 def _apply_persisted_fields(profile, data):
     profile.gesture_bindings.update(_validated_dict_field(data, "gesture_bindings"))
     profile.custom_shortcuts.update(_validated_dict_field(data, "custom_shortcuts"))
     profile.macros.update(_valid_macros(_validated_dict_field(data, "macros")))
+    profile.context_rules.update(_valid_context_rules(_validated_dict_field(data, "context_rules")))
 
 
 def _profile_from_dict(name, data):
@@ -251,4 +278,5 @@ def _profile_from_dict(name, data):
         gesture_bindings=dict(_validated_dict_field(data, "gesture_bindings")),
         custom_shortcuts=dict(_validated_dict_field(data, "custom_shortcuts")),
         macros=_valid_macros(_validated_dict_field(data, "macros")),
+        context_rules=_valid_context_rules(_validated_dict_field(data, "context_rules")),
     )

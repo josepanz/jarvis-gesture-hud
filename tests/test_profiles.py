@@ -169,13 +169,17 @@ class ProfileManagerToFromDictTests(unittest.TestCase):
             {"kind": "press-key", "value": "enter"},
         ]
 
+        pm.active.context_rules["notepad.exe"] = {"NARUTO_TORA": "VOLUME_UP"}
+
         data = pm.to_dict()
-        self.assertEqual(data["schema_version"], 1)
+        # A-03b: 1 -> 2, se agrega context_rules a lo persistido.
+        self.assertEqual(data["schema_version"], 2)
 
         restored = ProfileManager.from_dict(data)
         self.assertEqual(restored.active.gesture_bindings, pm.active.gesture_bindings)
         self.assertEqual(restored.active.custom_shortcuts, pm.active.custom_shortcuts)
         self.assertEqual(restored.active.macros, pm.active.macros)
+        self.assertEqual(restored.active.context_rules, pm.active.context_rules)
 
     def test_from_dict_preserves_the_default_profile_safe_settings(self):
         # gesture_bindings/custom_shortcuts/macros no son lo unico que trae
@@ -288,6 +292,54 @@ class ProfileManagerToFromDictTests(unittest.TestCase):
         data = {"schema_version": 1, "profiles": {"default": {"macros": "no-soy-un-dict"}}}
         pm = ProfileManager.from_dict(data)
         self.assertEqual(pm.get_setting("cursor_sensitivity"), 1.0)
+
+    def test_from_dict_reads_a_v1_file_without_context_rules(self):
+        # A-03b: compatibilidad hacia atras - un archivo de antes de que
+        # existiera esta clave sigue cargando igual, con context_rules vacio.
+        data = {"schema_version": 1, "profiles": {"default": {"gesture_bindings": {"NARUTO_TORA": "SCREENSHOT"}}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+        self.assertEqual(pm.active.gesture_bindings, {"NARUTO_TORA": "SCREENSHOT"})
+
+    def test_from_dict_restores_context_rules_for_a_non_default_profile_too(self):
+        data = {
+            "schema_version": 2,
+            "profiles": {"gaming": {"context_rules": {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.context_rules, {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}})
+
+    def test_from_dict_discards_context_rules_with_non_dict_top_level(self):
+        data = {"schema_version": 2, "profiles": {"default": {"context_rules": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+
+    def test_from_dict_discards_context_rules_entry_with_non_dict_app_bindings(self):
+        # H-02: JSON sintacticamente valido, pero el valor por app no es un
+        # dict - _validated_dict_field() no lo atrapa (el dict de arriba SI es
+        # un dict), asi que necesita su propio chequeo (_valid_context_rules).
+        data = {
+            "schema_version": 2,
+            "profiles": {"default": {"context_rules": {"notepad.exe": ["no", "es", "un", "dict"]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+
+    def test_from_dict_keeps_valid_context_rules_entry_and_discards_invalid_sibling(self):
+        data = {
+            "schema_version": 2,
+            "profiles": {
+                "default": {
+                    "context_rules": {
+                        "notepad.exe": {"NARUTO_TORA": "VOLUME_UP"},
+                        "chrome.exe": "no-es-un-dict",
+                    }
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}})
 
 
 if __name__ == "__main__":

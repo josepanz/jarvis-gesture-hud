@@ -12,6 +12,7 @@ import sys
 import tkinter as tk
 import unittest
 from pathlib import Path
+from tkinter import ttk
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -194,6 +195,83 @@ class SettingsWindowShortcutAndMacroTests(_RealTkTestCase):
         row_index = next(i for i, (event_name, _label, _icon_key) in enumerate(rows) if event_name == "PINCH_DOWN")
         combo = self.window._table_frame.grid_slaves(row=row_index, column=2)[0]
         self.assertNotIn("LOCK_SESSION", combo.cget("values"))
+
+
+class SettingsWindowContextRulesTests(_RealTkTestCase):
+    """A-03b (WORKPLAN.md §9, `hardening-and-polish`): editor de
+    Profile.context_rules ({app: {evento: accion}})."""
+
+    def setUp(self):
+        super().setUp()
+        self.profiles = ProfileManager()
+        self.on_change_calls = []
+        self.window = SettingsWindow(
+            self.root, self.profiles, GESTURE_DEFAULT_BINDINGS, on_change=lambda: self.on_change_calls.append(True)
+        )
+        self.window.open()
+        self.addCleanup(self.window._window.destroy)
+
+    def _add_rule(self, app_name, event_name, action_name):
+        self.window._open_context_rule_dialog()
+        dialog = self.window._window.winfo_children()[-1]
+        app_entry, event_combo_var_holder = None, None
+        # El dialogo se arma con widgets sueltos (no guardados como atributos
+        # de instancia, a proposito - son de un solo uso) - encontrarlos por
+        # tipo en el arbol de hijos es mas simple que exponer referencias
+        # nuevas solo para el test.
+        entries = [w for w in dialog.winfo_children() if isinstance(w, tk.Entry)]
+        entries[0].insert(0, app_name)
+        # Los 2 Combobox (gesto, accion) via su textvariable - seteo directo
+        # en vez de simular clicks reales, mismo criterio que el resto de
+        # este archivo (invocar callbacks directamente, sin event loop).
+        combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
+        event_combo, action_combo = combos
+        event_combo.set(event_name)
+        event_combo.event_generate("<<ComboboxSelected>>")
+        action_combo.set(action_name)
+        save_btn = [w for w in dialog.winfo_children() if isinstance(w, tk.Button)][-1]
+        save_btn.invoke()
+
+    def test_no_rules_shows_the_empty_placeholder(self):
+        labels = [w for w in self.window._context_rules_frame.winfo_children() if isinstance(w, tk.Label)]
+        self.assertEqual(len(labels), 1)
+        self.assertIn("todavía", labels[0].cget("text"))
+
+    def test_adding_a_rule_updates_the_active_profile_and_notifies(self):
+        self._add_rule("notepad.exe", "NARUTO_TORA", "VOLUME_UP")
+        self.assertEqual(self.profiles.active.context_rules, {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}})
+        self.assertEqual(self.on_change_calls, [True])
+
+    def test_added_rule_appears_in_the_list(self):
+        self._add_rule("notepad.exe", "NARUTO_TORA", "VOLUME_UP")
+        labels = [w for w in self.window._context_rules_frame.winfo_children() if isinstance(w, tk.Label)]
+        self.assertEqual(len(labels), 0)  # el placeholder desaparecio
+        rows = self.window._context_rules_frame.winfo_children()
+        row_labels = [w for row in rows for w in row.winfo_children() if isinstance(w, tk.Label)]
+        self.assertEqual(row_labels[0].cget("text"), "notepad.exe: NARUTO_TORA → VOLUME_UP")
+
+    def test_action_options_exclude_hold_required_for_a_non_hold_event(self):
+        # H-10 (mismo gate que la tabla de bindings): PINCH_DOWN no sostiene
+        # ningun hold, asi que LOCK_SESSION no puede ser una opcion aca tampoco.
+        self.window._open_context_rule_dialog()
+        dialog = self.window._window.winfo_children()[-1]
+        combos = [w for w in dialog.winfo_children() if isinstance(w, ttk.Combobox)]
+        event_combo, action_combo = combos
+        event_combo.set("PINCH_DOWN")
+        event_combo.event_generate("<<ComboboxSelected>>")
+        self.assertNotIn("LOCK_SESSION", action_combo.cget("values"))
+        dialog.destroy()
+
+    def test_removing_a_rule_clears_it_from_the_active_profile(self):
+        self._add_rule("notepad.exe", "NARUTO_TORA", "VOLUME_UP")
+        self.window._remove_context_rule("notepad.exe", "NARUTO_TORA")
+        self.assertEqual(self.profiles.active.context_rules, {})
+        self.assertEqual(self.on_change_calls, [True, True])
+
+    def test_removing_the_last_event_of_an_app_drops_the_app_entry_too(self):
+        self._add_rule("notepad.exe", "NARUTO_TORA", "VOLUME_UP")
+        self.window._remove_context_rule("notepad.exe", "NARUTO_TORA")
+        self.assertNotIn("notepad.exe", self.profiles.active.context_rules)
 
 
 if __name__ == "__main__":

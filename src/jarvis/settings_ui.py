@@ -182,6 +182,7 @@ class SettingsWindow:
 
         self._build_shortcut_macro_bar()
         self._build_bindings_table()
+        self._build_context_rules_section()
         self._build_voice_phrases_section()
         self._build_m1_m2_m3_help()
 
@@ -334,6 +335,124 @@ class SettingsWindow:
     def _on_rebind(self, event_name, new_action):
         self._profiles.active.gesture_bindings[event_name] = new_action
         self._on_change()
+
+    # --- A-03b (WORKPLAN.md §9, `hardening-and-polish`): reglas por app en foco --
+
+    def _build_context_rules_section(self):
+        """Editor de `Profile.context_rules` ({app: {evento: accion}}),
+        consumido por `main.py._dispatch_bound_event()` desde A-03. Vacio por
+        default en todos los perfiles - esta seccion es la unica forma de
+        poblarlo, ademas de tocar el perfil por codigo/test."""
+        frame = tk.Frame(self._window, bg=ACCENT_BG)
+        frame.pack(fill="x", padx=10, pady=(4, 4))
+
+        header = tk.Frame(frame, bg=ACCENT_BG)
+        header.pack(fill="x", padx=6, pady=(4, 0))
+        tk.Label(
+            header,
+            text="Reglas por aplicación en foco:",
+            bg=ACCENT_BG,
+            fg=FG,
+            font=("Consolas", 9, "bold"),
+            anchor="w",
+        ).pack(side="left")
+        add_btn = tk.Button(header, text="+ Regla", command=self._open_context_rule_dialog)
+        add_btn.pack(side="right")
+        Tooltip(
+            add_btn,
+            "Hace que un gesto dispare una acción distinta cuando cierta app está en primer "
+            "plano. El nombre de la app se compara literal contra el título de su ventana - "
+            "sin reglas, el comportamiento es idéntico al de las filas de arriba.",
+        )
+
+        self._context_rules_frame = tk.Frame(frame, bg=ACCENT_BG)
+        self._context_rules_frame.pack(fill="x", padx=6, pady=(2, 6))
+        self._refresh_context_rules_list()
+
+    def _refresh_context_rules_list(self):
+        for child in self._context_rules_frame.winfo_children():
+            child.destroy()
+        rules = self._profiles.active.context_rules
+        if not rules:
+            tk.Label(
+                self._context_rules_frame,
+                text="(ninguna todavía)",
+                bg=ACCENT_BG,
+                fg="#a0a0b0",
+                font=("Consolas", 9),
+                anchor="w",
+            ).pack(fill="x")
+            return
+        for app_name in sorted(rules):
+            for event_name, action_name in sorted(rules[app_name].items()):
+                row = tk.Frame(self._context_rules_frame, bg=ACCENT_BG)
+                row.pack(fill="x")
+                tk.Label(
+                    row,
+                    text=f"{app_name}: {event_name} → {action_name}",
+                    bg=ACCENT_BG,
+                    fg=FG,
+                    font=("Consolas", 9),
+                    anchor="w",
+                ).pack(side="left", fill="x", expand=True)
+                tk.Button(
+                    row, text="×", command=lambda a=app_name, e=event_name: self._remove_context_rule(a, e)
+                ).pack(side="right")
+
+    def _open_context_rule_dialog(self):
+        dialog = tk.Toplevel(self._window)
+        dialog.title("Nueva regla por app")
+        dialog.configure(bg=BG)
+
+        tk.Label(dialog, text="Aplicación (título de ventana, literal):", bg=BG, fg=FG).pack(padx=12, pady=(10, 2))
+        app_entry = tk.Entry(dialog, width=40)
+        app_entry.pack(padx=12, pady=(0, 8))
+
+        tk.Label(dialog, text="Gesto:", bg=BG, fg=FG).pack(padx=12)
+        event_var = tk.StringVar(value=sorted(self._default_bindings)[0])
+        event_combo = ttk.Combobox(
+            dialog, textvariable=event_var, values=sorted(self._default_bindings), state="readonly", width=30
+        )
+        event_combo.pack(padx=12, pady=(0, 8))
+
+        tk.Label(dialog, text="Acción:", bg=BG, fg=FG).pack(padx=12)
+        action_var = tk.StringVar()
+        action_combo = ttk.Combobox(dialog, textvariable=action_var, state="readonly", width=30)
+        action_combo.pack(padx=12, pady=(0, 8))
+
+        def _refresh_action_options(*_args):
+            # H-10 (mismo gate que `_rebind_target_options` ya aplica a la
+            # tabla de arriba): un gesto sin hold propio no ofrece las
+            # acciones HOLD_REQUIRED como destino, tampoco aca.
+            options = self._rebind_target_options(event_var.get())
+            action_combo.configure(values=options)
+            if options:
+                action_var.set(options[0])
+
+        event_combo.bind("<<ComboboxSelected>>", _refresh_action_options)
+        _refresh_action_options()
+
+        def _save():
+            app_name = app_entry.get().strip()
+            event_name = event_var.get()
+            action_name = action_var.get()
+            if app_name and event_name and action_name:
+                self._profiles.active.context_rules.setdefault(app_name, {})[event_name] = action_name
+                self._on_change()
+                self._refresh_context_rules_list()
+            dialog.destroy()
+
+        tk.Button(dialog, text="Guardar regla", command=_save).pack(pady=(4, 10))
+
+    def _remove_context_rule(self, app_name, event_name):
+        rules = self._profiles.active.context_rules
+        app_rules = rules.get(app_name)
+        if app_rules is not None:
+            app_rules.pop(event_name, None)
+            if not app_rules:
+                rules.pop(app_name, None)
+        self._on_change()
+        self._refresh_context_rules_list()
 
     # --- TASK-079: frases de voz registradas (solo informativo) ------------------
 
