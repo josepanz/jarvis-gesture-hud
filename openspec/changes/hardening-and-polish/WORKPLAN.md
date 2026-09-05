@@ -1531,7 +1531,7 @@ escribilo con lo que encontraste en vez de borrarla.
 - [x] H-22 sincronizar el buffer de audio · commit: bf5da43 (queue.Queue, mismo mecanismo que _results)
 - [x] H-23 temp único en config_store · commit: ea34a8f (a pedido explícito de José se cerró con commit propio en vez de esperar a agrupar; `gesture_icons.py` queda con el mismo patrón de temp fijo, H-15/a5a2dcc, sin tocar — fuera de alcance de esta tarea)
 - [x] H-24 renombrar `_dispatch_naruto_seal` · commit: 71f0170 (nombre nuevo: `_dispatch_bound_event`; alias viejo sacado en bdf04a6 tras confirmar por grep que no queda ningun uso real, proyecto sin consumidores externos)
-- [ ] H-25 actualizar docs + entradas de Decisions · commit: ______ ← **último de todos**
+- [x] H-25 actualizar docs + entradas de Decisions · commit: b11baca ← **último de todos**
 
 ### Workflow 7 — Unificación de arquitectura (después de 1–5)
 
