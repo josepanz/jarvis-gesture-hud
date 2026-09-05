@@ -262,6 +262,17 @@ GESTURE_DEFAULT_BINDINGS = {
     "TOGGLE_LEGEND": "TOGGLE_LEGEND",
     "LEGEND_ALPHA_UP": "LEGEND_ALPHA_UP",
     "LEGEND_ALPHA_DOWN": "LEGEND_ALPHA_DOWN",
+    # C-03 (WORKPLAN.md §10, workflow 8): swipe con puño cerrado. Identidad
+    # para los 4, para que las 4 direcciones aparezcan como filas en el
+    # settings screen (spec.md #8.2, "every bindable trigger"). LEFT/RIGHT
+    # tienen accion propia hardcodeada en _dispatch() (atras/adelante, ver
+    # abajo); UP/DOWN quedan deliberadamente SIN accion por default (ningun
+    # vertical natural para un swipe con puño) - reasignables desde el
+    # settings, nunca "mudos" para quien SI los reasigna.
+    "SWIPE_LEFT": "SWIPE_LEFT",
+    "SWIPE_RIGHT": "SWIPE_RIGHT",
+    "SWIPE_UP": "SWIPE_UP",
+    "SWIPE_DOWN": "SWIPE_DOWN",
 }
 
 # Comandos continuos - no van al historial de undo/redo (serian ruido puro:
@@ -556,6 +567,14 @@ class JarvisApp:
             self._trigger_redo()
         elif event == "MUTE":
             self.command_bus.dispatch(MuteCommand())
+        elif event == "SWIPE_LEFT":
+            # C-03: reusa HotkeyCommand (Fase 8), sin Command nuevo -
+            # atras/adelante funciona en navegadores y en el explorador de
+            # archivos. SWIPE_UP/SWIPE_DOWN quedan sin manejar aca a
+            # proposito (ver GESTURE_DEFAULT_BINDINGS).
+            self.command_bus.dispatch(HotkeyCommand("alt+left"))
+        elif event == "SWIPE_RIGHT":
+            self.command_bus.dispatch(HotkeyCommand("alt+right"))
 
     def _toggle_mirror(self):
         self.mirrored = not self.mirrored

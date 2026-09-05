@@ -5,9 +5,11 @@ end_position, delta, duration, velocity. Minimum displacement and velocity MUST 
 configurable. A swipe MUST NOT be triggered by slow cursor movement."
 
 Standalone, tested detector operating in the same normalized [0,1] landmark
-coordinate space GestureEngine already uses - NOT wired into it. No existing
-gesture or action maps to "swipe" in this app; wiring it in without a defined
-target action would be guessing at scope beyond what this task asks for.
+coordinate space GestureEngine already uses. Wired into `GestureEngine`
+(C-03, WORKPLAN.md §10, `hardening-and-polish`), gated on a closed fist
+(single hand) so ordinary pointer movement never triggers it - see
+gestures.py's `process()` for the gate and main.py's `_dispatch()` for
+SWIPE_LEFT/RIGHT's default `alt+left`/`alt+right` binding.
 """
 
 import math

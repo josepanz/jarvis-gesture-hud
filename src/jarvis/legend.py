@@ -61,6 +61,13 @@ ENTRIES = [
     # posicion del primero - siempre activo (no tiene el riesgo de falso
     # positivo del dwell, es un pinch normal x2 dentro del intervalo).
     ("Pulgar + Índice (pinch) x2 rápido", "Doble click", "double_click"),
+    # C-03 (WORKPLAN.md §10, workflow 8): swipe con puño cerrado, 1 mano.
+    # UP/DOWN no tienen accion por default (ver GESTURE_DEFAULT_BINDINGS) -
+    # se detectan igual y son reasignables desde el settings.
+    ("Puño cerrado, movimiento rápido a la izquierda", "Atrás (navegador/explorador)", "swipe_left"),
+    ("Puño cerrado, movimiento rápido a la derecha", "Adelante (navegador/explorador)", "swipe_right"),
+    ("Puño cerrado, movimiento rápido hacia arriba", "Sin asignar (reasignable)", "swipe_up"),
+    ("Puño cerrado, movimiento rápido hacia abajo", "Sin asignar (reasignable)", "swipe_down"),
 ]
 
 

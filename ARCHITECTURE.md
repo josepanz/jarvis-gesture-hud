@@ -1661,6 +1661,49 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   covers the dispatch side: `DOUBLE_CLICK` moves to the first click's saved position before
   clicking, and — when there's no prior anchor (e.g. voice-triggered or right after
   startup) — degrades to clicking in place rather than moving anywhere.
+- **C-03: swipe with a closed fist (WORKPLAN.md §10, workflow 8 — done last, highest
+  collision risk of the three).** `jarvis.core.swipe.SwipeDetector` needed a pose gate it
+  never had: fed the raw index position with no gate at all, any fast pointer movement
+  would trigger a swipe, breaking ordinary use. **Gate: a closed fist, single hand**
+  (`_is_fist(pts)`) — the one shape left free on an already-saturated single-hand surface.
+  Tracks the **wrist** (`pts[0]`), not the index — inside a fist the other fingertips are
+  curled and a noisier proxy for the hand's overall motion. Also requires
+  `not two_hand_active`, `pinch_winner is None`, and no seal hold in progress
+  (`_naruto_hold_seal is None`) — same shape as the C-01 dwell gate. **The census this task
+  explicitly demands (run every existing fixture through the new detector, don't just
+  reason about it) found a real gap the written spec didn't call out**: `_is_fist()` also
+  matches `NARUTO_SARU`/`NARUTO_I` (expected — they're distinguished from a plain fist by
+  thumb *direction*, which `_is_fist()` doesn't check at all, and both are already covered
+  by the seal-hold gate) **and `KOREAN_HEART`** (not a "seal", its hold lives in a separate
+  `self._korean_heart_hold_start`, so the seal-hold gate alone did NOT cover it) — added
+  `self._korean_heart_hold_start is None` to the gate explicitly once the census surfaced
+  this. `reset()` on gate loss so a half-open swipe window doesn't survive a pose change.
+  **Actions: reuses `HotkeyCommand`** (Fase 8), no new `Command`: `SWIPE_LEFT`/`SWIPE_RIGHT`
+  → `alt+left`/`alt+right` (browser/file-explorer back-forward), handled directly in
+  `_dispatch()`'s existing elif chain, same pattern as `SILENCE`/`TOGGLE_ACTIVE`/etc.
+  **`SWIPE_UP`/`SWIPE_DOWN` are intentionally left with NO default action** — no vertical
+  gesture reads naturally onto any existing action, and a bad default is worse than none —
+  but all 4 still get an identity entry in `GESTURE_DEFAULT_BINDINGS` so all 4 show up as
+  settings rows (spec.md #8.2's "every bindable trigger") and are reassignable; this
+  required carving an explicit, documented exception into
+  `tests/test_naruto_seal_dispatch.py::DefaultBindingTests::test_every_default_binding_is_a_known_dispatchable_action`,
+  which previously asserted every binding must resolve to *something* `_dispatch()`
+  handles — a deliberate, silent no-op is new territory this app hadn't needed before.
+  **Swipe vs. scroll**: deliberately NOT unified despite both being "4 directions, axis
+  picked by `abs(dx)` vs `abs(dy)`" — scroll is continuous/sustained (index+middle pose,
+  fires every frame while held, moves *content*); swipe is discrete/one-shot (fist pose,
+  requires distance **and** velocity inside a window, fires once, executes a *navigation
+  command*). No detection collision (scroll's pose isn't a fist), but legend copy says
+  "move content" vs. "navigate" rather than repeating "left/right/up/down" twice, so the
+  two don't read as duplicates. Verified in
+  `tests/test_gesture_engine_regression.py::SwipeTests`: each of the 4 directions fires
+  correctly on fast fist movement; a long-but-slow movement never fires (explicit original
+  spec criterion); fast movement without the fist pose never fires; losing the pose
+  mid-window cancels it; and the census itself — **every** existing single-hand fixture in
+  the suite, moved fast across the frame, produces zero `SWIPE_*` events.
+  `tests/test_naruto_seal_dispatch.py::SwipeDispatchTests` covers dispatch: `SWIPE_LEFT`/
+  `RIGHT` fire the right hotkey by default, `SWIPE_UP`/`DOWN` are a safe no-op by default,
+  and `SWIPE_UP` dispatches normally once explicitly reassigned to a real action.
 
 ## Dormant / PoC modules
 
@@ -1691,12 +1734,12 @@ Wired despite once being in this same "dormant" bucket (same audit, §9): `coold
 (A-01, `GestureEngine.cooldowns`), `debounce.py` (A-02, `GestureEngine._pinch_debouncers`
 + `MissToleranceCounter`), `contextual_bindings.py` (A-03, consumed by
 `main.py._dispatch_bound_event()`), `dwell.py` (C-01, `GestureEngine._dwell_detector`,
-opt-in behind `config.DWELL_CLICK_ENABLED`), and now `double_click.py` (C-02,
-`GestureEngine._double_click_detector`, always on) — in each case production code had
-already reimplemented the same idea by hand, or (dwell/double-click) WORKPLAN.md §10
-scheduled the wiring outright. `swipe.py` is still the same non-PoC "scheduled" category:
-WORKPLAN.md §10 schedules it for workflow 8 too, so it isn't in the pinned set above and
-doesn't carry the marker.
+opt-in behind `config.DWELL_CLICK_ENABLED`), `double_click.py` (C-02,
+`GestureEngine._double_click_detector`, always on), and now `swipe.py` (C-03,
+`GestureEngine._swipe_detector`, gated on a closed one-hand fist) — in each case
+production code had already reimplemented the same idea by hand, or (dwell/double-click/
+swipe) WORKPLAN.md §10 scheduled the wiring outright. All three of workflow 8's detectors
+are now wired; nothing is left in this "scheduled but not yet wired" category.
 
 ## Known limitations
 

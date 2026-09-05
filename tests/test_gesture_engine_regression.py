@@ -1959,5 +1959,86 @@ class DoubleClickTests(unittest.TestCase):
         self.assertNotIn("DOUBLE_CLICK", events3)
 
 
+def _swipe_events(events):
+    return [e for e in events if e.startswith("SWIPE_")]
+
+
+class SwipeTests(unittest.TestCase):
+    """C-03 (WORKPLAN.md §10, workflow 8): swipe con puño cerrado, 1 mano -
+    la tarea de mayor riesgo de colision de las 3 (por eso se hizo ultima)."""
+
+    def test_fast_fist_movement_in_each_direction_fires_the_right_swipe(self):
+        cases = [
+            ((0.2, 0.5), (0.6, 0.5), "SWIPE_RIGHT"),
+            ((0.6, 0.5), (0.2, 0.5), "SWIPE_LEFT"),
+            ((0.5, 0.2), (0.5, 0.6), "SWIPE_DOWN"),
+            ((0.5, 0.6), (0.5, 0.2), "SWIPE_UP"),
+        ]
+        for start, end, expected in cases:
+            with self.subTest(expected=expected):
+                engine = GestureEngine()
+                process(engine, fist_hand(*start))
+                _, _, events = process(engine, fist_hand(*end))
+                self.assertEqual(events, [expected])
+
+    def test_a_long_but_slow_movement_never_fires(self):
+        # Criterio explicito del spec original: distancia sin velocidad no alcanza.
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5))
+        x0, y0, _ = engine._swipe_detector._start
+        engine._swipe_detector._start = (x0, y0, time.time() - 0.5)
+        # 0.2 de distancia en ~500ms = 0.4/s, por debajo de min_velocity (0.5/s).
+        _, _, events = process(engine, fist_hand(0.4, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_fast_movement_without_the_fist_pose_never_fires(self):
+        engine = GestureEngine()
+        process(engine, pointer_only_hand(0.2, 0.5))
+        _, _, events = process(engine, pointer_only_hand(0.6, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_losing_the_fist_pose_mid_window_cancels_it(self):
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5))  # arranca la ventana
+        process(engine, open_palm_hand(0.3, 0.5))  # pierde el puño a mitad de camino - cancela
+        # de vuelta en puño, pero es una ventana NUEVA (recien arranca en este cuadro).
+        _, _, events = process(engine, fist_hand(0.6, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_no_existing_fixture_ever_produces_a_swipe(self):
+        # El test mas importante de esta tarea: censo de colisiones contra
+        # TODO el resto de las poses de 1 mano ya existentes, movidas rapido
+        # de un lado al otro del frame. NARUTO_SARU/NARUTO_I/KOREAN_HEART
+        # matchean _is_fist (verificado, no solo razonado - ver el gate en
+        # gestures.py) y son el caso real que puede fallar.
+        fixtures = {
+            "NARUTO_TORA": naruto_tora_hand,
+            "NARUTO_U": naruto_u_hand,
+            "NARUTO_HITSUJI": naruto_hitsuji_hand,
+            "NARUTO_USHI": naruto_ushi_hand,
+            "NARUTO_UMA": naruto_uma_hand,
+            "NARUTO_SARU": naruto_saru_hand,
+            "NARUTO_INU": naruto_inu_hand,
+            "NARUTO_I": naruto_i_hand,
+            "JJK_MEGUMI": jjk_megumi_hand,
+            "KOREAN_HEART": korean_heart_hand,
+            "OPEN_PALM": open_palm_hand,
+            "SILENCE": silence_hand,
+            "SHAKA": shaka_hand,
+            "SCREENSHOT": screenshot_hand,
+            "SCROLL": scroll_hand,
+            "ZOOM": zoom_hand,
+            "VOLUME": volume_hand,
+            "PINCH_CLICK": pinch_click_hand,
+            "RIGHT_CLICK": right_click_hand,
+        }
+        for name, fixture_fn in fixtures.items():
+            with self.subTest(pose=name):
+                engine = GestureEngine()
+                process(engine, fixture_fn(0.2, 0.5))
+                _, _, events = process(engine, fixture_fn(0.6, 0.5))
+                self.assertEqual(_swipe_events(events), [])
+
+
 if __name__ == "__main__":
     unittest.main()

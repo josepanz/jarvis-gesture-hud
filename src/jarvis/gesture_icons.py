@@ -191,6 +191,13 @@ ICON_SPECS = {
     # "pinch_click" a proposito (ES ese pellizco, x2) - se distingue por el
     # glyph de 2 puntos.
     "double_click": {"hands": 1, "extended": {"thumb", "index"}, "pinch": ("thumb", "index"), "glyph": "double_dot"},
+    # C-03 (WORKPLAN.md §10, workflow 8): swipe con puño cerrado, 1 mano -
+    # mismo puño (extended=set()) que korean_heart, distinguido por no tener
+    # pinch marker y por el glyph de flecha (4 iconos, 1 por direccion).
+    "swipe_left": {"hands": 1, "extended": set(), "pinch": None, "glyph": "arrow_left"},
+    "swipe_right": {"hands": 1, "extended": set(), "pinch": None, "glyph": "arrow_right"},
+    "swipe_up": {"hands": 1, "extended": set(), "pinch": None, "glyph": "arrow_up"},
+    "swipe_down": {"hands": 1, "extended": set(), "pinch": None, "glyph": "arrow_down"},
 }
 
 
@@ -348,6 +355,36 @@ def _draw_double_dot(draw, box):
     draw.ellipse([cx2 - r, cy - r, cx2 + r, cy + r], fill=_GLYPH_COLOR)
 
 
+def _draw_arrow_left(draw, box):
+    # C-03: una sola flecha (no el par bidireccional de "arrow_up_down") -
+    # cada direccion de swipe es un icono propio.
+    x0, y0, x1, y1 = box
+    cy = (y0 + y1) / 2
+    draw.polygon([(x0, cy), (x0 + 6, y0 + 1), (x0 + 6, y1 - 1)], fill=_GLYPH_COLOR)
+    draw.line([x0 + 6, cy, x1, cy], fill=_GLYPH_COLOR, width=2)
+
+
+def _draw_arrow_right(draw, box):
+    x0, y0, x1, y1 = box
+    cy = (y0 + y1) / 2
+    draw.polygon([(x1, cy), (x1 - 6, y0 + 1), (x1 - 6, y1 - 1)], fill=_GLYPH_COLOR)
+    draw.line([x0, cy, x1 - 6, cy], fill=_GLYPH_COLOR, width=2)
+
+
+def _draw_arrow_up(draw, box):
+    x0, y0, x1, y1 = box
+    cx = (x0 + x1) / 2
+    draw.polygon([(cx, y0), (x0 + 1, y0 + 6), (x1 - 1, y0 + 6)], fill=_GLYPH_COLOR)
+    draw.line([cx, y0 + 6, cx, y1], fill=_GLYPH_COLOR, width=2)
+
+
+def _draw_arrow_down(draw, box):
+    x0, y0, x1, y1 = box
+    cx = (x0 + x1) / 2
+    draw.polygon([(cx, y1), (x0 + 1, y1 - 6), (x1 - 1, y1 - 6)], fill=_GLYPH_COLOR)
+    draw.line([cx, y0, cx, y1 - 6], fill=_GLYPH_COLOR, width=2)
+
+
 GLYPH_DRAWERS = {
     "arrow_up_down": _draw_arrow_up_down,
     "zoom": _draw_zoom,
@@ -362,6 +399,10 @@ GLYPH_DRAWERS = {
     "heart": _draw_heart,
     "dwell_ring": _draw_dwell_ring,
     "double_dot": _draw_double_dot,
+    "arrow_left": _draw_arrow_left,
+    "arrow_right": _draw_arrow_right,
+    "arrow_up": _draw_arrow_up,
+    "arrow_down": _draw_arrow_down,
 }
 
 _GLYPH_BOX = (ICON_SIZE - 15, 2, ICON_SIZE - 2, 15)  # esquina superior derecha

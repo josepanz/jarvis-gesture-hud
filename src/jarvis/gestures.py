@@ -25,6 +25,7 @@ from jarvis.core.cooldown import CooldownRegistry
 from jarvis.core.debounce import ConsecutiveFrameDebouncer, MissToleranceCounter
 from jarvis.core.double_click import DoubleClickDetector
 from jarvis.core.dwell import DwellDetector
+from jarvis.core.swipe import SwipeDetector
 from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
@@ -473,6 +474,11 @@ class GestureEngine:
         # (bypassear COOLDOWN_CLICK para el segundo click de un par).
         self._double_click_detector = DoubleClickDetector(clock=time.time)
 
+        # C-03 (WORKPLAN.md §10): swipe con puño cerrado, 1 mano. Defaults de
+        # SwipeDetector (min_distance/min_velocity/max_duration_ms) tal
+        # cual - razonados, no medidos en camara todavia (ver V-10).
+        self._swipe_detector = SwipeDetector()
+
     @staticmethod
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
@@ -534,6 +540,7 @@ class GestureEngine:
         # que no quede pendiente de emparejar contra un proximo click que ya
         # ni siquiera es fisicamente el mismo gesto interrumpido.
         self._double_click_detector.reset()
+        self._swipe_detector.reset()
 
     def _process_two_hand_gestures(self, hands, w, h, now):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
@@ -1028,6 +1035,38 @@ class GestureEngine:
         if is_right_pinching and not self.was_right_pinching and self.cooldowns.try_fire(COOLDOWN_RIGHT_CLICK):
             events.append("RIGHT_CLICK")
         self.was_right_pinching = is_right_pinching
+
+        # C-03 (WORKPLAN.md §10): swipe - puño cerrado, 1 mano, movimiento
+        # rapido. Gate de pose (_is_fist) es la forma que queda libre en una
+        # superficie ya saturada: _is_fist() hoy solo participa en gestos de
+        # 2 manos y en 3 poses de 1 mano que SI matchean _is_fist (verificado
+        # contra el censo de fixtures existente, no solo razonado) - NARUTO_SARU
+        # y NARUTO_I (se distinguen por la DIRECCION del pulgar, que
+        # _is_fist ni chequea) ya quedan cubiertos por el gate de "hold de
+        # sello en progreso" (se activa desde el primer cuadro que el sello
+        # se reconoce, antes de completar su propio hold); KOREAN_HEART
+        # tambien matchea _is_fist y NO es un "sello" (su hold vive en
+        # _korean_heart_hold_start, no en _naruto_hold_seal) - se agrega
+        # explicito aca, si no un movimiento rapido de muñeca entrando a esa
+        # pose podria disparar tambien un swipe. Reset() explicito cuando se
+        # pierde la pose - una ventana a medio abrir no puede sobrevivir a
+        # un cambio de gesto. Rastrea la muñeca (pts[0], no el indice) - en
+        # un puño el resto de los dedos esta curvado y es un proxy de
+        # posicion mas ruidoso que la muñeca para el movimiento global de la
+        # mano.
+        _swipe_gate = (
+            _is_fist(pts)
+            and not two_hand_active
+            and pinch_winner is None
+            and self._naruto_hold_seal is None
+            and self._korean_heart_hold_start is None
+        )
+        if _swipe_gate:
+            swipe_event = self._swipe_detector.update(pts[0].x, pts[0].y, now)
+            if swipe_event is not None:
+                events.append(swipe_event)
+        else:
+            self._swipe_detector.reset()
 
         # C-01 (WORKPLAN.md §10): dwell-click - opt-in, sin forma de mano
         # propia (opera sobre el indice normalizado, igual que el puntero).

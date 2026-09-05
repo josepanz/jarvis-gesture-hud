@@ -138,8 +138,19 @@ class DefaultBindingTests(_AppTestCase):
             "TOGGLE_LEGEND",
             "LEGEND_ALPHA_UP",
             "LEGEND_ALPHA_DOWN",
+            "SWIPE_LEFT",
+            "SWIPE_RIGHT",
         }
+        # C-03 (WORKPLAN.md §10, workflow 8): SWIPE_UP/SWIPE_DOWN se
+        # detectan pero quedan deliberadamente SIN binding por defecto -
+        # ningun vertical natural existe para un swipe con puño. Son
+        # reasignables desde el settings (identidad en GESTURE_DEFAULT_BINDINGS,
+        # asi que aparecen como fila); solo con su default de identidad,
+        # intacto, es un no-op seguro y silencioso a proposito.
+        intentionally_unbound_by_default = {"SWIPE_UP", "SWIPE_DOWN"}
         for seal, action in GESTURE_DEFAULT_BINDINGS.items():
+            if seal in intentionally_unbound_by_default and action == seal:
+                continue
             self.assertIn(action, handled, f"{seal} -> {action!r} no es una accion que _dispatch() maneje")
 
 
@@ -375,6 +386,34 @@ class DoubleClickDispatchTests(_AppTestCase):
         self.assertFalse(self.mock_mouse_pyautogui.moveTo.called)
         self.mock_mouse_pyautogui.mouseDown.assert_called_once()
         self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+
+
+class SwipeDispatchTests(_AppTestCase):
+    """C-03 (WORKPLAN.md §10, workflow 8): SWIPE_LEFT/RIGHT tienen accion
+    propia por default (HotkeyCommand, reusado de Fase 8); SWIPE_UP/DOWN son
+    un no-op seguro por default, reasignables desde el settings."""
+
+    def test_swipe_left_default_binding_dispatches_alt_left(self):
+        self.app._dispatch_bound_event("SWIPE_LEFT")
+        self.mock_macro_pyautogui.hotkey.assert_called_once_with("alt", "left")
+
+    def test_swipe_right_default_binding_dispatches_alt_right(self):
+        self.app._dispatch_bound_event("SWIPE_RIGHT")
+        self.mock_macro_pyautogui.hotkey.assert_called_once_with("alt", "right")
+
+    def test_swipe_up_and_down_default_bindings_are_a_safe_no_op(self):
+        self.app._dispatch_bound_event("SWIPE_UP")  # no debe lanzar
+        self.app._dispatch_bound_event("SWIPE_DOWN")
+        self.assertFalse(self.mock_macro_pyautogui.hotkey.called)
+
+    def test_swipe_up_can_be_reassigned_to_a_real_action(self):
+        override = Profile(name="custom", gesture_bindings={"SWIPE_UP": "VOLUME_UP"})
+        self.app.profiles.register(override)
+        self.app.profiles.switch_to("custom")
+
+        self.app._dispatch_bound_event("SWIPE_UP")
+
+        self.assertTrue(self.mock_os.volume_up.called)
 
 
 if __name__ == "__main__":
