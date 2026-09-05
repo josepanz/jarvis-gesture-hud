@@ -1543,7 +1543,7 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ### Workflow 8 — Gestos que faltan (después del 7)
 
-- [ ] C-01 dwell-click opcional · commit: ______
+- [x] C-01 dwell-click opcional · commit: b534abf
 - [ ] C-02 doble click re-anclado (**requiere A-01 hecho**) · commit: ______
 - [ ] C-03 swipe con puño (hacelo último: mayor riesgo de colisión) · commit: ______
 
