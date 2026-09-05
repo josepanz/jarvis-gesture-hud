@@ -187,6 +187,10 @@ ICON_SPECS = {
     # gesto en si no tiene forma propia, se distingue de "pointer" unicamente
     # por el glyph de anillo (la misma metafora visual que draw_dwell_progress()).
     "dwell_click": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "dwell_ring"},
+    # C-02 (WORKPLAN.md §10, workflow 8): doble click. Misma forma que
+    # "pinch_click" a proposito (ES ese pellizco, x2) - se distingue por el
+    # glyph de 2 puntos.
+    "double_click": {"hands": 1, "extended": {"thumb", "index"}, "pinch": ("thumb", "index"), "glyph": "double_dot"},
 }
 
 
@@ -332,6 +336,18 @@ def _draw_dwell_ring(draw, box):
     draw.ellipse([x0 + 1, y0 + 1, x1 - 1, y1 - 1], outline=_GLYPH_COLOR, width=2)
 
 
+def _draw_double_dot(draw, box):
+    # C-02: 2 puntos lado a lado - "esto pasa dos veces", mismo espiritu que
+    # "snap"/"clap_burst" comunicando temporalidad en vez de una pose estatica.
+    x0, y0, x1, y1 = box
+    cy = (y0 + y1) / 2
+    r = (x1 - x0) * 0.16
+    cx1 = x0 + (x1 - x0) * 0.3
+    cx2 = x0 + (x1 - x0) * 0.7
+    draw.ellipse([cx1 - r, cy - r, cx1 + r, cy + r], fill=_GLYPH_COLOR)
+    draw.ellipse([cx2 - r, cy - r, cx2 + r, cy + r], fill=_GLYPH_COLOR)
+
+
 GLYPH_DRAWERS = {
     "arrow_up_down": _draw_arrow_up_down,
     "zoom": _draw_zoom,
@@ -345,6 +361,7 @@ GLYPH_DRAWERS = {
     "clap_burst": _draw_clap_burst,
     "heart": _draw_heart,
     "dwell_ring": _draw_dwell_ring,
+    "double_dot": _draw_double_dot,
 }
 
 _GLYPH_BOX = (ICON_SIZE - 15, 2, ICON_SIZE - 2, 15)  # esquina superior derecha

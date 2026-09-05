@@ -1623,6 +1623,44 @@ by [Conventional Commits](https://www.conventionalcommits.org/) on `main`
   `main.py.run()`'s frame loop (drawn at `cam_xy`, the camera-space point — not the
   normalized coordinates the detector itself tracks internally) whenever the flag is on and
   progress is non-zero.
+- **C-02: double click, re-anchored to the first click (WORKPLAN.md §10, workflow 8).**
+  `jarvis.core.double_click.DoubleClickDetector` classifies "single"/"double" from a
+  stream of completed clicks, but wiring it in wasn't mechanical: two independent clicks
+  today already means two real OS clicks (`PINCH_DOWN`→`mouseDown`, `PINCH_UP`→`mouseUp`),
+  yet Windows never recognized them as a native double click, for two compounding reasons.
+  First, `config.CLICK_COOLDOWN` (300ms) is *smaller* than Windows' own double-click
+  interval (~500ms) but still blocks the second pinch's `PINCH_DOWN` *event* outright — the
+  cooldown gates whether `GestureEngine.process()` appends the event, not whether
+  `was_pinching` itself flips, so the physical second pinch-release still produces a
+  `PINCH_UP` with no matching `mouseDown` ever having fired for it. Second, even with the
+  cooldown out of the way, a hand-driven, EMA-smoothed pointer drifts a few pixels between
+  two rapid pinches — well past `SM_CXDOUBLECLK`'s ~4px window — so the OS wouldn't pair
+  them anyway. The module's own docstring suggested the naive fix (hold the first click
+  back ~450ms to see if a second follows), rejected here as a real, perceptible latency
+  regression on the single most-used interaction in the app. Implemented instead: register
+  every completed click (`PINCH_UP`, not `PINCH_DOWN` — "click completo", per the module's
+  own contract) against `DoubleClickDetector`; when it returns "double" (which happens
+  precisely on the release whose matching press got eaten by the cooldown above), synthesize
+  the missing click there and then — `MouseMoveCommand` to the FIRST click's screen position
+  (captured in `main.py` at the first click's successful `PINCH_DOWN`, since only `main.py`
+  knows screen coordinates — `GestureEngine` only sees normalized/camera space) followed by
+  `MouseButtonCommand(True)`/`(False)`, so both clicks land at the same point and the OS
+  pairs them as a native double click — zero added latency on the first click.
+  `self.cooldowns.reset(COOLDOWN_CLICK)` fires alongside, so the *next* ordinary click isn't
+  wrongly still gated by a cooldown timestamp from click one; `DoubleClickDetector` itself
+  already clears its own streak after returning "double" (its own tested contract), so a
+  third rapid click starts a fresh pair rather than chaining into a triple.
+  `DoubleClickDetector` lives inside `GestureEngine` (not `main.py`), with `clock=time.time`
+  like `CooldownRegistry`/`DwellDetector` — it has to interact with `self.cooldowns`
+  directly (the bypass), so it needs to sit where that cooldown state already lives.
+  Verified in `tests/test_gesture_engine_regression.py::DoubleClickTests`: a single click
+  never emits `DOUBLE_CLICK`; the second rapid pinch's `PINCH_DOWN` really is suppressed
+  (root-cause pin); two rapid clicks emit `DOUBLE_CLICK` on the second release; two clicks
+  separated by more than the interval are just two ordinary clicks; three rapid clicks are a
+  pair plus a single, never a triple. `tests/test_naruto_seal_dispatch.py::DoubleClickDispatchTests`
+  covers the dispatch side: `DOUBLE_CLICK` moves to the first click's saved position before
+  clicking, and — when there's no prior anchor (e.g. voice-triggered or right after
+  startup) — degrades to clicking in place rather than moving anywhere.
 
 ## Dormant / PoC modules
 
@@ -1652,12 +1690,13 @@ actually live" without re-deriving it from imports by hand.
 Wired despite once being in this same "dormant" bucket (same audit, §9): `cooldown.py`
 (A-01, `GestureEngine.cooldowns`), `debounce.py` (A-02, `GestureEngine._pinch_debouncers`
 + `MissToleranceCounter`), `contextual_bindings.py` (A-03, consumed by
-`main.py._dispatch_bound_event()`), and now `dwell.py` (C-01, `GestureEngine._dwell_detector`,
-opt-in behind `config.DWELL_CLICK_ENABLED`) — in each case production code had already
-reimplemented the same idea by hand, or (dwell) WORKPLAN.md §10 scheduled the wiring
-outright. `double_click.py`/`swipe.py` are still the same non-PoC "scheduled" category:
-WORKPLAN.md §10 schedules them for workflow 8 too, so they aren't in the pinned set above
-and don't carry the marker.
+`main.py._dispatch_bound_event()`), `dwell.py` (C-01, `GestureEngine._dwell_detector`,
+opt-in behind `config.DWELL_CLICK_ENABLED`), and now `double_click.py` (C-02,
+`GestureEngine._double_click_detector`, always on) — in each case production code had
+already reimplemented the same idea by hand, or (dwell/double-click) WORKPLAN.md §10
+scheduled the wiring outright. `swipe.py` is still the same non-PoC "scheduled" category:
+WORKPLAN.md §10 schedules it for workflow 8 too, so it isn't in the pinned set above and
+doesn't carry the marker.
 
 ## Known limitations
 

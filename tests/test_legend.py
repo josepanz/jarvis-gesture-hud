@@ -50,7 +50,8 @@ _EXPECTED_TEXT = (
     "Sello Megumi (índice+medio+anular)            →  Silenciar sistema\n"
     "Aplauso (2 manos, acercar y separar)          →  Teclado HUD\n"
     "Corazón coreano (pulgar+índice, sostenido)    →  Captura\n"
-    "Índice quieto sobre el objetivo (dwell)       →  Click izquierdo"
+    "Índice quieto sobre el objetivo (dwell)       →  Click izquierdo\n"
+    "Pulgar + Índice (pinch) x2 rápido             →  Doble click"
 )
 
 

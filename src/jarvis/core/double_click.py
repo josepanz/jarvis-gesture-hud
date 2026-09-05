@@ -1,15 +1,16 @@
 """DoubleClickDetector (TASK-019, spec.md #12).
 
 "Double click SHALL require: two valid click events + maximum_inter_click_interval.
-Default SHOULD be approximately 400-500 ms." Standalone, tested classifier - NOT
-wired into GestureEngine's PINCH_DOWN/PINCH_UP handling.
-
-Why not wired in: nothing in this app currently maps double-click to any action, and
-"Single click is not duplicated" (TASK-019's own acceptance criterion) requires
-holding back the FIRST click's firing until the interval window closes to see if a
-second one follows - that is a real, perceptible latency regression on the single
-most-used existing interaction (left click) unless done carefully. Wiring this in
-is a follow-up decision, not a mechanical one.
+Default SHOULD be approximately 400-500 ms." Wired into `GestureEngine`
+(C-02, WORKPLAN.md §10, `hardening-and-polish`) - register_click() is called
+on PINCH_UP (click completo), classifying it against the PREVIOUS completed
+click rather than holding the first one back: "Single click is not
+duplicated" (TASK-019's own acceptance criterion) is satisfied WITHOUT the
+naive "hold back the first click to see if a second follows" design, which
+would have added real, perceptible latency to the single most-used existing
+interaction (left click). See gestures.py's `process()` for the gate and
+main.py's `_dispatch_migrated()` for how the recognized second click is
+re-anchored to the first click's screen position.
 """
 
 import time

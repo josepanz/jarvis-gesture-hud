@@ -57,6 +57,10 @@ ENTRIES = [
     # (config.DWELL_CLICK_ENABLED) - la fila existe igual para que sea
     # reasignable desde el settings apenas se habilite.
     ("Índice quieto sobre el objetivo (dwell)", "Click izquierdo", "dwell_click"),
+    # C-02 (WORKPLAN.md §10, workflow 8): doble click, re-anclado a la
+    # posicion del primero - siempre activo (no tiene el riesgo de falso
+    # positivo del dwell, es un pinch normal x2 dentro del intervalo).
+    ("Pulgar + Índice (pinch) x2 rápido", "Doble click", "double_click"),
 ]
 
 

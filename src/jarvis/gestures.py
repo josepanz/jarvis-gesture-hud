@@ -23,6 +23,7 @@ import time
 from jarvis import config
 from jarvis.core.cooldown import CooldownRegistry
 from jarvis.core.debounce import ConsecutiveFrameDebouncer, MissToleranceCounter
+from jarvis.core.double_click import DoubleClickDetector
 from jarvis.core.dwell import DwellDetector
 from jarvis.temporal_gesture import ImpulseDetector
 
@@ -466,6 +467,12 @@ class GestureEngine:
         self._dwell_detector = DwellDetector(duration_ms=config.DWELL_DURATION_MS, clock=time.time)
         self.dwell_progress = 0.0  # publico: main.py lo lee para dibujar draw_dwell_progress()
 
+        # C-02 (WORKPLAN.md §10): clasificador de doble click. clock=time.time
+        # por la misma razon que CooldownRegistry/DwellDetector arriba - vive
+        # dentro del engine porque necesita interactuar con self.cooldowns
+        # (bypassear COOLDOWN_CLICK para el segundo click de un par).
+        self._double_click_detector = DoubleClickDetector(clock=time.time)
+
     @staticmethod
     def _dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
@@ -523,6 +530,10 @@ class GestureEngine:
         self._korean_heart_hold_start = None
         self._dwell_detector.reset()
         self.dwell_progress = 0.0
+        # C-02: si la mano desaparece a mitad del intervalo de doble click,
+        # que no quede pendiente de emparejar contra un proximo click que ya
+        # ni siquiera es fisicamente el mismo gesto interrumpido.
+        self._double_click_detector.reset()
 
     def _process_two_hand_gestures(self, hands, w, h, now):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
@@ -987,6 +998,22 @@ class GestureEngine:
             events.append("PINCH_DOWN")
         elif not is_pinching and self.was_pinching:
             events.append("PINCH_UP")
+            # C-02 (WORKPLAN.md §10): clasificar el click recien completado.
+            # COOLDOWN_CLICK (300ms) es mas chico que el intervalo de doble
+            # click de Windows (~500ms) - un segundo PINCH_DOWN genuino y
+            # rapido puede llegar a estar bloqueado por el cooldown (evento
+            # jamas emitido), pero `was_pinching` igual transiciona a False
+            # aca sin importar el cooldown, asi que este PINCH_UP SI se
+            # emite. No hay forma de "revivir" un PINCH_DOWN ya perdido -
+            # quien despache DOUBLE_CLICK sintetiza el click completo el
+            # mismo, re-anclado a la posicion de pantalla del primero (ver
+            # main.py). reset() del cooldown para que el bypass no bloquee
+            # al SIGUIENTE click normal (no se acumula: DoubleClickDetector
+            # ya limpia su propio streak tras un "double", un tercer click
+            # rapido arranca un par nuevo, nunca un triple).
+            if self._double_click_detector.register_click() == "double":
+                self.cooldowns.reset(COOLDOWN_CLICK)
+                events.append("DOUBLE_CLICK")
         self.was_pinching = is_pinching
 
         # Click derecho (edge-triggered). Cooldown propio (COOLDOWN_RIGHT_CLICK) -

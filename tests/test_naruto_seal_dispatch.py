@@ -348,5 +348,34 @@ class DwellClickDispatchTests(_AppTestCase):
         self.assertFalse(self.mock_mouse_pyautogui.mouseDown.called)
 
 
+class DoubleClickDispatchTests(_AppTestCase):
+    """C-02 (WORKPLAN.md §10, workflow 8): DOUBLE_CLICK dispatch - re-anclado
+    a la posicion de pantalla del PRIMER click (self._last_click_screen_xy,
+    seteado por un PINCH_DOWN real, no bloqueado por cooldown)."""
+
+    def test_double_click_moves_to_the_first_clicks_position_then_clicks(self):
+        # run() mantiene self._last_screen_xy actualizado cuadro a cuadro
+        # (fuera de _dispatch_bound_event) - se simula aca porque el test
+        # llama _dispatch_bound_event directo, sin pasar por run().
+        self.app._last_screen_xy = (100, 200)
+        self.app._dispatch_bound_event("PINCH_DOWN", cam_xy=(10, 10), screen_xy=(100, 200))
+        self.app._dispatch_bound_event("PINCH_UP", cam_xy=(10, 10), screen_xy=(100, 200))
+        self.mock_mouse_pyautogui.reset_mock()
+
+        self.app._dispatch_bound_event("DOUBLE_CLICK", cam_xy=(12, 11), screen_xy=(101, 201))
+
+        self.mock_mouse_pyautogui.moveTo.assert_called_once_with(100, 200)  # posicion del PRIMER click
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+        self.assertFalse(self.app.is_dragging)  # click completo, no un drag
+
+    def test_double_click_with_no_prior_click_anchor_still_clicks_without_moving(self):
+        self.app._dispatch_bound_event("DOUBLE_CLICK", cam_xy=(12, 11), screen_xy=(101, 201))
+
+        self.assertFalse(self.mock_mouse_pyautogui.moveTo.called)
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

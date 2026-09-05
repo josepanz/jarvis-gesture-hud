@@ -19,7 +19,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jarvis import config  # noqa: E402
-from jarvis.gestures import GestureEngine  # noqa: E402
+from jarvis.gestures import COOLDOWN_CLICK, GestureEngine  # noqa: E402
 from jarvis.gestures import _is_shaka  # noqa: E402
 from jarvis.hand_tracker import Hand  # noqa: E402
 
@@ -1889,6 +1889,74 @@ class DwellClickTests(unittest.TestCase):
             engine.active = False
             _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
             self.assertNotIn("DWELL_CLICK", events)
+
+
+class DoubleClickTests(unittest.TestCase):
+    """C-02 (WORKPLAN.md §10, workflow 8): doble click re-anclado - dos
+    pinches (index) completos dentro de DoubleClickDetector.max_interval_ms
+    (450ms) producen un DOUBLE_CLICK ademas del PINCH_UP normal."""
+
+    def test_a_single_click_never_produces_a_double_click_event(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("DOUBLE_CLICK", events)
+
+    def test_second_rapid_pinch_downs_event_is_actually_suppressed_by_the_cooldown(self):
+        # Causa raiz documentada en el WORKPLAN: CLICK_COOLDOWN (300ms) es
+        # mas chico que el intervalo de doble click de Windows (~500ms), asi
+        # que el PINCH_DOWN de un segundo pellizco rapido y genuino NUNCA se
+        # emite - DOUBLE_CLICK es lo unico que representa ese segundo click.
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        _, _, events_down = process(engine, pinch_click_hand(pinched=True))
+        self.assertNotIn("PINCH_DOWN", events_down)  # tragado por el cooldown
+
+    def test_two_rapid_pinches_within_the_interval_produce_a_double_click(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))  # click 2: PINCH_DOWN suprimido
+        _, _, events = process(engine, pinch_click_hand(pinched=False))  # click 2: release
+        self.assertIn("PINCH_UP", events)
+        self.assertIn("DOUBLE_CLICK", events)
+
+    def test_pinches_separated_by_more_than_the_interval_are_two_normal_clicks(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        # Simula que paso mas que el intervalo Y que el cooldown de click ya
+        # expiro (en la app real, los 2 avanzan con el mismo reloj de pared).
+        engine._double_click_detector._last_click_time = time.time() - 1.0
+        engine.cooldowns.reset(COOLDOWN_CLICK)
+
+        _, _, events_down = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertIn("PINCH_DOWN", events_down)  # click 2: normal, no bloqueado
+        _, _, events_up = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events_up)
+        self.assertNotIn("DOUBLE_CLICK", events_up)
+
+    def test_three_rapid_pinches_are_a_pair_plus_a_single_not_a_triple(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))
+        _, _, events2 = process(engine, pinch_click_hand(pinched=False))  # click 2 -> double
+        self.assertIn("DOUBLE_CLICK", events2)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))
+        _, _, events3 = process(engine, pinch_click_hand(pinched=False))  # click 3 -> single otra vez
+        self.assertNotIn("DOUBLE_CLICK", events3)
 
 
 if __name__ == "__main__":

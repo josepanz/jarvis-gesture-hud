@@ -173,10 +173,11 @@ _MIGRATED_GESTURES = frozenset(
         "VOLUME_DOWN",
         "SCREENSHOT",
         "LOCK_SESSION",
-        # C-01 (WORKPLAN.md §10, workflow 8): dwell-click - termina en un
-        # click real (Command/CommandBus), entra por el mismo camino migrado
-        # que PINCH_DOWN/UP.
+        # C-01/C-02 (WORKPLAN.md §10, workflow 8): dwell-click y doble click -
+        # los dos terminan en un click real (Command/CommandBus), entran por
+        # el mismo camino migrado que PINCH_DOWN/UP.
         "DWELL_CLICK",
+        "DOUBLE_CLICK",
     }
 )
 
@@ -239,6 +240,9 @@ GESTURE_DEFAULT_BINDINGS = {
     # default como cualquier gesto "clasico" - reasignable desde el settings
     # como el resto de esta lista.
     "DWELL_CLICK": "DWELL_CLICK",
+    # C-02 (WORKPLAN.md §10, workflow 8): doble click, misma identidad por
+    # default.
+    "DOUBLE_CLICK": "DOUBLE_CLICK",
     "RIGHT_CLICK": "RIGHT_CLICK",
     "SCROLL_UP": "SCROLL_UP",
     "SCROLL_DOWN": "SCROLL_DOWN",
@@ -359,6 +363,7 @@ class JarvisApp:
         self.is_dragging = False
         self.should_quit = False
         self._last_screen_xy = None
+        self._last_click_screen_xy = None  # C-02: posicion del ultimo click real, para re-anclar el doble click
         self._last_command_name = None
         self._last_fps = 0.0
 
@@ -396,6 +401,7 @@ class JarvisApp:
             elif not self.is_dragging:
                 self.command_bus.dispatch(MouseButtonCommand(pressed=True))
                 self.is_dragging = True
+                self._last_click_screen_xy = self._last_screen_xy  # C-02: ancla para un eventual doble click
         elif gesture_type == "PINCH_UP":
             if self.is_dragging:
                 self.command_bus.dispatch(MouseButtonCommand(pressed=False))
@@ -433,6 +439,18 @@ class JarvisApp:
             else:
                 self.command_bus.dispatch(MouseButtonCommand(pressed=True))
                 self.command_bus.dispatch(MouseButtonCommand(pressed=False))
+        elif gesture_type == "DOUBLE_CLICK":
+            # C-02: el PINCH_DOWN de este segundo click pudo haber sido
+            # tragado por CLICK_COOLDOWN (ver gestures.py) - se sintetiza el
+            # click completo aca, re-anclado a la posicion de pantalla del
+            # PRIMER click (no la actual: el propio puntero pudo correrse
+            # entre los 2 pellizcos) para que el SO los empareje como doble
+            # click nativo.
+            if self._last_click_screen_xy is not None:
+                self.command_bus.dispatch(MouseMoveCommand(*self._last_click_screen_xy))
+            self.command_bus.dispatch(MouseButtonCommand(pressed=True))
+            self.command_bus.dispatch(MouseButtonCommand(pressed=False))
+            self.overlay.show_bubble("🖱🖱 Doble click", *self._feedback_position())
 
     def _dispatch_key_action(self, key_action):
         if key_action.kind == "layout":
