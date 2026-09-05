@@ -40,8 +40,12 @@ demostrable. Lo que se cablea:
   FPS/gesto/comando/perfil - apagado por default, no cambia nada hasta que se
   activa.
 - Context Engine: ForegroundApplicationTracker corre cacheado (0.5s) y se
-  registra en telemetry - detecta la app en primer plano de verdad, aunque
-  todavia no hay ningun binding contextual de gestos usandolo (ver mas abajo).
+  registra en telemetry - detecta la app en primer plano de verdad. A-03
+  (WORKPLAN.md `hardening-and-polish` §9) cablea ademas su consumidor real:
+  `_dispatch_bound_event()` resuelve `profile.context_rules[app][evento]`
+  antes que el override del perfil / default global / identidad. Con
+  `context_rules` vacio en todos los perfiles (sin editor propio todavia -
+  A-03b) el comportamiento es byte-identico al de antes.
 - Voz STT + LLM (tecla 'v', push-to-talk por toggle - no hay key-up real en
   el polling por frame de cv2.waitKey, asi que se activa/desactiva con la
   misma tecla en vez de mantenerla apretada): jarvis.voice_capture.VoiceListener
@@ -63,19 +67,16 @@ Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
 - GestureStateMachine: no hay un punto de enganche de bajo riesgo sin
   reestructurar el loop de deteccion de GestureEngine (que sigue siendo
   boolean/umbral, no productor de estados formales).
-- Debounce (ConsecutiveFrameDebouncer) / CooldownRegistry genericos:
-  GestureEngine ya tiene su propio mecanismo de cooldown funcionando y testeado
-  (config.py + `self.last_*_time`) - reemplazarlo es un refactor con riesgo de
-  regresion real sin ningun cambio de comportamiento a cambio.
 - ConfidenceFilter: GestureEngine detecta por umbral booleano, no produce un
   score de confianza real - forzar el filtro sobre un valor siempre-1.0 seria
   decorativo. Se cablea de verdad en el pipeline de voz (PHASE 14 en esta misma
   rama), donde STT/LLM si producen confianza genuina.
-- SwipeDetector/DoubleClickDetector/DwellDetector + bindings contextuales de
-  gestos: activarlos por default significaria inventar mapeos gesto->accion
-  nuevos (que swipe hace que cosa) que nadie pidio, con riesgo real de falsos
-  positivos durante uso normal (un swipe rapido de la mano ya pasa moviendo el
-  mouse). Quedan construidos y testeados, sin activar.
+- SwipeDetector/DoubleClickDetector/DwellDetector: activarlos por default
+  significaria inventar mapeos gesto->accion nuevos (que swipe hace que cosa)
+  que nadie pidio, con riesgo real de falsos positivos durante uso normal (un
+  swipe rapido de la mano ya pasa moviendo el mouse). Quedan construidos y
+  testeados, sin activar (ver workflow 8 del WORKPLAN de hardening-and-polish
+  para el plan de cablearlos).
 - Reescribir el loop de camara para pasar por GestureInputProvider/
   KeyboardInputProvider: el loop actual funciona y esta bien testeado: cambiar
   su estructura interna es riesgo real por cero cambio de comportamiento.
@@ -113,6 +114,7 @@ from jarvis.core.command_history import CommandHistory
 from jarvis.core.command_metrics import CommandMetricsRecorder
 from jarvis.core.confidence import ConfidenceFilter, format_confidence
 from jarvis.core.context_tracker import ForegroundApplicationTracker
+from jarvis.core.contextual_bindings import resolve_contextual_intent
 from jarvis.core.contextual_hud import ContextualHudRenderer
 from jarvis.core.events import GestureEvent
 from jarvis.core.feedback import FeedbackManager
@@ -132,7 +134,7 @@ from jarvis.llm_intent import LLMIntentResolver
 from jarvis.overlay import ScreenOverlay
 from jarvis.paths import writable_assets_dir
 from jarvis.pose_tracker import PoseTracker, filter_hands_by_pose_ownership
-from jarvis.settings_ui import SettingsWindow
+from jarvis.settings_ui import HOLD_CAPABLE_EVENTS, HOLD_REQUIRED_ACTIONS, SettingsWindow
 from jarvis.voice import VoiceJarvis
 from jarvis.voice_capture import VoiceListener
 
@@ -672,13 +674,10 @@ class JarvisApp:
         """TASK-063 (Fase 4), generalizado en TASK-081 (Fase 8) a TODO gesto
         y tecla que la app puede producir, no solo sellos - de ahi el nombre
         (H-24: se llamaba `_dispatch_naruto_seal` por su origen en Fase 4,
-        cuando solo despachaba sellos Naruto). Resuelve el binding (override
-        del perfil activo > GESTURE_DEFAULT_BINDINGS > el propio evento, via
-        ProfileManager.get_gesture_binding() ya existente - TODO evento real
-        tiene un default identity o tematico, asi que ese ultimo caso es
-        puramente defensivo) y ejecuta: macro/atajo custom si el binding
-        apunta a uno, si no `_dispatch()` con el mismo cam_xy/screen_xy que
-        recibio el gesto original (PINCH_DOWN/UP los siguen necesitando).
+        cuando solo despachaba sellos Naruto). Resuelve el binding y ejecuta:
+        macro/atajo custom si el binding apunta a uno, si no `_dispatch()` con
+        el mismo cam_xy/screen_xy que recibio el gesto original (PINCH_DOWN/UP
+        los siguen necesitando).
 
         H-09: soltar el boton del mouse al llegar un PINCH_UP fisico es un
         invariante del sistema, no una accion reasignable - corre ANTES de
@@ -691,7 +690,23 @@ class JarvisApp:
             self.command_bus.dispatch(MouseButtonCommand(pressed=False))
             self.is_dragging = False
 
-        action_name = self.profiles.get_gesture_binding(event, global_bindings=GESTURE_DEFAULT_BINDINGS)
+        # A-03 (WORKPLAN.md §9): precedencia explicita, en este orden -
+        # 1) regla por app en foco del perfil activo, 2) override del perfil,
+        # 3) default global, 4) identidad. Con context_rules vacio (todos los
+        # perfiles hoy) resolve_contextual_intent() devuelve None de entrada
+        # (bindings_by_app.get(app) da falsy) y esto cae exactamente en el
+        # comportamiento de antes - byte-identico mientras nadie defina una
+        # regla.
+        action_name = resolve_contextual_intent(event, self.context_tracker.get(), self.profiles.active.context_rules)
+        # H-10: mismo gate que la UI de rebinding (settings_ui._rebind_target_options) -
+        # una regla por app tampoco puede habilitar una accion HOLD_REQUIRED
+        # sobre un evento sin hold propio. context_rules no tiene editor propio
+        # todavia (A-03b), pero nada impide poblarlo por codigo/test, asi que
+        # el gate va aca en vez de confiar en que la (futura) UI lo respete.
+        if action_name in HOLD_REQUIRED_ACTIONS and event not in HOLD_CAPABLE_EVENTS:
+            action_name = None
+        if action_name is None:
+            action_name = self.profiles.get_gesture_binding(event, global_bindings=GESTURE_DEFAULT_BINDINGS)
         if action_name is None:
             action_name = event
         if self._dispatch_macro_or_shortcut(action_name):
@@ -798,7 +813,13 @@ class JarvisApp:
             self._last_fps = round(1000 / frame_time_ms, 1) if frame_time_ms > 0 else 0.0
             self.perf_metrics.record_frame_time(frame_time_ms)
             self.perf_metrics.record_fps(self._last_fps)
-            self.context_tracker.get()  # cached (0.5s TTL) - cheap, keeps context "live"
+            # A-03: mantiene la cache (0.5s TTL) tibia todos los cuadros, no
+            # solo cuando dispara un gesto - _dispatch_bound_event() tambien
+            # llama a .get() para resolver context_rules, y sin este pre-warm
+            # una racha larga sin gestos dejaria esa llamada vieja y forzaria
+            # una consulta sincronica al SO justo en el camino critico de
+            # despacho del proximo gesto.
+            self.context_tracker.get()
 
         # H-12: salir con 'q' sin haber vuelto a apretar 'v' dejaba el
         # sounddevice.InputStream abierto (el microfono tomado mas alla de la

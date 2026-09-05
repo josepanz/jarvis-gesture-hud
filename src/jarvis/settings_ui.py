@@ -60,8 +60,11 @@ _CLASSIC_EVENT_ICON_KEYS = {
 # estructural en CommandBus (que requeriria que GestureEvent cargue
 # evidencia real de duracion desde GestureEngine hasta el dispatcher - fuera
 # de alcance de este fix, ver H-10 en el WORKPLAN de hardening-and-polish).
-_HOLD_REQUIRED_ACTIONS = frozenset({"LOCK_SESSION"})
-_HOLD_CAPABLE_EVENTS = frozenset(
+# Publicos (sin "_") porque A-03 (mismo WORKPLAN, §9) los reusa desde main.py
+# para el mismo gate sobre context_rules - una regla por app tampoco puede
+# habilitar HOLD_REQUIRED sobre un evento sin hold propio.
+HOLD_REQUIRED_ACTIONS = frozenset({"LOCK_SESSION"})
+HOLD_CAPABLE_EVENTS = frozenset(
     {
         # sellos Naruto de 1 mano + JJK_MEGUMI: NARUTO_SEAL_HOLD_SECONDS
         "NARUTO_TORA", "NARUTO_USHI", "NARUTO_U", "NARUTO_UMA", "NARUTO_HITSUJI",
@@ -277,8 +280,8 @@ class SettingsWindow:
     def _rebind_target_options(self, event_name):
         """H-10: las acciones HOLD_REQUIRED (LOCK_SESSION) solo se ofrecen en
         filas cuyo gesto de origen ya sostiene su propio hold - ver
-        `_HOLD_CAPABLE_EVENTS` arriba."""
-        actions = VALID_ACTIONS if event_name in _HOLD_CAPABLE_EVENTS else VALID_ACTIONS - _HOLD_REQUIRED_ACTIONS
+        `HOLD_CAPABLE_EVENTS` arriba."""
+        actions = VALID_ACTIONS if event_name in HOLD_CAPABLE_EVENTS else VALID_ACTIONS - HOLD_REQUIRED_ACTIONS
         return sorted(actions) + sorted(self._profiles.active.custom_shortcuts) + sorted(
             self._profiles.active.macros
         )
