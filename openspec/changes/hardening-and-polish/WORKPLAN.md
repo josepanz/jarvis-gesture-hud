@@ -1527,7 +1527,7 @@ escribilo con lo que encontraste en vez de borrarla.
 - [x] H-18 gate de tests antes del release · commit: e64a734
 - [x] H-19 pinear dependencias · commit: b6d6d3b
 - [x] H-20 cache de pip en CI · commit: e9294f8
-- [ ] H-21 subprocess en vez de os.system · commit: ______
+- [x] H-21 subprocess en vez de os.system · commit: 5c1abc8 (tests/test_os_native.py no existia, se creo — el original citado en la tarea nunca se habia escrito)
 - [ ] H-22 sincronizar el buffer de audio · commit: ______
 - [ ] H-23 (agrupar) temp único en config_store
 - [ ] H-24 renombrar `_dispatch_naruto_seal` · commit: ______
