@@ -496,6 +496,29 @@ de detección por 6.
 
 ---
 
+### Y-08 · Fix: sostener un sello no debe completar de paso el hold de pausa
+
+**No estaba planeada** - hallazgo real del Workflow 4 (Y-V3, verificación en cámara
+con José, 2026-09-06): armar Ne (y en general cualquier sello que curve bastante
+los dedos de las 2 manos, ej. Ushi/Saru) satisface de paso `_is_fist` en ambas
+manos. Sin protección, sostenerlo lo suficiente completaba TAMBIÉN el hold de
+`both_fists` (`PAUSE_HOLD_SECONDS`, `gestures.py`) y disparaba `TOGGLE_ACTIVE`
+sin querer - se vio en vivo dos veces armando Ne.
+
+**Causa raíz**: el modelo (Y-01/Y-02/Y-03) corre y acumula su propio hold en
+`main.py`, completamente aparte de `_process_two_hand_gestures()` - nunca hereda
+la jerarquía que sí protege a `JJK_GOJO_DOMAIN`, que sigue viviendo adentro de
+esa función.
+
+**Fix**: `external_seal_in_progress` (el mismo mecanismo que la trampa 2 de Y-04,
+ya inyectado por `main.py` desde `HandSignTracker.hold_seal`) ahora también
+suspende el hold de `both_fists` en `_process_two_hand_gestures()`, no solo los
+gates de dwell/swipe.
+
+**Commit**: `fix: sostener un sello ya no completa de paso el hold de pausa` · `5531ee9`
+
+---
+
 ## 6. WORKFLOW 4 — Verificación en cámara (REQUIERE A JOSÉ)
 
 Reemplaza a **V-01 y V-02** del WORKPLAN de `hardening-and-polish`, que quedaron sin
@@ -548,13 +571,66 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 
 - [x] Y-06 Mizunoe y Gassho · commit: 1683272
 - [ ] Y-07 secuencias de sellos · commit: ______
+- [x] Y-08 fix colisión sello/pausa (no planeada, hallazgo Y-V3) · commit: 5531ee9
 
 ### Workflow 4 — Cámara real (requiere a José)
 
-- [ ] Y-V1 los 12 sellos, uno por uno
-- [ ] Y-V2 costo real con 1 vs. 2 manos
-- [ ] Y-V3 falsos positivos contra los gestos clásicos de 2 manos
-- [ ] Y-V4 ajuste del umbral (0.7) y del hold (1.2 s) con datos reales
+- [x] Y-V1 los 12 sellos, uno por uno
+- [x] Y-V2 costo real con 1 vs. 2 manos
+- [x] Y-V3 falsos positivos contra los gestos clásicos de 2 manos
+- [x] Y-V4 ajuste del umbral (0.7) y del hold (1.2 s) con datos reales
+
+#### Resultados (verificado en cámara real, José, 2026-09-06)
+
+Cámara DroidCam (fuente de FPS inestable de por sí, ver Y-V2). Debug HUD
+instrumentado para esta sesión con `sign`/`sign_hold` (clase+score crudo y
+progreso del hold en vivo) - ver `hand_sign_tracker.HandSignTracker.last_detection`/
+`hold_elapsed`/`hold_needed` y `main.py` (telemetry del HUD), commit `393e9ba`.
+
+**Y-V1 — score real por sello** (los 14, con forma correcta):
+
+| Sello | Score | Disparó |
+|---|---|---|
+| Tora | 0.83 | sí (captura real guardada en `captures/`) |
+| Ushi | 0.89 | sí |
+| U | 0.87 | sí |
+| Uma | 0.94 | sí |
+| Hitsuji | 0.78 | sí (el más ajustado del zodíaco) |
+| Saru | 0.86 | sí |
+| Inu | 0.79 | sí (pasó umbral, confirmado por score) |
+| I (Boar) | — | sí (bloqueó la sesión real - LOCK_SESSION) |
+| Ne | 0.84 | sí |
+| Mi | 0.89-0.90 | sí |
+| Tori | 0.87 | sí |
+| Tatsu | 0.82 | sí (necesitó reintento - la primera forma no llegó a 0.7) |
+| Mizunoe | 0.76 | sí (pasó umbral) |
+| Gassho | 0.43 -> 0.91 | sí, recién tras corregir postura (cerró la app real - CLOSE_APP) |
+
+Rango real con forma correcta: **0.76-0.94**. Confirma el rango medido en
+Y-01 con las fotos estáticas (0.82-0.93) - la cámara en vivo no lo empeora
+de forma relevante.
+
+**Y-V2 — costo real**: FPS con 1 mano ~21-33, con 2 manos ~16-22 (mismo
+rango de variación con o sin el modelo corriendo - la varianza de DroidCam
+domina la medición, no se puede aislar limpiamente el costo de ~8ms que ya
+midió Y-01 con este instrumento). No contradice la medición de Y-01; no la
+reemplaza tampoco.
+
+**Y-V3 — falso positivo real encontrado**: armar Ne (manos juntas cerca de
+la cara) pasa, en el camino, por una forma que se lee como "2 puños
+juntos" - si se sostiene ese tránsito más de `PAUSE_HOLD_SECONDS` (1.2s),
+dispara `TOGGLE_ACTIVE` (pausa) sin querer, dos veces en esta sesión. No es
+un sello inventado disparando solo (los 14 sellos en sí no dieron ningún
+falso positivo cruzado), pero sí una colisión real entre el gate de 2 manos
+"clásico" (`gestures.py`, `_is_fist`/`both_fists`) y el sello detectado por
+el modelo - **causa raíz**: el modelo corre y acumula hold en main.py
+completamente aparte de `_process_two_hand_gestures()`, así que nunca hereda
+la jerarquía que sí protege a JJK_GOJO_DOMAIN (que sigue viviendo adentro de
+esa función). Fix: ver Y-08 más abajo.
+
+**Y-V4 — umbral y hold**: **no se ajustan**. 0.7 discrimina bien (Gassho mal
+hecho: 0.43, filtrado correctamente; bien hecho: 0.91) y 1.2s se sintió
+cómodo en el uso real, sin quejas.
 
 ---
 
