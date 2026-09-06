@@ -147,6 +147,19 @@ ICON_SPECS = {
         "pinch": None,
         "glyph": None,
     },
+    # Y-06: Gassho y Mizunoe - no son sellos del zodiaco, pero el modelo los
+    # distingue igual. Gassho: palmas planas juntas en oracion, los 4 dedos
+    # extendidos en ambas manos (glyph "close" reusado - mismo tema que su
+    # accion default, CLOSE_APP). Mizunoe: parecido a Inu en la foto
+    # (docs/gesture-reference/canonical/13_mizunoe.jpg vs. 11_inu_dog.jpg) -
+    # mismo set de dedos que naruto_inu, distinguido por el glyph.
+    "naruto_gassho": {
+        "hands": 2,
+        "extended": ({"index", "middle", "ring", "pinky"}, {"index", "middle", "ring", "pinky"}),
+        "pinch": None,
+        "glyph": "close",
+    },
+    "naruto_mizunoe": {"hands": 2, "extended": ({"pinky"}, {"pinky"}), "pinch": None, "glyph": "arrow_left"},
     # TASK-070 (Fase 6): sellos JJK.
     "jjk_gojo_domain": {
         # Marco en L (pulgar+indice) de ambas manos - set de dedos extendidos

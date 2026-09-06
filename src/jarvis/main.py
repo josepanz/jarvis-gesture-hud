@@ -218,6 +218,23 @@ GESTURE_DEFAULT_BINDINGS = {
     # nunca correspondio a nada real. Su accion default (CLOSE_APP) sigue
     # alcanzable con las 2 manos en Shaka sostenidas.
     "NARUTO_TATSU": "VOLUME_UP",
+    # Y-06 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): Gassho y
+    # Mizunoe salen gratis del modelo (no son sellos del zodiaco, pero el
+    # modelo los distingue igual) - mismo mecanismo de hold que el resto.
+    # CLOSE_APP quedo libre en Y-04 (era el default de NARUTO_KAI, borrado);
+    # SCROLL_LEFT nunca tuvo default - los 2 unicos huecos que quedaban en
+    # VALID_ACTIONS antes de esta tarea (junto con SCROLL_RIGHT).
+    #
+    # Ojo con CLAP (advertencia explicita del WORKPLAN): Gassho es una pose
+    # ESTATICA de manos juntas, CLAP es un impulso (acercar+separar,
+    # ImpulseDetector en gestures.py). Verificado en el codigo (no en camara
+    # - pendiente Y-V3): ImpulseDetector tiene un estado "expired" explicito
+    # para exactamente este caso - un contacto sostenido mas alla de
+    # CLAP_MAX_WINDOW_SECONDS (0.4s, bien por debajo de
+    # NARUTO_TWOHAND_HOLD_SECONDS=1.2s) nunca dispara al soltarse (ver
+    # tests/test_temporal_gesture.py::test_a_sustained_hold_that_eventually_releases_does_not_fire).
+    "NARUTO_GASSHO": "CLOSE_APP",
+    "NARUTO_MIZUNOE": "SCROLL_LEFT",
     # TASK-070 (Fase 6): sellos JJK. El vocabulario fijo de acciones
     # (VALID_ACTIONS, 14 en total) ya esta agotado por los 12 sellos Naruto
     # de arriba - queda UNA sola accion sin usar (RIGHT_CLICK). Las otras 2

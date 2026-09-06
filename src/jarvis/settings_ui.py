@@ -70,10 +70,12 @@ HOLD_CAPABLE_EVENTS = frozenset(
         # sello de 1 mano que queda (el modelo no lo cubre): NARUTO_SEAL_HOLD_SECONDS
         "JJK_MEGUMI",
         # Los 12 sellos reales, todos de 2 manos (modelo YOLOX, ver
-        # hand_sign_tracker.py) + JJK_GOJO_DOMAIN: NARUTO_TWOHAND_HOLD_SECONDS.
+        # hand_sign_tracker.py) + Gassho/Mizunoe (Y-06, mismo modelo, mismo
+        # mecanismo) + JJK_GOJO_DOMAIN: NARUTO_TWOHAND_HOLD_SECONDS.
         # NARUTO_KAI se borro (no es uno de los 14 sellos canonicos).
         "NARUTO_NE", "NARUTO_USHI", "NARUTO_TORA", "NARUTO_U", "NARUTO_TATSU", "NARUTO_MI",
         "NARUTO_UMA", "NARUTO_HITSUJI", "NARUTO_SARU", "NARUTO_TORI", "NARUTO_INU", "NARUTO_I",
+        "NARUTO_GASSHO", "NARUTO_MIZUNOE",
         "JJK_GOJO_DOMAIN",
         # holds propios
         "KOREAN_HEART", "LOCK_SESSION",

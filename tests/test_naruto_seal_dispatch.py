@@ -105,6 +105,17 @@ class DefaultBindingTests(_AppTestCase):
         self.app._dispatch_bound_event("NARUTO_NE")  # default: ZOOM_OUT
         self.mock_mouse_pyautogui.scroll.assert_called()
 
+    def test_gassho_default_binding_dispatches_the_right_command(self):
+        # Y-06 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): Gassho no
+        # es un sello del zodiaco, pero el modelo lo distingue igual - mismo
+        # _dispatch_bound_event, mismo mecanismo que el resto.
+        self.app._dispatch_bound_event("NARUTO_GASSHO")  # default: CLOSE_APP
+        self.assertTrue(self.app.should_quit)
+
+    def test_mizunoe_default_binding_dispatches_the_right_command(self):
+        self.app._dispatch_bound_event("NARUTO_MIZUNOE")  # default: SCROLL_LEFT
+        self.mock_mouse_pyautogui.hscroll.assert_called()
+
     def test_jjk_seal_default_binding_dispatches_the_right_command(self):
         # TASK-070 (Fase 6): mismo _dispatch_bound_event, extendido al
         # prefijo JJK_ en run() - la resolucion del binding en si nunca miro

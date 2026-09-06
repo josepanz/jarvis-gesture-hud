@@ -32,6 +32,8 @@ EXPECTED_EVENT_BY_FILE = {
     "10_tori_bird.jpg": "NARUTO_TORI",
     "11_inu_dog.jpg": "NARUTO_INU",
     "12_i_boar.jpg": "NARUTO_I",
+    "13_mizunoe.jpg": "NARUTO_MIZUNOE",
+    "14_gassho_clap.jpg": "NARUTO_GASSHO",
 }
 
 
@@ -125,9 +127,8 @@ class HandSignTrackerMockedModelTests(unittest.TestCase):
 
 
 class HandSignTrackerRealModelCanonicalImagesTests(unittest.TestCase):
-    """El caso central de Y-02: con el modelo real, cada una de las 14
-    imagenes de referencia produce su evento tras el hold (las 12 mapeadas;
-    Gassho/Mizunoe no tienen evento todavia, ver Y-06)."""
+    """El caso central de Y-02/Y-06: con el modelo real, cada una de las 14
+    imagenes de referencia produce su evento tras el hold."""
 
     @classmethod
     def setUpClass(cls):

@@ -31,10 +31,9 @@ ENTRIES = [
     ("Tecla m", "Modo espejo on/off", "key_mirror"),
     ("Teclas +/-", "Transparencia", "key_legend_opacity"),
     # Y-05 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 12 sellos
-    # reales, los 14 canonicos salvo Gassho/Mizunoe (Y-06, opcional). Todos de
-    # 2 MANOS - el modelo YOLOX de `hand_sign_tracker.py` los detecta y los
-    # sostiene config.NARUTO_TWOHAND_HOLD_SECONDS; ya no hay geometria propia
-    # que describir aca, la forma real esta fotografiada en
+    # del zodiaco, todos de 2 MANOS - el modelo YOLOX de `hand_sign_tracker.py`
+    # los detecta y los sostiene config.NARUTO_TWOHAND_HOLD_SECONDS; ya no hay
+    # geometria propia que describir aca, la forma real esta fotografiada en
     # `docs/gesture-reference/canonical/` (14 fotos, una por sello) - las
     # descripciones de abajo estan sacadas de esas fotos, no inventadas.
     # NARUTO_KAI se borro (no es uno de los 14 canonicos, AUDIT.md); su accion
@@ -51,6 +50,10 @@ ENTRIES = [
     ("Sello Mi (manos entrelazadas hacia abajo)", "Scroll abajo", "naruto_mi"),
     ("Sello Tori (manos en abanico, dedos juntos)", "Scroll arriba", "naruto_tori"),
     ("Sello Tatsu (manos en rombo, dedos curvados)", "Volumen +", "naruto_tatsu"),
+    # Y-06: Gassho y Mizunoe - no son sellos del zodiaco, pero el modelo los
+    # distingue igual (salian gratis) y usan el mismo mecanismo de hold.
+    ("Sello Gassho (manos juntas en oración, palmas planas)", "Cerrar Jarvis", "naruto_gassho"),
+    ("Sello Mizunoe (manos entrelazadas, parecido a Inu)", "Scroll izquierda", "naruto_mizunoe"),
     # TASK-070 (Fase 6): sellos JJK, sostenidos config.NARUTO_TWOHAND_HOLD_SECONDS
     # (Gojo) o config.NARUTO_SEAL_HOLD_SECONDS (Megumi) - Sukuna es temporal
     # (ImpulseDetector), sin hold.

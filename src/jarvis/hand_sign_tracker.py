@@ -6,10 +6,11 @@ la app necesita (umbral de score, debounce, hold, dedup) sin tocar `main.py`
 todavia - eso es Y-03.
 
 Mapea el nombre de clase del modelo a nuestro evento de siempre (tabla en
-`WORKPLAN.md` §2). `Gassho` y `Mizunoe` no tienen evento todavia (Y-06,
-opcional); una deteccion de esas dos clases, o de `Unknown`, o de la clase 16
-sin nombre (`class_name is None`, ver `hand_sign_model.py`), se trata igual
-que "no hay sello": no arranca ni sostiene ningun hold.
+`WORKPLAN.md` §2). Y-06 agrega Gassho y Mizunoe (salian gratis del modelo,
+sin geometria propia que escribir). `Unknown` y la clase 16 sin nombre
+(`class_name is None`, ver `hand_sign_model.py`) siguen sin evento: una
+deteccion de esas dos se trata igual que "no hay sello", no arranca ni
+sostiene ningun hold.
 
 Dedup y hold son deliberadamente distintos del `_naruto_hold_seal` de dos
 manos que hoy vive en `gestures.py` (que reemite el evento cada
@@ -36,9 +37,8 @@ MODEL_FILENAME = "hand_sign_yolox_nano.onnx"
 # camara (Y-V4).
 DEFAULT_MIN_SCORE = 0.7
 
-# Los 12 sellos que mapean 1:1 (WORKPLAN.md §2). Gassho/Mizunoe quedan afuera
-# a proposito (Y-06, opcional) - una deteccion de esas clases no tiene evento
-# y se trata como "no hay sello".
+# Los 12 sellos del zodiaco (WORKPLAN.md §2) + Gassho/Mizunoe (Y-06) - las 14
+# clases nombradas que el modelo distingue, salvo "Unknown".
 CLASS_NAME_TO_EVENT = {
     "Ne(Rat)": "NARUTO_NE",
     "Ushi(Ox)": "NARUTO_USHI",
@@ -52,6 +52,8 @@ CLASS_NAME_TO_EVENT = {
     "Tori(Bird)": "NARUTO_TORI",
     "Inu(Dog)": "NARUTO_INU",
     "I(Boar)": "NARUTO_I",
+    "Gassho": "NARUTO_GASSHO",
+    "Mizunoe": "NARUTO_MIZUNOE",
 }
 
 
