@@ -79,6 +79,34 @@ class HandSignTrackerMockedModelTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertIsNone(self.tracker.hold_seal)
 
+    def test_last_detection_reflects_the_raw_top_detection_even_below_threshold(self):
+        # Y-V1..Y-V4 (Workflow 4, WORKPLAN.md §6): diagnostico en vivo - se ve
+        # la deteccion cruda (score real) aunque no llegue a min_score ni
+        # tenga evento mapeado, para poder leer "cuanto falta" en camara.
+        self._tick(_seal("Ne(Rat)", score=0.4))
+        self.assertEqual(self.tracker.last_detection.class_name, "Ne(Rat)")
+        self.assertEqual(self.tracker.last_detection.score, 0.4)
+        self.assertIsNone(self.tracker.hold_seal)  # no llega a min_score, no cuenta como sello
+
+        self._tick(_seal("Unknown", score=0.95))
+        self.assertEqual(self.tracker.last_detection.class_name, "Unknown")
+        self.assertEqual(self.tracker.last_detection.score, 0.95)
+
+    def test_last_detection_is_none_when_the_model_sees_nothing(self):
+        events = self._tick([])
+        self.assertEqual(events, [])
+        self.assertIsNone(self.tracker.last_detection)
+
+    def test_hold_elapsed_tracks_progress_toward_hold_needed(self):
+        self._confirm("Ne(Rat)")
+        self.assertEqual(self.tracker.hold_elapsed, 0.0)  # el hold recien arranca
+
+        self.t += config.NARUTO_TWOHAND_HOLD_SECONDS / 2
+        self._tick(_seal("Ne(Rat)"))
+        self.assertGreater(self.tracker.hold_elapsed, 0.0)
+        self.assertLess(self.tracker.hold_elapsed, config.NARUTO_TWOHAND_HOLD_SECONDS)
+        self.assertEqual(self.tracker.hold_needed, config.NARUTO_TWOHAND_HOLD_SECONDS)
+
     def test_confirmed_and_held_emits_once(self):
         events = self._confirm("Ne(Rat)")
         self.assertEqual(events, [])  # el hold recien arranca este cuadro

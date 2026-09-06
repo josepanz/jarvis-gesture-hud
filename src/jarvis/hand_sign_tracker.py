@@ -80,11 +80,27 @@ class HandSignTracker:
         self._hold_start = None
         self._emitted_for_hold = False
 
+        # Y-V1..Y-V4 (Workflow 4, WORKPLAN.md §6): diagnostico en vivo para la
+        # verificacion en camara real - `main.py` los vuelca al HUD de debug
+        # (tecla `d`). `last_detection` es la MEJOR deteccion cruda del cuadro
+        # (score real, aunque este por debajo de min_score o sin evento
+        # mapeado - para poder ver "esta clasificando Tora a 0.55, falta
+        # llegar a 0.7" en vivo), o None si el modelo no detecto nada.
+        # `hold_elapsed`/`hold_needed` son el progreso del hold en curso (0 si
+        # no hay ninguno sostenido).
+        self.last_detection = None
+        self.hold_elapsed = 0.0
+        self.hold_needed = self._hold_seconds
+
     def _best_mapped_class(self, frame):
         """Mejor deteccion (mayor score) que supere `min_score` Y tenga un
         evento mapeado, o None. `HandSignModel.detect()` ya devuelve la lista
-        ordenada de mayor a menor score."""
-        for detection in self._model.detect(frame):
+        ordenada de mayor a menor score. De paso guarda esa mejor deteccion
+        CRUDA (sin filtrar) en `self.last_detection`, para diagnostico en
+        camara (Y-V1..Y-V4) - una sola llamada a `detect()`, no dos."""
+        detections = self._model.detect(frame)
+        self.last_detection = detections[0] if detections else None
+        for detection in detections:
             if detection.score < self._min_score:
                 break
             if detection.class_name in CLASS_NAME_TO_EVENT:
@@ -105,15 +121,18 @@ class HandSignTracker:
             self.hold_seal = None
             self._hold_start = None
             self._emitted_for_hold = False
+            self.hold_elapsed = 0.0
             return []
 
         if self.hold_seal != class_name:
             self.hold_seal = class_name
             self._hold_start = now
             self._emitted_for_hold = False
+            self.hold_elapsed = 0.0
             return []
 
-        if not self._emitted_for_hold and now - self._hold_start >= self._hold_seconds:
+        self.hold_elapsed = now - self._hold_start
+        if not self._emitted_for_hold and self.hold_elapsed >= self._hold_seconds:
             self._emitted_for_hold = True
             return [CLASS_NAME_TO_EVENT[class_name]]
 

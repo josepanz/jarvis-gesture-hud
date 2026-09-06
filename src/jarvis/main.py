@@ -904,16 +904,26 @@ class JarvisApp:
                 draw_hand_overlay(frame, hands, self.gestures.last_primary_landmarks, events[-1] if events else None)
 
             if self.hud_renderer.debug:
-                self.hud_renderer.render(
-                    frame,
-                    "TRACKING" if hands else "IDLE",
-                    telemetry={
-                        "fps": self._last_fps,
-                        "gesture": events[-1] if events else None,
-                        "command": self._last_command_name,
-                        "profile": self.profiles.active.name,
-                    },
-                )
+                telemetry = {
+                    "fps": self._last_fps,
+                    "gesture": events[-1] if events else None,
+                    "command": self._last_command_name,
+                    "profile": self.profiles.active.name,
+                }
+                # Y-V1..Y-V4 (Workflow 4, WORKPLAN.md §6): diagnostico en vivo
+                # de HandSignTracker mientras se verifica en camara real - la
+                # mejor deteccion cruda (score real, aunque no llegue a
+                # min_score) y el progreso del hold en curso.
+                if self.hand_sign_tracker is not None:
+                    detection = self.hand_sign_tracker.last_detection
+                    if detection is not None:
+                        telemetry["sign"] = f"{detection.class_name} {detection.score:.2f}"
+                    if self.hand_sign_tracker.hold_seal is not None:
+                        telemetry["sign_hold"] = (
+                            f"{self.hand_sign_tracker.hold_seal} "
+                            f"{self.hand_sign_tracker.hold_elapsed:.2f}/{self.hand_sign_tracker.hold_needed:.2f}s"
+                        )
+                self.hud_renderer.render(frame, "TRACKING" if hands else "IDLE", telemetry=telemetry)
 
             self.overlay.pump()
 
