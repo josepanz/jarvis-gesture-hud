@@ -540,7 +540,7 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 
 ### Workflow 2 — Cablear y borrar lo inventado
 
-- [ ] Y-03 cablear en el loop, gate de 2 manos (**requiere Y-02**) · commit: ______
+- [x] Y-03 cablear en el loop, gate de 2 manos (**requiere Y-02**) · commit: d88ff68
 - [ ] Y-04 borrar los sellos de una mano (**requiere Y-03**) · commit: ______
 - [ ] Y-05 leyenda, iconos y settings a las formas reales · commit: ______
 
