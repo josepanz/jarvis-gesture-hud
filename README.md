@@ -90,4 +90,4 @@ jarvis-gesture-hud/
 └── captures/                # screenshots guardados
 ```
 
-Correr los tests: `python -m unittest discover -s tests -v` (724 tests, sin dependencias nuevas). Detalles de qué está probado, cómo, y las convenciones para agregar módulos nuevos en [ARCHITECTURE.md § Development](ARCHITECTURE.md#development).
+Correr los tests: `python -m unittest discover -s tests -v` (749 tests, sin dependencias nuevas). Detalles de qué está probado, cómo, y las convenciones para agregar módulos nuevos en [ARCHITECTURE.md § Development](ARCHITECTURE.md#development).

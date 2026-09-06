@@ -8,6 +8,9 @@
 > ni el repo de referencia. Todo lo que el modelo ejecutor necesita (contexto, causa
 > raíz, cambio, trampas, tests, criterios de aceptación y mensaje de commit) está acá.
 > La auditoría completa que justifica todo esto está en `AUDIT.md`, al lado.
+>
+> **Estado: COMPLETO** (2026-09-06). Los 4 workflows + Y-08 (hallazgo no
+> planeado del Workflow 4) están cerrados - ver checkboxes y commits en §8.
 
 ---
 
@@ -570,7 +573,7 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 ### Workflow 3 — Lo que el modelo regala (opcional, después de la cámara)
 
 - [x] Y-06 Mizunoe y Gassho · commit: 1683272
-- [ ] Y-07 secuencias de sellos · commit: ______
+- [x] Y-07 secuencias de sellos · commit: afe4b18
 - [x] Y-08 fix colisión sello/pausa (no planeada, hallazgo Y-V3) · commit: 5531ee9
 
 ### Workflow 4 — Cámara real (requiere a José)
