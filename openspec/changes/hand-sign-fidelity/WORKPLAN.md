@@ -546,7 +546,7 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 
 ### Workflow 3 — Lo que el modelo regala (opcional, después de la cámara)
 
-- [ ] Y-06 Mizunoe y Gassho · commit: ______
+- [x] Y-06 Mizunoe y Gassho · commit: 1683272
 - [ ] Y-07 secuencias de sellos · commit: ______
 
 ### Workflow 4 — Cámara real (requiere a José)
