@@ -542,7 +542,7 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 
 - [x] Y-03 cablear en el loop, gate de 2 manos (**requiere Y-02**) · commit: d88ff68
 - [x] Y-04 borrar los sellos de una mano (**requiere Y-03**) · commit: 7d45875
-- [ ] Y-05 leyenda, iconos y settings a las formas reales · commit: ______
+- [x] Y-05 leyenda, iconos y settings a las formas reales · commit: 9723849
 
 ### Workflow 3 — Lo que el modelo regala (opcional, después de la cámara)
 
