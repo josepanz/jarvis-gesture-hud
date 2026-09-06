@@ -642,6 +642,22 @@ class TwoHandMasterGestureTests(unittest.TestCase):
         self.assertEqual(events, ["TOGGLE_ACTIVE"])
         self.assertFalse(engine.active)
 
+    def test_external_seal_in_progress_suppresses_pause(self):
+        # Y-08 (hallazgo de camara real con Jose, 2026-09-06, WORKPLAN.md §6):
+        # varios sellos reales curvan los dedos de las 2 manos lo bastante
+        # como para matchear _is_fist tambien - sin este gate, sostener un
+        # sello ya reconocido por el modelo completaba de paso el hold de
+        # PAUSA y disparaba TOGGLE_ACTIVE sin querer.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.3, 0.5), "Left"), Hand(fist_hand(0.6, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H, external_seal_in_progress=True)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H, external_seal_in_progress=True)
+        self.assertEqual(events, [])
+        self.assertTrue(engine.active)  # nunca se pauso
+
     def test_both_shaka_held_closes(self):
         import time
 

@@ -431,7 +431,7 @@ class GestureEngine:
         self._double_click_detector.reset()
         self._swipe_detector.reset()
 
-    def _process_two_hand_gestures(self, hands, w, h, now):
+    def _process_two_hand_gestures(self, hands, w, h, now, external_seal_in_progress=False):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
         two_hand_active). two_hand_active (TASK-055b) es la condicion geometrica cruda
         de CUALQUIER gesto de 2 manos (shaka/punos/pinch-zoom/menu meta) - no si ese
@@ -440,7 +440,16 @@ class GestureEngine:
         mano "primaria" sin importar que este haciendo la otra (ver design.md TASK-055b:
         antes solo LOCK_SESSION/PINCH_DOWN estaban protegidos, con su propia condicion
         angosta - esta queda igual sin tocar, two_hand_active es la version general
-        nueva para los 7 chequeos que no tenian ninguna proteccion)."""
+        nueva para los 7 chequeos que no tenian ninguna proteccion).
+
+        `external_seal_in_progress` (Y-08, hallazgo de camara real con José,
+        2026-09-06, WORKPLAN.md §6): varios sellos reales curvan bastante los
+        dedos de las 2 manos (Ushi/Saru, por ejemplo) y de paso satisfacen
+        `_is_fist` en ambas - sin este gate, sostener un sello ya reconocido
+        por el modelo el tiempo suficiente tambien completaba el hold de
+        PAUSA (`both_fists`, `PAUSE_HOLD_SECONDS`), disparando TOGGLE_ACTIVE
+        sin querer (observado en vivo armando Ne). Mismo mecanismo que la
+        trampa 2 de Y-04 (dwell/swipe)."""
         events = []
         # TASK-056: ademas de requerir exactamente 2 manos, exige que sean
         # plausiblemente de la misma persona (§1.2/§3B). Si no, cada mano
@@ -478,7 +487,7 @@ class GestureEngine:
         else:
             self.close_hold_start = None
 
-        if both_fists and not both_shaka:
+        if both_fists and not both_shaka and not external_seal_in_progress:
             if self.pause_hold_start is None:
                 self.pause_hold_start = now
             elif now - self.pause_hold_start > config.PAUSE_HOLD_SECONDS:
@@ -591,12 +600,16 @@ class GestureEngine:
         garantia vieja (`self._naruto_hold_seal is not None`) dejo de cubrir
         esos casos apenas la deteccion de 1 mano se borro. Inyectado por
         quien llama (main.py) en vez de que este motor conozca el tracker -
-        mantiene `GestureEngine` puro/sin I/O (ver docstring del modulo)."""
+        mantiene `GestureEngine` puro/sin I/O (ver docstring del modulo).
+        Y-08 le agrega un segundo uso: tambien suspende el hold de PAUSA
+        (`both_fists`) mientras dura, ver `_process_two_hand_gestures`."""
         now = time.time()
         # TASK-056: filtro de manos implausibles (fondo/otra persona) antes de
         # CUALQUIER logica de gestos, de 1 o 2 manos - ver design.md §1.2.
         hands = filter_plausible_hands(hands, w, h)
-        events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(hands, w, h, now)
+        events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(
+            hands, w, h, now, external_seal_in_progress
+        )
 
         if not self.active or not hands:
             self.last_primary_landmarks = None
