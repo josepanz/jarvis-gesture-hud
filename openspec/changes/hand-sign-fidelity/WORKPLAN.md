@@ -536,7 +536,7 @@ WORKPLAN** y se pueden hacer en cualquier momento.
 ### Workflow 1 — Traer el modelo (no cambia comportamiento)
 
 - [x] Y-01 vendorizar modelo + wrapper ONNX · commit: a511715
-- [ ] Y-02 `HandSignTracker` con debounce y hold · commit: ______
+- [x] Y-02 `HandSignTracker` con debounce y hold · commit: 219a9f1
 
 ### Workflow 2 — Cablear y borrar lo inventado
 
