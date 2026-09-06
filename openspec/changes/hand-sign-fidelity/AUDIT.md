@@ -200,15 +200,27 @@ decisión:
 
 ---
 
-## 7. Recomendación
+## 7. Decisión tomada (José, 2026-09-05)
 
-1. **Ahora**: usar `docs/gesture-reference/canonical/` como referencia visual y
-   arrancar la sesión de cámara por **V-04 + V-08/V-09/V-10 + gestos clásicos**,
-   que no dependen de la decisión de sellos.
-2. **Decisión de José** (no de un modelo): (b) cablear YOLOX, (c) redefinir a mano,
-   o (e) renombrar y dejar de prometer fidelidad.
-3. Si sale (b), es una propuesta OpenSpec propia con su WORKPLAN — no un parche
-   dentro de `hardening-and-polish`.
+**(b) Cablear el modelo YOLOX**, y **borrar los sellos de una mano inventados**
+(*"obviá los sellos de 1 mano de naruto y borralos si no son útiles"*).
+
+El plan de ejecución, autocontenido y tarea por tarea, está en
+[`WORKPLAN.md`](WORKPLAN.md) al lado de este archivo.
+
+Verificación extra hecha después de la decisión, ya incorporada al WORKPLAN:
+
+- **14/14 imágenes canónicas se auto-clasifican** con score 0.82–0.93 (umbral 0.7).
+  Es la base de los criterios de aceptación de Y-01.
+- **El frame hay que pasarlo SIN espejar**: 13 de 14 clasifican igual espejadas, pero
+  `Mi(Snake)` cae de 0.82 a **0.70**, justo en el umbral. `main.py` espeja por default
+  (`MIRROR_CAMERA_DEFAULT = True`), así que hay que tomar el frame antes del
+  `cv2.flip`.
+- **`NARUTO_KAI` es el único huérfano**: no está entre los 14 canónicos. Se borra; su
+  acción default (`CLOSE_APP`) sigue siendo alcanzable con las 2 manos en Shaka.
+- Dos dependencias que hacen fallar el borrado si se ignoran: `_fingers_crossed` la
+  usa `_is_jjk_megumi`, y `_naruto_hold_seal` lo leen los gates de dwell (C-01) y
+  swipe (C-03). Detalle en Y-04 del WORKPLAN.
 
 ---
 

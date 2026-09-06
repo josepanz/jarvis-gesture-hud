@@ -1549,8 +1549,12 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ### Workflow 6 — Cámara real (requiere a José)
 
-- [ ] V-01 sellos Naruto de una mano (bloqueante)
-- [ ] V-02 sellos Naruto de dos manos
+- [~] V-01 sellos Naruto de una mano — **SUPERADO** por `hand-sign-fidelity/AUDIT.md`
+      (2026-09-05): los 8 sellos de una mano son formas inventadas, no existen. No hay
+      umbral que calibrar. Reemplazado por Y-V1 de `hand-sign-fidelity/WORKPLAN.md`
+- [~] V-02 sellos Naruto de dos manos — **SUPERADO** por la misma auditoría: de los 5,
+      sólo Ne y Mi son correctos, Tori está definido al revés y Kai no existe entre los
+      14 canónicos. Reemplazado por Y-V1
 - [ ] V-03 JJK + Clap + corazón coreano
 - [ ] V-04 confirmar o revertir EMA_ALPHA 0.25
 - [ ] V-05 colisión Sukuna ↔ RIGHT_CLICK
