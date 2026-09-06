@@ -127,6 +127,7 @@ from jarvis.core.undo_redo import UndoRedoController
 from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
+from jarvis.hand_sign_tracker import HandSignTracker
 from jarvis.hand_visualizer import draw_hand_overlay
 from jarvis.hud_keyboard import HUDKeyboard
 from jarvis.legend import TITLE as LEGEND_TITLE
@@ -308,6 +309,10 @@ class JarvisApp:
             # asi que en el caso default no se paga ni el costo de construccion ni
             # la descarga del modelo de pose.
             self.pose_tracker = PoseTracker() if config.POSE_HAND_OWNERSHIP_ENABLED else None
+            # Y-03 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): el modelo
+            # de sellos, igual que HandTracker/PoseTracker arriba - un fallo de
+            # carga tampoco puede terminar en un traceback crudo.
+            self.hand_sign_tracker = HandSignTracker() if config.HAND_SIGN_MODEL_ENABLED else None
         except Exception as exc:
             _logger.error(
                 "no se pudo descargar/cargar el modelo de manos - revisá la conexión "
@@ -802,6 +807,11 @@ class JarvisApp:
             if not ret:
                 break
 
+            # Y-02 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): el
+            # modelo de sellos se mide con el frame SIN espejar (medido: Mi(Snake)
+            # cae de 0.82 a 0.70 espejado, justo en el umbral) - se guarda antes
+            # del flip de abajo, que es solo para lo que se muestra en pantalla.
+            raw_frame = frame
             if self.mirrored:
                 frame = cv2.flip(frame, 1)
             h, w, _ = frame.shape
@@ -822,6 +832,14 @@ class JarvisApp:
 
             screen_xy, cam_xy, events = self.gestures.process(hands, w, h, self.screen_w, self.screen_h)
             self._last_screen_xy = screen_xy
+
+            # Y-03: gate de costo - un sello canonico siempre usa las 2 manos,
+            # asi que el modelo ni se invoca en el uso normal (1 mano, puntero/
+            # click). Mismo `for event in events:` de siempre (abajo): los
+            # nombres de evento son los de siempre, sin binding/perfil/leyenda
+            # nuevos que migrar.
+            if self.hand_sign_tracker is not None and len(hands) == 2:
+                events = events + self.hand_sign_tracker.process(raw_frame)
 
             for event in events:
                 # H-01: defensa en profundidad - un gesto individual que falla

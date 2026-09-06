@@ -156,6 +156,15 @@ POSE_HAND_OWNERSHIP_ENABLED = False
 # valor razonado, no medido; documentado como limitacion conocida.
 POSE_MAX_WRIST_DISTANCE_FRACTION = 0.08
 
+# Y-03 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): a diferencia de
+# POSE_HAND_OWNERSHIP_ENABLED (arriba), este va en True por default. Medido
+# en esta maquina (AUDIT.md): el modelo YOLOX-Nano de sellos cuesta 8.1ms/frame
+# promedio en CPU, MENOS que el HandLandmarker que ya corre siempre (10.0ms/frame) -
+# y encima solo se invoca cuando hay 2 manos en cuadro (unica situacion en la
+# que un sello es posible), asi que en el uso normal (1 mano, puntero/click)
+# ni siquiera paga eso.
+HAND_SIGN_MODEL_ENABLED = True
+
 CAPTURES_DIR = "captures"
 
 HUD_KEY_COLOR = (255, 0, 0)
