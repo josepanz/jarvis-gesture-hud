@@ -99,8 +99,11 @@ class DefaultBindingTests(_AppTestCase):
     def test_twohand_seal_default_binding_dispatches_the_right_command(self):
         # TASK-066 (Fase 5): mismo _dispatch_bound_event, sin importar si el
         # evento vino de 1 o 2 manos (distingue solo por el prefijo NARUTO_).
-        self.app._dispatch_bound_event("NARUTO_KAI")  # default: CLOSE_APP
-        self.assertTrue(self.app.should_quit)
+        # Y-04: NARUTO_KAI (el ejemplo original) se borro - no es uno de los
+        # 14 sellos canonicos (AUDIT.md); NARUTO_NE es ahora, igual que todos
+        # los sellos reales, de 2 manos.
+        self.app._dispatch_bound_event("NARUTO_NE")  # default: ZOOM_OUT
+        self.mock_mouse_pyautogui.scroll.assert_called()
 
     def test_jjk_seal_default_binding_dispatches_the_right_command(self):
         # TASK-070 (Fase 6): mismo _dispatch_bound_event, extendido al
@@ -222,33 +225,41 @@ class UnboundSealTests(_AppTestCase):
 
 class HoldRequiredGatingTests(_AppTestCase):
     """NARUTO_I -> LOCK_SESSION (HOLD_REQUIRED) por default - el binding en si
-    no re-implementa ningun hold; la garantia viene de que GestureEngine
-    nunca emite NARUTO_I antes de que su propio hold
-    (config.NARUTO_SEAL_HOLD_SECONDS) se cumpla (ver
-    tests/test_gesture_engine_regression.py::NarutoOneHandSealTests) - este
-    test verifica el pipeline COMPLETO (deteccion real + dispatch real), no
-    solo una de las 2 mitades por separado."""
+    no re-implementa ningun hold; la garantia viene de que quien detecta el
+    sello nunca emite NARUTO_I antes de que su propio hold se cumpla. Y-04
+    (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): reescrito contra
+    `HandSignTracker` (Y-02) - el modelo detecta los sellos ahora, no
+    `GestureEngine` (ver tests/test_hand_sign_tracker.py para el hold en
+    aislado). Modelo mockeado: no hace falta inferencia real para probar el
+    gate de hold; este test verifica el pipeline COMPLETO (tracker + dispatch
+    real), no solo una de las 2 mitades por separado."""
 
     def test_lock_session_is_not_dispatched_before_the_seal_hold_completes(self):
-        import time
+        from unittest.mock import MagicMock
 
-        from tests.test_gesture_engine_regression import H, SCREEN_H, SCREEN_W, W, naruto_i_hand
+        from jarvis import config
+        from jarvis.core.debounce import DEFAULT_CONFIRMATION_FRAMES
+        from jarvis.hand_sign_model import Detection
+        from jarvis.hand_sign_tracker import HandSignTracker
 
-        engine = GestureEngine()
-        pts = naruto_i_hand()
+        model = MagicMock()
+        model.detect.return_value = [Detection(class_name="I(Boar)", score=0.9, bbox=(0, 0, 10, 10))]
+        tracker = HandSignTracker(model=model)
 
-        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        t = 0.0
+        events = []
+        for _ in range(DEFAULT_CONFIRMATION_FRAMES):
+            events = tracker.process(None, now=t)
+            t += 0.03
         for event in events:
-            if event.startswith("NARUTO_"):
-                self.app._dispatch_bound_event(event)
+            self.app._dispatch_bound_event(event)
         self.assertFalse(self.mock_os.lock_session.called)  # todavia no se cumplio el hold
 
-        engine._naruto_hold_start = time.time() - 1.0
-        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+        t += config.NARUTO_TWOHAND_HOLD_SECONDS + 0.01
+        events = tracker.process(None, now=t)
         self.assertIn("NARUTO_I", events)
         for event in events:
-            if event.startswith("NARUTO_"):
-                self.app._dispatch_bound_event(event)
+            self.app._dispatch_bound_event(event)
         self.assertTrue(self.mock_os.lock_session.called)  # recien ahora, con el hold cumplido
 
 

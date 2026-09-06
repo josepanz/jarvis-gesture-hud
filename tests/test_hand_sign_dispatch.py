@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jarvis.hand_tracker import Hand  # noqa: E402
-from tests.test_gesture_engine_regression import ne_hand  # noqa: E402
+from tests.test_gesture_engine_regression import fist_hand  # noqa: E402
 from tests.test_naruto_seal_dispatch import _AppTestCase  # noqa: E402
 
 _FRAME = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -37,13 +37,13 @@ class HandSignDispatchTests(_AppTestCase):
     def test_two_hands_in_frame_invokes_the_tracker_and_dispatches_its_event(self):
         self.app.hand_sign_tracker.process.return_value = ["NARUTO_NE"]  # default: ZOOM_OUT
 
-        self._run_one_frame_with_hands([Hand(ne_hand(), "Left"), Hand(ne_hand(), "Right")])
+        self._run_one_frame_with_hands([Hand(fist_hand(0.3, 0.5), "Left"), Hand(fist_hand(0.6, 0.5), "Right")])
 
         self.app.hand_sign_tracker.process.assert_called_once()
         self.mock_mouse_pyautogui.scroll.assert_called()  # ZOOM_OUT via Ctrl+Scroll
 
     def test_one_hand_in_frame_never_invokes_the_tracker(self):
-        self._run_one_frame_with_hands([Hand(ne_hand(), "Right")])
+        self._run_one_frame_with_hands([Hand(fist_hand(), "Right")])
 
         self.app.hand_sign_tracker.process.assert_not_called()
 

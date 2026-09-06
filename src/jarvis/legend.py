@@ -41,7 +41,9 @@ ENTRIES = [
     ("Sello Ne (manos juntas, hacia arriba)", "Zoom -", "naruto_ne"),
     ("Sello Mi (manos juntas, hacia abajo)", "Scroll abajo", "naruto_mi"),
     ("Sello Tori (manos en abanico)", "Scroll arriba", "naruto_tori"),
-    ("Sello Kai (manos juntas, dedos cruzados)", "Cerrar Jarvis", "naruto_kai"),
+    # Y-04: NARUTO_KAI se borro (no es uno de los 14 sellos canonicos,
+    # AUDIT.md) - su accion default (Cerrar Jarvis) sigue alcanzable con las
+    # 2 manos en Shaka sostenidas.
     ("Sello Tatsu (1 puño + 1 mano abierta)", "Volumen +", "naruto_tatsu"),
     # TASK-070 (Fase 6): sellos JJK, sostenidos config.NARUTO_TWOHAND_HOLD_SECONDS
     # (Gojo) o config.NARUTO_SEAL_HOLD_SECONDS (Megumi) - Sukuna es temporal

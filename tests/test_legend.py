@@ -43,7 +43,6 @@ _EXPECTED_TEXT = (
     "Sello Ne (manos juntas, hacia arriba)           →  Zoom -\n"
     "Sello Mi (manos juntas, hacia abajo)            →  Scroll abajo\n"
     "Sello Tori (manos en abanico)                   →  Scroll arriba\n"
-    "Sello Kai (manos juntas, dedos cruzados)        →  Cerrar Jarvis\n"
     "Sello Tatsu (1 puño + 1 mano abierta)           →  Volumen +\n"
     "Sello Gojo (marco en L, 2 manos arriba)         →  Click derecho\n"
     "Sello Sukuna (chasquido pulgar-medio)           →  Captura\n"

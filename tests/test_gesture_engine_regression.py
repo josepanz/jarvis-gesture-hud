@@ -330,8 +330,8 @@ def two_way_tie_pinch_hand(cx=0.5, cy=0.5):
     return pts
 
 
-def process(engine, pts):
-    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+def process(engine, pts, **kwargs):
+    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H, **kwargs)
 
 
 def confirm_pinch(engine, pts):
@@ -998,13 +998,12 @@ class BackgroundHandFilterTests(unittest.TestCase):
         self.assertIn("TOGGLE_ACTIVE", events)
 
 
-# TASK-061/062 (Fase 4): sellos Naruto de 1 mano. Cada fixture fue verificado
-# contra el GestureEngine real antes de aceptarse aca (mismo criterio que el
-# resto de este archivo, ver docstring del modulo) - las 4 distancias
-# pulgar-a-cada-dedo se calcularon explicitamente para confirmar que ninguna
-# cae bajo ningun umbral de pinch (PINCH_CLICK/RIGHT_CLICK/ZOOM/SCREENSHOT/
-# VOLUME), y cada fixture se corrio de punta a punta contra GestureEngine.process()
-# confirmando que dispara UNICAMENTE su propio NARUTO_<NOMBRE> y ningun otro evento.
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 8 fixtures de
+# sellos Naruto de 1 mano (naruto_tora_hand...naruto_i_hand) y
+# NARUTO_SEAL_FIXTURES se borraron aca junto con la deteccion geometrica que
+# probaban (AUDIT.md: 6 de 8 no correspondian a ningun sello real). `_naruto_base`
+# sobrevive: `jjk_megumi_hand()` (mas abajo) lo sigue usando como scaffold -
+# JJK Megumi no es un sello Naruto y el modelo no lo cubre.
 def _naruto_base(cx, cy):
     pts = flat(cx, cy)
     pts[5] = Landmark(cx - 0.06, cy, 0)  # index mcp
@@ -1012,152 +1011,6 @@ def _naruto_base(cx, cy):
     pts[13] = Landmark(cx + 0.02, cy, 0)  # ring mcp
     pts[17] = Landmark(cx + 0.06, cy, 0)  # pinky mcp
     return pts
-
-
-def naruto_tora_hand(cx=0.5, cy=0.5):
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy - 0.08, 0)
-    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx - 0.05, cy - 0.08, 0)  # muy cerca del indice ("juntos")
-    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.08, cy - 0.02, 0)  # pulgar cruzado, cerca de la palma
-    pts[2] = Landmark(cx - 0.07, cy, 0)
-    return pts
-
-
-def naruto_u_hand(cx=0.5, cy=0.5):
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.09, cy - 0.08, 0)
-    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx + 0.15, cy - 0.08, 0)  # bien separado del indice ("peace sign")
-    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.08, cy - 0.02, 0)  # pulgar tucked
-    pts[2] = Landmark(cx - 0.07, cy, 0)
-    return pts
-
-
-def naruto_hitsuji_hand(cx=0.5, cy=0.5):
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.02, cy - 0.08, 0)  # indice cruza a la derecha
-    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx - 0.09, cy - 0.08, 0)  # medio cruza a la izquierda
-    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.04, cy - 0.04, 0)
-    pts[2] = Landmark(cx - 0.05, cy - 0.01, 0)
-    return pts
-
-
-def naruto_ushi_hand(cx=0.5, cy=0.5):
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)  # solo el indice extendido
-    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido junto a los dedos
-    pts[2] = Landmark(cx - 0.09, cy, 0)
-    return pts
-
-
-def naruto_uma_hand(cx=0.5, cy=0.5):
-    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
-    # ver ARCHITECTURE.md y el comentario de `_is_naruto_uma` en gestures.py.
-    # Ahora: pulgar+indice+menique extendidos, medio+anular recogidos.
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)  # indice extendido
-    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)  # medio recogido
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)  # anular recogido
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
-    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
-    pts[4] = Landmark(cx - 0.15, cy - 0.05, 0)  # pulgar extendido
-    pts[2] = Landmark(cx - 0.1, cy, 0)
-    return pts
-
-
-def naruto_saru_hand(cx=0.5, cy=0.5):
-    # REDEFINIDO POR SEGUNDA VEZ (verificado en camara real, 2026-08-27) -
-    # ver ARCHITECTURE.md y el comentario de `_is_naruto_saru` en gestures.py.
-    # Ahora: puño cerrado con el pulgar hacia ARRIBA (distinto de I, que es
-    # hacia el costado) - pulgar alineado con el nudillo medio (landmark 9)
-    # en x, bien arriba en y.
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[6] = Landmark(cx - 0.06, cy, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.02, cy - 0.2, 0)  # pulgar recto hacia arriba desde el mcp medio
-    pts[2] = Landmark(cx - 0.02, cy - 0.05, 0)
-    return pts
-
-
-def naruto_inu_hand(cx=0.5, cy=0.5):
-    # REDEFINIDO (verificado en camara real, 2026-08-27) - ver
-    # ARCHITECTURE.md y el comentario de `_is_naruto_inu` en gestures.py.
-    # Ahora: solo el menique extendido, resto recogido.
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[6] = Landmark(cx - 0.06, cy, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)  # menique extendido
-    pts[18] = Landmark(cx + 0.06, cy - 0.03, 0)
-    pts[4] = Landmark(cx - 0.1, cy + 0.02, 0)  # pulgar recogido
-    pts[2] = Landmark(cx - 0.09, cy, 0)
-    return pts
-
-
-def naruto_i_hand(cx=0.5, cy=0.5):
-    # FIX (verificado en camara real, 2026-08-27) - ver ARCHITECTURE.md y el
-    # comentario de `_is_naruto_i` en gestures.py. Pulgar bien lateral
-    # (domina el eje x, no el y) respecto al mcp medio (landmark 9).
-    pts = _naruto_base(cx, cy)
-    pts[8] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[6] = Landmark(cx - 0.06, cy, 0)
-    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
-    pts[10] = Landmark(cx - 0.02, cy, 0)
-    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.02, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.25, cy + 0.01, 0)  # pulgar lateral, mismo nivel que el mcp medio
-    pts[2] = Landmark(cx - 0.15, cy, 0)
-    return pts
-
-
-NARUTO_SEAL_FIXTURES = {
-    "TORA": naruto_tora_hand,
-    "U": naruto_u_hand,
-    "HITSUJI": naruto_hitsuji_hand,
-    "USHI": naruto_ushi_hand,
-    "UMA": naruto_uma_hand,
-    "SARU": naruto_saru_hand,
-    "INU": naruto_inu_hand,
-    "I": naruto_i_hand,
-}
 
 
 def hold_naruto(engine, pts):
@@ -1170,206 +1023,15 @@ def hold_naruto(engine, pts):
     return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
 
 
-class NarutoOneHandSealTests(unittest.TestCase):
-    def test_each_seal_fires_only_its_own_event_after_the_hold(self):
-        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                _, _, events = hold_naruto(engine, fixture_fn())
-                self.assertEqual(events, [f"NARUTO_{name}"])
-
-    def test_no_seal_fires_before_the_hold_completes(self):
-        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                _, _, events = engine.process([Hand(fixture_fn(), "Right")], W, H, SCREEN_W, SCREEN_H)
-                self.assertEqual(events, [])
-
-    def test_releasing_the_seal_past_the_miss_tolerance_resets_it(self):
-        # open_palm_hand() como "sin match" en vez de flat(): flat() tiene
-        # las 21 landmarks coincidentes, lo que la hace pellizcar por
-        # construccion (d_thumb_index=0) y contamina el assert con un
-        # PINCH_UP de paso - open_palm_hand() no matchea ningun sello NI
-        # ninguna condicion de pinch.
-        engine = GestureEngine()
-        engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE + 1):  # supera la tolerancia -> reinicia de verdad
-            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        # Rehace el sello - el hold tiene que rearmarse desde 0, no heredar
-        # ningun progreso del intento anterior.
-        _, _, events = engine.process([Hand(naruto_tora_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        self.assertEqual(events, [])
-
-    def test_a_brief_flicker_within_the_miss_tolerance_does_not_reset_the_hold(self):
-        # Verificado en camara real (2026-08-27): incluso sosteniendo la
-        # forma correcta a proposito, la clasificacion parpadea a "ningun
-        # sello" por 1 frame suelto de vez en cuando (ruido, no un cambio de
-        # pose real) - sin esta tolerancia, el hold casi nunca llega a
-        # completarse en la practica.
-        engine = GestureEngine()
-        pts = naruto_tora_hand()
-        engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-        for _ in range(config.NARUTO_SEAL_MISS_TOLERANCE):  # exactamente en el limite, no lo supera
-            engine.process([Hand(open_palm_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        engine._naruto_hold_start = time.time() - 1.0
-        _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-        self.assertEqual(events, ["NARUTO_TORA"])  # el progreso del hold sobrevivio al parpadeo
-
-    def test_none_of_the_existing_gesture_fixtures_leak_a_naruto_event(self):
-        existing_fixtures = {
-            "pinch_click": pinch_click_hand(),
-            "right_click": right_click_hand(),
-            "scroll": scroll_hand(),
-            "zoom": zoom_hand(),
-            "open_palm": open_palm_hand(),
-            "silence": silence_hand(),
-            "volume": volume_hand(),
-            "screenshot": screenshot_hand(),
-            "shaka": shaka_hand(),
-            "fist": fist_hand(),
-            "fist_opening_transition": fist_opening_transition_hand(),
-            "flat": flat(),
-        }
-        for name, pts in existing_fixtures.items():
-            with self.subTest(fixture=name):
-                engine = GestureEngine()
-                for _ in range(3):
-                    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-                engine._naruto_hold_start = time.time() - 1.0
-                _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-                self.assertFalse(
-                    [e for e in events if e.startswith("NARUTO_")],
-                    f"{name} unexpectedly produced a NARUTO_* event: {events}",
-                )
-
-    def test_no_seal_fixture_triggers_a_pinch_family_event(self):
-        # La otra mitad del censo de colision: cada fixture de sello nuevo NO
-        # debe disparar ningun gesto EXISTENTE (no solo lo inverso de arriba).
-        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                pts = fixture_fn()
-                for _ in range(3):
-                    _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-                    self.assertFalse(
-                        [e for e in events if not e.startswith("NARUTO_")],
-                        f"{name} unexpectedly produced a non-Naruto event: {events}",
-                    )
+# Y-04: NarutoOneHandSealTests (probaba los 8 sellos de 1 mano de arriba) se
+# borro entera junto con la deteccion que ejercitaba.
 
 
-# TASK-064/065 (Fase 5): sellos Naruto de 2 manos. design.md §5.1 permite
-# explicitamente un proxy grueso (distancia entre centros + curvatura
-# promedio + orientacion) en vez de intentar el entrelazado fino de dedos,
-# que MediaPipe no puede ver de forma confiable entre 2 manos. Cada fixture
-# fue verificado contra el GestureEngine real antes de aceptarse aca, igual
-# que los de 1 mano - dispara UNICAMENTE su propio NARUTO_<NOMBRE>, y ningun
-# fixture de 2 manos existente (both_fists/both_shaka/meta-menu) dispara
-# ninguno de estos. Umbrales de config.py RAZONADOS, no medidos en camara
-# real todavia (pendiente, ver ARCHITECTURE.md).
-def ne_hand(cx=0.48, cy=0.5):
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)  # muñeca abajo -> la mano "apunta" hacia arriba
-    pts[8] = Landmark(cx - 0.02, cy - 0.15, 0)
-    pts[6] = Landmark(cx - 0.02, cy - 0.03, 0)
-    pts[12] = Landmark(cx + 0.02, cy - 0.15, 0)
-    pts[10] = Landmark(cx + 0.02, cy - 0.03, 0)
-    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.04, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.06, cy, 0)
-    pts[2] = Landmark(cx - 0.05, cy, 0)
-    return pts
-
-
-def mi_hand(cx=0.48, cy=0.5):
-    # Mismo "entrelazado" que Ne (2 de 4 dedos extendidos) - solo cambia la
-    # muñeca, para que la mano "apunte" hacia abajo en vez de hacia arriba.
-    pts = list(ne_hand(cx, cy))
-    pts[0] = Landmark(cx, cy - 0.2, 0)
-    return pts
-
-
-def tori_hand(cx, cy=0.5):
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)
-    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
-        pts[tip] = Landmark(cx, cy - 0.15, 0)
-        pts[pip] = Landmark(cx, cy - 0.03, 0)
-    pts[4] = Landmark(cx - 0.1, cy, 0)
-    pts[2] = Landmark(cx - 0.08, cy, 0)
-    return pts
-
-
-def kai_hand_1(cx=0.46, cy=0.5):
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)
-    pts[5] = Landmark(cx - 0.02, cy, 0)
-    pts[9] = Landmark(cx + 0.01, cy, 0)
-    pts[8] = Landmark(cx + 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 2
-    pts[6] = Landmark(cx, cy - 0.05, 0)
-    pts[12] = Landmark(cx + 0.12, cy - 0.18, 0)
-    pts[10] = Landmark(cx + 0.01, cy - 0.05, 0)
-    pts[16] = Landmark(cx + 0.04, cy + 0.05, 0)
-    pts[14] = Landmark(cx + 0.04, cy, 0)
-    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx + 0.06, cy, 0)
-    pts[4] = Landmark(cx - 0.08, cy, 0)
-    pts[2] = Landmark(cx - 0.07, cy, 0)
-    return pts
-
-
-def kai_hand_2(cx=0.54, cy=0.5):
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)
-    pts[5] = Landmark(cx + 0.02, cy, 0)
-    pts[9] = Landmark(cx - 0.01, cy, 0)
-    pts[8] = Landmark(cx - 0.15, cy - 0.15, 0)  # indice cruza hacia el lado de la mano 1
-    pts[6] = Landmark(cx, cy - 0.05, 0)
-    pts[12] = Landmark(cx - 0.12, cy - 0.18, 0)
-    pts[10] = Landmark(cx - 0.01, cy - 0.05, 0)
-    pts[16] = Landmark(cx - 0.04, cy + 0.05, 0)
-    pts[14] = Landmark(cx - 0.04, cy, 0)
-    pts[20] = Landmark(cx - 0.06, cy + 0.05, 0)
-    pts[18] = Landmark(cx - 0.06, cy, 0)
-    pts[4] = Landmark(cx + 0.08, cy, 0)
-    pts[2] = Landmark(cx + 0.07, cy, 0)
-    return pts
-
-
-def tatsu_hand_1(cx=0.48, cy=0.5):
-    # Una mano bien cerrada (puño)...
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)
-    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
-        pts[tip] = Landmark(cx, cy + 0.05, 0)
-        pts[pip] = Landmark(cx, cy, 0)
-    pts[4] = Landmark(cx - 0.08, cy, 0)
-    pts[2] = Landmark(cx - 0.07, cy, 0)
-    return pts
-
-
-def tatsu_hand_2(cx=0.52, cy=0.5):
-    # ...la otra bien abierta - la asimetria de curvatura es la señal de Tatsu.
-    pts = [Landmark(cx, cy, 0) for _ in range(21)]
-    pts[0] = Landmark(cx, cy + 0.2, 0)
-    for tip, pip in ((8, 6), (12, 10), (16, 14), (20, 18)):
-        pts[tip] = Landmark(cx, cy - 0.15, 0)
-        pts[pip] = Landmark(cx, cy - 0.03, 0)
-    pts[4] = Landmark(cx + 0.08, cy, 0)
-    pts[2] = Landmark(cx + 0.07, cy, 0)
-    return pts
-
-
-TWOHAND_SEAL_FIXTURES = {
-    "NE": (ne_hand, ne_hand),
-    "MI": (mi_hand, mi_hand),
-    "TORI": (lambda: tori_hand(0.35), lambda: tori_hand(0.65)),
-    "KAI": (kai_hand_1, kai_hand_2),
-    "TATSU": (tatsu_hand_1, tatsu_hand_2),
-}
-
-
+# Y-04: ne_hand/mi_hand/tori_hand/kai_hand_1/kai_hand_2/tatsu_hand_1/tatsu_hand_2
+# y TWOHAND_SEAL_FIXTURES (Ne/Mi/Tori/Kai/Tatsu por geometria) se borraron -
+# reemplazados por el modelo YOLOX. `hold_twohand_seal()` sobrevive (mas abajo):
+# lo sigue usando JJK_GOJO_DOMAIN, que no es un sello Naruto y el modelo no
+# lo cubre.
 def hold_twohand_seal(engine, p1, p2):
     hands = [Hand(p1, "Left"), Hand(p2, "Right")]
     engine.process(hands, W, H, SCREEN_W, SCREEN_H)
@@ -1377,53 +1039,8 @@ def hold_twohand_seal(engine, p1, p2):
     return engine.process(hands, W, H, SCREEN_W, SCREEN_H)
 
 
-class NarutoTwoHandSealTests(unittest.TestCase):
-    def test_each_seal_fires_only_its_own_event_after_the_hold(self):
-        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                _, _, events = hold_twohand_seal(engine, fn1(), fn2())
-                self.assertEqual(events, [f"NARUTO_{name}"])
-
-    def test_no_seal_fires_before_the_hold_completes(self):
-        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
-                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                self.assertEqual(events, [])
-
-    def test_existing_two_hand_fixtures_do_not_leak_a_naruto_twohand_event(self):
-        existing_pairs = {
-            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
-            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
-            "meta_menu": (fist_hand(0.3, 0.5), open_hand_n_fingers(1, 0.7, 0.5)),
-        }
-        for name, (p1, p2) in existing_pairs.items():
-            with self.subTest(fixture=name):
-                engine = GestureEngine()
-                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
-                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                engine._twohand_seal_hold_start = time.time() - 2.0
-                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                self.assertFalse(
-                    [e for e in events if e.startswith("NARUTO_")],
-                    f"{name} unexpectedly produced a NARUTO_* two-hand event: {events}",
-                )
-
-    def test_no_twohand_seal_fixture_triggers_an_existing_two_hand_event(self):
-        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
-                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                engine.pause_hold_start = time.time() - 2.0
-                engine.close_hold_start = time.time() - 2.0
-                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                self.assertFalse(
-                    [e for e in events if not e.startswith("NARUTO_")],
-                    f"{name} unexpectedly produced a non-Naruto event: {events}",
-                )
+# Y-04: NarutoTwoHandSealTests (probaba Ne/Mi/Tori/Kai/Tatsu por geometria) se
+# borro entera - el modelo YOLOX los reemplaza.
 
 
 # TASK-068/069/070 (Fase 6): gestos JJK. Mismo criterio de fixtures
@@ -1481,16 +1098,10 @@ class JJKGestureTests(unittest.TestCase):
         _, _, events = hold_naruto(engine, jjk_megumi_hand())
         self.assertEqual(events, ["JJK_MEGUMI"])
 
-    def test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger(self):
-        # design.md §6.3: la unica diferencia entre las 2 fixtures es la
-        # posicion del anular - confirma que ESE es el discriminador real.
-        engine = GestureEngine()
-        _, _, hitsuji_events = hold_naruto(engine, naruto_hitsuji_hand())
-        self.assertEqual(hitsuji_events, ["NARUTO_HITSUJI"])
-
-        engine2 = GestureEngine()
-        _, _, megumi_events = hold_naruto(engine2, jjk_megumi_hand())
-        self.assertEqual(megumi_events, ["JJK_MEGUMI"])
+    # Y-04: test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger
+    # se borro - probaba que Megumi no colisionaba con la deteccion geometrica
+    # de Hitsuji (ya borrada); sin esa deteccion, Megumi es el unico sello de
+    # 1 mano que queda, no hay colision que verificar.
 
     def test_gojo_domain_fires_only_its_own_event_after_the_hold(self):
         engine = GestureEngine()
@@ -1556,14 +1167,8 @@ class JJKGestureTests(unittest.TestCase):
                     f"{name} unexpectedly produced a JJK_* event: {events}",
                 )
 
-    def test_no_naruto_seal_fixture_triggers_a_jjk_event(self):
-        for name, fixture_fn in NARUTO_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                pts = fixture_fn()
-                for _ in range(3):
-                    _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
-                    self.assertFalse([e for e in events if e.startswith("JJK_")])
+    # Y-04: test_no_naruto_seal_fixture_triggers_a_jjk_event se borro - usaba
+    # NARUTO_SEAL_FIXTURES (los 8 sellos de 1 mano ya borrados).
 
     def test_no_existing_two_hand_fixture_leaks_gojo_domain(self):
         existing_pairs = {
@@ -1579,15 +1184,9 @@ class JJKGestureTests(unittest.TestCase):
                 _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
                 self.assertNotIn("JJK_GOJO_DOMAIN", events)
 
-    def test_no_twohand_naruto_seal_fixture_leaks_gojo_domain(self):
-        for name, (fn1, fn2) in TWOHAND_SEAL_FIXTURES.items():
-            with self.subTest(seal=name):
-                engine = GestureEngine()
-                hands = [Hand(fn1(), "Left"), Hand(fn2(), "Right")]
-                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                engine._twohand_seal_hold_start = time.time() - 2.0
-                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
-                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+    # Y-04: test_no_twohand_naruto_seal_fixture_leaks_gojo_domain se borro -
+    # usaba TWOHAND_SEAL_FIXTURES (Ne/Mi/Tori/Kai/Tatsu por geometria, ya
+    # borrados).
 
 
 # TASK-071/072/073 (Fase 7): gestos comunes. Mismo criterio de fixtures
@@ -1767,9 +1366,11 @@ class HandLossStateResetTests(unittest.TestCase):
         _, _, events = process(engine, shaka_hand())
         self.assertIn("LOCK_SESSION", events)
 
-    def test_naruto_seal_survives_hand_loss_does_not_complete_on_return(self):
+    def test_one_hand_seal_survives_hand_loss_does_not_complete_on_return(self):
+        # Y-04: JJK_MEGUMI en vez de NARUTO_TORA (borrado) - unico sello de 1
+        # mano que queda, mismo mecanismo (_naruto_hold_start).
         engine = GestureEngine()
-        pts = naruto_tora_hand()
+        pts = jjk_megumi_hand()
         process(engine, pts)
         engine._naruto_hold_start = time.time() - 2.0  # ya supera NARUTO_SEAL_HOLD_SECONDS
         engine.process([], W, H, SCREEN_W, SCREEN_H)
@@ -1794,8 +1395,9 @@ class HandLossStateResetTests(unittest.TestCase):
         self.assertNotIn("SCROLL_DOWN", events)
 
     def test_pause_mid_hold_resets_the_hold_on_resume(self):
+        # Y-04: JJK_MEGUMI en vez de NARUTO_TORA (borrado).
         engine = GestureEngine()
-        pts = naruto_tora_hand()
+        pts = jjk_megumi_hand()
         process(engine, pts)
         engine._naruto_hold_start = time.time() - 2.0
         engine.active = False
@@ -1869,16 +1471,32 @@ class DwellClickTests(unittest.TestCase):
     def test_holding_a_seal_never_completes_dwell(self):
         # Colision critica documentada: DwellDetector.DEFAULT_DURATION_MS
         # (600ms) coincide EXACTAMENTE con NARUTO_SEAL_HOLD_SECONDS*1000 -
-        # sostener un sello no puede completar tambien el dwell.
+        # sostener un sello no puede completar tambien el dwell. Y-04:
+        # JJK_MEGUMI en vez de NARUTO_TORA (borrado) - mismo mecanismo
+        # (_naruto_hold_seal/NARUTO_SEAL_HOLD_SECONDS), unico sello de 1 mano
+        # que queda.
         engine = GestureEngine()
-        pts = naruto_tora_hand()
+        pts = jjk_megumi_hand()
         with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
             _, _, events = hold_naruto(engine, pts)
-            self.assertIn("NARUTO_TORA", events)
+            self.assertIn("JJK_MEGUMI", events)
             self.assertNotIn("DWELL_CLICK", events)
             engine._dwell_detector._start_time = time.time() - 1.0
             _, _, events2 = process(engine, pts)
             self.assertNotIn("DWELL_CLICK", events2)
+
+    def test_external_seal_in_progress_suppresses_dwell(self):
+        # Y-04 (trampa 2, WORKPLAN.md): los 12 sellos reales ahora los
+        # detecta HandSignTracker (Y-02) FUERA de este motor - sin esta
+        # suspension explicita, sostener el indice quieto mientras el modelo
+        # reconoce un sello de 2 manos completaria tambien el dwell.
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts, external_seal_in_progress=True)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            _, _, events = process(engine, pts, external_seal_in_progress=True)
+            self.assertNotIn("DWELL_CLICK", events)
 
     def test_paused_never_completes_dwell(self):
         engine = GestureEngine()
@@ -2006,20 +1624,13 @@ class SwipeTests(unittest.TestCase):
         self.assertEqual(_swipe_events(events), [])
 
     def test_no_existing_fixture_ever_produces_a_swipe(self):
-        # El test mas importante de esta tarea: censo de colisiones contra
-        # TODO el resto de las poses de 1 mano ya existentes, movidas rapido
-        # de un lado al otro del frame. NARUTO_SARU/NARUTO_I/KOREAN_HEART
-        # matchean _is_fist (verificado, no solo razonado - ver el gate en
-        # gestures.py) y son el caso real que puede fallar.
+        # Censo de colisiones contra el resto de las poses de 1 mano
+        # existentes, movidas rapido de un lado al otro del frame. Y-04:
+        # los 8 fixtures naruto_*_hand se borraron junto con la deteccion
+        # geometrica que probaban - JJK_MEGUMI/KOREAN_HEART (matchean
+        # _is_fist, verificado, no solo razonado - ver el gate en
+        # gestures.py) siguen siendo el caso real que puede fallar.
         fixtures = {
-            "NARUTO_TORA": naruto_tora_hand,
-            "NARUTO_U": naruto_u_hand,
-            "NARUTO_HITSUJI": naruto_hitsuji_hand,
-            "NARUTO_USHI": naruto_ushi_hand,
-            "NARUTO_UMA": naruto_uma_hand,
-            "NARUTO_SARU": naruto_saru_hand,
-            "NARUTO_INU": naruto_inu_hand,
-            "NARUTO_I": naruto_i_hand,
             "JJK_MEGUMI": jjk_megumi_hand,
             "KOREAN_HEART": korean_heart_hand,
             "OPEN_PALM": open_palm_hand,
@@ -2038,6 +1649,17 @@ class SwipeTests(unittest.TestCase):
                 process(engine, fixture_fn(0.2, 0.5))
                 _, _, events = process(engine, fixture_fn(0.6, 0.5))
                 self.assertEqual(_swipe_events(events), [])
+
+    def test_external_seal_in_progress_suppresses_swipe(self):
+        # Y-04 (trampa 2, WORKPLAN.md): los 12 sellos reales ahora los
+        # detecta HandSignTracker (Y-02) FUERA de este motor - sin esta
+        # suspension explicita, la mano "ancla" de un sello de 2 manos
+        # (a menudo con dedos curvados, matchea _is_fist) podria disparar un
+        # swipe con el mismo movimiento de muñeca que arma el sello.
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5), external_seal_in_progress=True)
+        _, _, events = process(engine, fist_hand(0.6, 0.5), external_seal_in_progress=True)
+        self.assertEqual(_swipe_events(events), [])
 
 
 if __name__ == "__main__":

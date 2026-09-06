@@ -141,25 +141,36 @@ def main():
                 _wait_for_llm_resolution()
                 assert mock_os.volume_mute.called, "LLM-resolved MUTE should dispatch MuteCommand"
 
-            # --- TASK-063 (Fase 4): un sello Naruto de 1 mano, de punta a
-            # punta - deteccion real (GestureEngine + hold) -> dispatch real
-            # (binding por default) -> Command real.
-            import test_gesture_engine_regression as regr
+            # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): un
+            # sello Naruto de 2 manos, de punta a punta - deteccion real
+            # (HandSignTracker + hold, modelo mockeado) -> dispatch real
+            # (binding por default) -> Command real. Antes probaba NARUTO_I
+            # via GestureEngine (sello de 1 mano inventado, ya borrado).
+            from unittest.mock import MagicMock
 
-            pts = regr.naruto_i_hand()  # default: NARUTO_I -> LOCK_SESSION
-            hands = [regr.Hand(pts, "Right")]
-            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
-            for event in events:
-                if event.startswith("NARUTO_"):
-                    app._dispatch_bound_event(event)
+            from jarvis import config as _config
+            from jarvis.core.debounce import DEFAULT_CONFIRMATION_FRAMES
+            from jarvis.hand_sign_model import Detection
+            from jarvis.hand_sign_tracker import HandSignTracker
+
+            _model = MagicMock()
+            _model.detect.return_value = [Detection(class_name="I(Boar)", score=0.9, bbox=(0, 0, 10, 10))]
+            _tracker = HandSignTracker(model=_model)
+
+            _t = 0.0
+            _events = []
+            for _ in range(DEFAULT_CONFIRMATION_FRAMES):
+                _events = _tracker.process(None, now=_t)
+                _t += 0.03
+            for event in _events:
+                app._dispatch_bound_event(event)
             assert not mock_os.lock_session.called, "no debe disparar antes de cumplirse el hold"
 
-            app.gestures._naruto_hold_start = time.time() - 1.0
-            _, _, events = app.gestures.process(hands, regr.W, regr.H, app.screen_w, app.screen_h)
-            assert "NARUTO_I" in events
-            for event in events:
-                if event.startswith("NARUTO_"):
-                    app._dispatch_bound_event(event)
+            _t += _config.NARUTO_TWOHAND_HOLD_SECONDS + 0.01
+            _events = _tracker.process(None, now=_t)
+            assert "NARUTO_I" in _events
+            for event in _events:
+                app._dispatch_bound_event(event)
             assert mock_os.lock_session.called, "NARUTO_I deberia disparar LockSession (binding por default)"
 
             # --- TASK-081 (Fase 8): settings screen de punta a punta -

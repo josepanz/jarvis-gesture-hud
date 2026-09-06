@@ -79,9 +79,10 @@ NARUTO_SEAL_MISS_TOLERANCE = 3  # frames seguidos sin match tolerados antes de r
 # recalibrados con datos reales despues de fallar en vivo). Pendiente de
 # verificacion real, ver ARCHITECTURE.md.
 NARUTO_TWOHAND_HOLD_SECONDS = 1.2  # igual que PAUSE_HOLD_SECONDS - un gesto de 2 manos mas complejo
-NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION = 0.20  # manos "juntas/pegadas" (Ne/Mi/Kai/Tatsu)
-NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION = 0.20  # manos "en abanico" (Tori), mas separadas que el clasp
-NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION = 0.42
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION
+# y NARUTO_TWOHAND_FAN_MIN/MAX_DISTANCE_FRACTION se borraron aca - eran los
+# umbrales de la deteccion geometrica de Ne/Mi/Kai/Tatsu/Tori (proxy de
+# distancia/curvatura), reemplazada por el modelo YOLOX.
 
 # TASK-068/069 (Fase 6): gestos Jujutsu Kaisen. Umbrales RAZONADOS, no
 # medidos en camara real todavia - misma salvedad que la Fase 5 (Naruto de 2

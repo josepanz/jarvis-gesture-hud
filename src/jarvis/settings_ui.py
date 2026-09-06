@@ -66,11 +66,15 @@ _CLASSIC_EVENT_ICON_KEYS = {
 HOLD_REQUIRED_ACTIONS = frozenset({"LOCK_SESSION"})
 HOLD_CAPABLE_EVENTS = frozenset(
     {
-        # sellos Naruto de 1 mano + JJK_MEGUMI: NARUTO_SEAL_HOLD_SECONDS
-        "NARUTO_TORA", "NARUTO_USHI", "NARUTO_U", "NARUTO_UMA", "NARUTO_HITSUJI",
-        "NARUTO_SARU", "NARUTO_INU", "NARUTO_I", "JJK_MEGUMI",
-        # sellos de 2 manos: NARUTO_TWOHAND_HOLD_SECONDS
-        "NARUTO_NE", "NARUTO_MI", "NARUTO_TORI", "NARUTO_KAI", "NARUTO_TATSU", "JJK_GOJO_DOMAIN",
+        # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): unico
+        # sello de 1 mano que queda (el modelo no lo cubre): NARUTO_SEAL_HOLD_SECONDS
+        "JJK_MEGUMI",
+        # Los 12 sellos reales, todos de 2 manos (modelo YOLOX, ver
+        # hand_sign_tracker.py) + JJK_GOJO_DOMAIN: NARUTO_TWOHAND_HOLD_SECONDS.
+        # NARUTO_KAI se borro (no es uno de los 14 sellos canonicos).
+        "NARUTO_NE", "NARUTO_USHI", "NARUTO_TORA", "NARUTO_U", "NARUTO_TATSU", "NARUTO_MI",
+        "NARUTO_UMA", "NARUTO_HITSUJI", "NARUTO_SARU", "NARUTO_TORI", "NARUTO_INU", "NARUTO_I",
+        "JJK_GOJO_DOMAIN",
         # holds propios
         "KOREAN_HEART", "LOCK_SESSION",
     }

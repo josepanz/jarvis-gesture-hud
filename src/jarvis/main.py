@@ -213,10 +213,13 @@ GESTURE_DEFAULT_BINDINGS = {
     "NARUTO_NE": "ZOOM_OUT",
     "NARUTO_MI": "SCROLL_DOWN",
     "NARUTO_TORI": "SCROLL_UP",
-    "NARUTO_KAI": "CLOSE_APP",  # "Release" - calza tematicamente con cerrar la app
+    # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): NARUTO_KAI se
+    # borro aca - no esta entre los 14 sellos canonicos (AUDIT.md), asi que
+    # nunca correspondio a nada real. Su accion default (CLOSE_APP) sigue
+    # alcanzable con las 2 manos en Shaka sostenidas.
     "NARUTO_TATSU": "VOLUME_UP",
     # TASK-070 (Fase 6): sellos JJK. El vocabulario fijo de acciones
-    # (VALID_ACTIONS, 14 en total) ya esta agotado por los 13 sellos Naruto
+    # (VALID_ACTIONS, 14 en total) ya esta agotado por los 12 sellos Naruto
     # de arriba - queda UNA sola accion sin usar (RIGHT_CLICK). Las otras 2
     # reusan una accion ya asignada a otro sello (mismo mecanismo que
     # permite reasignar cualquier binding por perfil - 2 gestos fisicos
@@ -830,16 +833,28 @@ class JarvisApp:
                 if owned_hands is not None:
                     hands = owned_hands
 
-            screen_xy, cam_xy, events = self.gestures.process(hands, w, h, self.screen_w, self.screen_h)
-            self._last_screen_xy = screen_xy
-
             # Y-03: gate de costo - un sello canonico siempre usa las 2 manos,
             # asi que el modelo ni se invoca en el uso normal (1 mano, puntero/
-            # click). Mismo `for event in events:` de siempre (abajo): los
-            # nombres de evento son los de siempre, sin binding/perfil/leyenda
-            # nuevos que migrar.
+            # click). Corre ANTES de gestures.process() (Y-04, trampa 2): asi
+            # `hold_seal` refleja este cuadro cuando se lo inyectamos abajo,
+            # para que los gates de dwell/swipe de GestureEngine sepan que un
+            # sello de 2 manos esta en curso aunque el motor no lo detecte el.
+            sign_events = []
             if self.hand_sign_tracker is not None and len(hands) == 2:
-                events = events + self.hand_sign_tracker.process(raw_frame)
+                sign_events = self.hand_sign_tracker.process(raw_frame)
+
+            external_seal_in_progress = (
+                self.hand_sign_tracker is not None and self.hand_sign_tracker.hold_seal is not None
+            )
+            screen_xy, cam_xy, events = self.gestures.process(
+                hands, w, h, self.screen_w, self.screen_h, external_seal_in_progress=external_seal_in_progress
+            )
+            self._last_screen_xy = screen_xy
+
+            # Mismo `for event in events:` de siempre (abajo): los nombres de
+            # evento son los de siempre, sin binding/perfil/leyenda nuevos que
+            # migrar.
+            events = events + sign_events
 
             for event in events:
                 # H-01: defensa en profundidad - un gesto individual que falla

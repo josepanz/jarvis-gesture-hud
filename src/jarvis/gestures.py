@@ -133,119 +133,18 @@ def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
     return _segments_cross(pts[mcp_a], pts[tip_a], pts[mcp_b], pts[tip_b])
 
 
-def _index_middle_extended_ring_pinky_curled(pts):
-    return _fingers_extended(pts, 8, 12) and _fingers_curled(pts, 16, 20)
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los sellos de una
+# mano que este proyecto inventaba (Tora/Ushi/U/Uma/Hitsuji/Saru/Inu/I) fueron
+# borrados aca - AUDIT.md midio que 6 de 8 no correspondian a ningun sello
+# real (los 14 sellos canonicos se hacen con las DOS manos). Reemplazados por
+# el modelo YOLOX de `hand_sign_tracker.py`, que corre cuando hay 2 manos en
+# cuadro (ver main.py). `_is_jjk_megumi` (mas abajo) no se toca: JJK Megumi no
+# es un sello Naruto y el modelo no lo cubre.
 
 
-def _thumb_offset_from_palm(pts):
-    """(dx lateral, dy "hacia arriba") del pulgar respecto al nudillo medio
-    de la palma (landmark 9, referencia de centro de palma) - dy positivo
-    significa el pulgar esta mas arriba que el centro de la palma. Separa
-    "pulgar hacia arriba" de "pulgar hacia el costado" comparando cual eje
-    domina, en vez de un solo chequeo vertical (ver `_is_naruto_i`/`_is_naruto_saru`)."""
-    return pts[4].x - pts[9].x, pts[9].y - pts[4].y
-
-
-# TASK-061/062 (Fase 4, `openspec/changes/personalization-and-config-ui`,
-# design.md §4.1/§4.2): sellos Naruto de 1 mano. Censo de colision completo -
-# incluyendo las 2 redefiniciones explicitas (Uma, Saru) - documentado en
-# ARCHITECTURE.md. Tora/U/Hitsuji comparten la forma base "indice+medio
-# extendidos, anular+menique recogidos" (identica a SCROLL) - se distinguen
-# entre si y de SCROLL en `process()`, donde ya estan disponibles las
-# distancias precalculadas (d_thumb_index, distancia indice-medio) y el
-# chequeo de cruce de dedos; el resto de los sellos son formas propias sin
-# ambiguedad, verificadas pura y unicamente por curvatura de dedos.
-def _is_naruto_ushi(pts):
-    # Ox: solo el indice extendido, pulgar recogido junto a los dedos (no
-    # separado como en SCROLL - el pointer continuo tampoco es un chequeo
-    # discreto, asi que no hay colision posible ahi, per design.md §4.1).
-    return _fingers_extended(pts, 8) and _fingers_curled(pts, 12, 16, 20) and pts[4].y > pts[2].y
-
-
-def _is_naruto_uma(pts):
-    # Horse - REDEFINIDO POR SEGUNDA VEZ (verificado en camara real,
-    # 2026-08-27): la v1 (design.md original: "las 5 extendidas y parejas")
-    # colisionaba EXACTAMENTE con KEYBOARD_TOGGLE (apply.md §15). La v2
-    # ("indice+medio+anular extendidos, menique recogido") pedia aislar el
-    # anular junto al medio sin el menique - medido en vivo: 0% de
-    # coincidencia, la mano real hizo naturalmente pulgar+indice+menique
-    # extendidos con medio+anular recogidos (forma tipo "rock and roll") en
-    # su lugar. Redefinido a esa forma, verificada como sostenible.
-    return _fingers_extended(pts, 8, 20) and _fingers_curled(pts, 12, 16) and pts[4].y < pts[2].y
-
-
-def _is_naruto_saru(pts):
-    # Monkey - REDEFINIDO POR SEGUNDA VEZ (verificado en camara real,
-    # 2026-08-27): la v1 (flag explicito de design.md: "pulgar+menique") ERA
-    # la forma de `_is_shaka` (apply.md §15). La v2 ("pulgar+anular
-    # extendidos") pedia aislar el anular solo - medido en vivo: 0% de
-    # coincidencia, todos los dedos salieron extendidos (imposible aislar el
-    # anular del medio/menique, comparten tendones). Redefinido a "pulgar
-    # arriba": puño cerrado con el pulgar extendido HACIA ARRIBA (no hacia
-    # el costado, eso es I/Boar) - distinguido de I por la DIRECCION del
-    # pulgar (arriba vs costado, ver `_thumb_offset_from_palm`), no por su
-    # curvatura simple.
-    if not _fingers_curled(pts, 8, 12, 16, 20):
-        return False
-    dx, dy = _thumb_offset_from_palm(pts)
-    return dy > 0.10 and dy > abs(dx)
-
-
-def _is_naruto_inu(pts):
-    # Dog - REDEFINIDO (verificado en camara real: la v1, "anular+menique
-    # juntos extendidos", dio 0% de coincidencia - la mano quedo
-    # completamente cerrada, aislar el anular sin el medio resulto
-    # imposible). Redefinido a: solo el menique extendido (el menique SI
-    # tiene un rango de movimiento independiente razonable, a diferencia del
-    # anular), resto recogido.
-    return _fingers_extended(pts, 20) and _fingers_curled(pts, 8, 12, 16) and pts[4].y > pts[2].y
-
-
-def _is_naruto_i(pts):
-    # Boar: puño cerrado con el pulgar extendido hacia el COSTADO (lateral),
-    # no hacia arriba (eso es Saru, arriba) ni recogido.
-    # FIX (verificado en camara real, 2026-08-27): la v1 media "extendido"
-    # con el mismo chequeo vertical que el resto de los dedos (pts[4].y <
-    # pts[2].y), pero "hacia el costado" es un movimiento LATERAL, no
-    # vertical - ese chequeo nunca podia detectarlo (el pulgar real salio
-    # "curvado" ~97% de las veces con esa metrica, incluso sostenido bien
-    # hacia el costado). Ahora compara el desplazamiento lateral contra el
-    # vertical (ver `_thumb_offset_from_palm`), igual que Saru pero
-    # exigiendo que domine el eje contrario.
-    # LIMITACION documentada (censo de colision, ver ARCHITECTURE.md):
-    # `_is_fist()` no chequea el pulgar, asi que tanto esta forma como Saru
-    # TAMBIEN cuentan como puño para la logica de 2 manos (fists[0] !=
-    # fists[1]) - interaccion de fondo aceptada, no una ejecucion silenciosa
-    # de una accion equivocada (arma el menu meta, no dispara nada solo).
-    #
-    # Umbral 0.15 (no 0.06): verificado contra `fist_hand()` (fixture de
-    # puño generico reusado en todo este archivo, con el pulgar apenas
-    # recogido a un costado por default, no deliberadamente extendido) -
-    # con un umbral mas chico ese puño comun tambien calificaba como I por
-    # accidente. 0.15 deja margen claro entre "pulgar apenas al costado de
-    # un puño relajado" y "pulgar deliberadamente extendido hacia el costado".
-    if not _fingers_curled(pts, 8, 12, 16, 20):
-        return False
-    dx, dy = _thumb_offset_from_palm(pts)
-    return abs(dx) > 0.15 and abs(dx) > dy
-
-
-# TASK-064/065 (Fase 5): sellos Naruto de 2 manos. design.md §5.1 advierte
-# que el entrelazado fino de dedos entre 2 manos NO es detectable de forma
-# confiable con los 21 puntos de MediaPipe (oclusion entre manos) y permite
-# explicitamente usar un proxy mas grueso (§5.1: "both hands' centers within
-# X distance, both hands' average finger curl above/below a threshold,
-# relative hand orientation") - eso es lo que se usa aca, no un intento de
-# replicar el entrelazado real punto por punto. Pendiente de verificar en
-# camara real (a diferencia de la Fase 4, donde la primera version fallo en
-# vivo la mayoria de las veces) - los umbrales son razonados, no medidos.
-def _curl_ratio(pts):
-    """Fraccion de los 4 dedos (no el pulgar) que leen como extendidos -
-    0.0 = puño, 1.0 = mano abierta, valores intermedios = proxy de "a medio
-    doblar/entrelazado"."""
-    return _extended_finger_count(pts) / 4.0
-
-
+# `_hands_distance`/`_hand_center` (usados por `_is_jjk_gojo_domain`, mas
+# abajo - unico sello de 2 manos que queda detectado por geometria, no por el
+# modelo).
 def _hand_center(pts, w, h):
     xs = [p.x for p in pts]
     ys = [p.y for p in pts]
@@ -256,16 +155,6 @@ def _hands_distance(p1, p2, w, h):
     c1x, c1y = _hand_center(p1, w, h)
     c2x, c2y = _hand_center(p2, w, h)
     return math.hypot(c2x - c1x, c2y - c1y)
-
-
-def _hand_points_up(pts):
-    avg_tip_y = sum(pts[t].y for t in (8, 12, 16, 20)) / 4
-    return avg_tip_y < pts[0].y - 0.05
-
-
-def _hand_points_down(pts):
-    avg_tip_y = sum(pts[t].y for t in (8, 12, 16, 20)) / 4
-    return avg_tip_y > pts[0].y + 0.05
 
 
 # TASK-068 (Fase 6): JJK_GOJO_DOMAIN (2 manos, estatico, Pattern B per
@@ -642,47 +531,19 @@ class GestureEngine:
             self.meta_hold_start = None
             self.meta_consumed = False
 
-        # TASK-064/065 (Fase 5) + TASK-068 (Fase 6): sellos de 2 manos.
-        # Excluidos si ya es otro gesto de 2 manos conocido (shaka/puños/
-        # pinch) - jerarquia, no solapamiento. Orden de chequeo: Kai (mas
-        # especifico, exige cruce real de dedos) -> Tatsu (asimetria de
-        # curvatura) -> Ne/Mi (mismo "entrelazado" proxy, distinguidos por
-        # orientacion) -> Tori (separadas y mas abiertas) -> Gojo (unica
-        # familia geometrica distinta: angulo pulgar-indice, no
-        # distancia/curvatura, chequeada al final para no competir con las
-        # anteriores). `_twohand_seal` guarda el EVENTO completo (con
-        # prefijo) para que el mismo hold-state-machine sirva para ambos
-        # namespaces sin duplicar logica.
+        # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 5
+        # sellos Naruto de 2 manos por geometria (Ne/Mi/Tori/Kai/Tatsu) se
+        # borraron aca - los 12 sellos reales (incluido NARUTO_KAI, que ni
+        # siquiera es uno de los 14 canonicos) los detecta el modelo YOLOX
+        # ahora (`hand_sign_tracker.py`, invocado desde main.py cuando hay 2
+        # manos en cuadro). JJK_GOJO_DOMAIN no es un sello Naruto y el modelo
+        # no lo cubre - se queda, unica familia geometrica que persiste aca
+        # (angulo pulgar-indice, ver `_is_jjk_gojo_domain`).
+        # `_twohand_seal` sigue guardando el EVENTO completo (con prefijo)
+        # para reusar el mismo hold-state-machine de abajo sin duplicar logica.
         _twohand_seal = None
-        if not both_shaka and not both_fists and not both_pinching:
-            dist_frac = _hands_distance(p1, p2, w, h) / math.hypot(w, h)
-            ratio1, ratio2 = _curl_ratio(p1), _curl_ratio(p2)
-            clasped = dist_frac <= config.NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION
-            fanned = (
-                config.NARUTO_TWOHAND_FAN_MIN_DISTANCE_FRACTION
-                < dist_frac
-                <= config.NARUTO_TWOHAND_FAN_MAX_DISTANCE_FRACTION
-            )
-            interlaced = 0.2 <= ratio1 <= 0.8 and 0.2 <= ratio2 <= 0.8
-            asymmetric = abs(_extended_finger_count(p1) - _extended_finger_count(p2)) >= 2
-            kai_crossed = (
-                _fingers_extended(p1, 8, 12)
-                and _fingers_extended(p2, 8, 12)
-                and (_segments_cross(p1[5], p1[8], p2[5], p2[8]) or _segments_cross(p1[9], p1[12], p2[9], p2[12]))
-            )
-
-            if clasped and kai_crossed:
-                _twohand_seal = "NARUTO_KAI"
-            elif clasped and asymmetric:
-                _twohand_seal = "NARUTO_TATSU"
-            elif clasped and interlaced and _hand_points_up(p1) and _hand_points_up(p2):
-                _twohand_seal = "NARUTO_NE"
-            elif clasped and interlaced and _hand_points_down(p1) and _hand_points_down(p2):
-                _twohand_seal = "NARUTO_MI"
-            elif fanned and ratio1 >= 0.75 and ratio2 >= 0.75:
-                _twohand_seal = "NARUTO_TORI"
-            elif _is_jjk_gojo_domain(p1, p2, w, h):
-                _twohand_seal = "JJK_GOJO_DOMAIN"
+        if not both_shaka and not both_fists and not both_pinching and _is_jjk_gojo_domain(p1, p2, w, h):
+            _twohand_seal = "JJK_GOJO_DOMAIN"
 
         if _twohand_seal is not None:
             if self._twohand_seal_hold_name != _twohand_seal:
@@ -717,9 +578,20 @@ class GestureEngine:
         )
         return events, both_pinching, both_shaka, two_hand_active
 
-    def process(self, hands, w, h, screen_w, screen_h):
+    def process(self, hands, w, h, screen_w, screen_h, external_seal_in_progress=False):
         """Devuelve (screen_xy, cam_xy, events). screen_xy/cam_xy son None si no hay
-        puntero que mover (sin manos, o lectura de gestos en pausa)."""
+        puntero que mover (sin manos, o lectura de gestos en pausa).
+
+        `external_seal_in_progress` (Y-04, trampa 2 de
+        `openspec/changes/hand-sign-fidelity/WORKPLAN.md`): True si
+        `HandSignTracker` (Y-02, corre en main.py, FUERA de este motor) tiene
+        un sello de 2 manos sostenido este cuadro. Este motor ya no detecta
+        esos sellos (el modelo lo hace), pero los gates de dwell (C-01) y
+        swipe (C-03) necesitan seguir sabiendo que uno esta en curso - la
+        garantia vieja (`self._naruto_hold_seal is not None`) dejo de cubrir
+        esos casos apenas la deteccion de 1 mano se borro. Inyectado por
+        quien llama (main.py) en vez de que este motor conozca el tracker -
+        mantiene `GestureEngine` puro/sin I/O (ver docstring del modulo)."""
         now = time.time()
         # TASK-056: filtro de manos implausibles (fondo/otra persona) antes de
         # CUALQUIER logica de gestos, de 1 o 2 manos - ver design.md §1.2.
@@ -903,45 +775,17 @@ class GestureEngine:
         else:
             self.scroll_baseline = None
 
-        # TASK-062 (Fase 4) + TASK-068 (Fase 6): sellos de 1 mano. Todos
-        # exigen ningun pinch activo (pinch_winner is None - asi cualquier
-        # forma que accidentalmente quede lo bastante cerca de un dedo como
-        # para pellizcar pierde contra el pinch, nunca dispara ambos) y que
-        # no haya un gesto de 2 manos en curso - ver censo de colision
-        # completo en ARCHITECTURE.md. `_naruto_seal` guarda el EVENTO
-        # completo (con prefijo NARUTO_/JJK_) para que el mismo
-        # hold-state-machine sirva para ambos namespaces sin duplicar logica
-        # (mismo truco que el bloque de 2 manos, ver arriba).
-        _naruto_gate = pinch_winner is None and not two_hand_active
-        _naruto_seal = None
-        if _naruto_gate:
-            if _index_middle_extended_ring_pinky_curled(pts):
-                # Tora/U/Hitsuji comparten esta base (identica a SCROLL) -
-                # se distinguen por cruce de dedos, separacion indice-medio,
-                # y posicion del pulgar (igual o menor a 40px = "junto a la
-                # mano", el complemento exacto del ">40" que ya exige SCROLL
-                # - sin tocar la condicion de SCROLL en absoluto).
-                d_index_middle = self._dist3(index, middle, w, h)
-                crossed = _fingers_crossed(pts, 8, 5, 12, 9)
-                if d_thumb_index <= 40:
-                    if crossed:
-                        _naruto_seal = "NARUTO_HITSUJI"
-                    elif d_index_middle < 30:
-                        _naruto_seal = "NARUTO_TORA"
-                    elif d_index_middle > 50:
-                        _naruto_seal = "NARUTO_U"
-            elif _is_naruto_ushi(pts):
-                _naruto_seal = "NARUTO_USHI"
-            elif _is_naruto_uma(pts):
-                _naruto_seal = "NARUTO_UMA"
-            elif _is_naruto_saru(pts):
-                _naruto_seal = "NARUTO_SARU"
-            elif _is_naruto_inu(pts):
-                _naruto_seal = "NARUTO_INU"
-            elif _is_naruto_i(pts):
-                _naruto_seal = "NARUTO_I"
-            elif _is_jjk_megumi(pts):
-                _naruto_seal = "JJK_MEGUMI"
+        # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 8
+        # sellos Naruto de 1 mano (Tora/Ushi/U/Uma/Hitsuji/Saru/Inu/I) se
+        # borraron aca - AUDIT.md midio que 6 de 8 no correspondian a ningun
+        # sello real (los 14 sellos canonicos son de 2 manos). Ahora los
+        # detecta el modelo YOLOX cuando hay 2 manos en cuadro (ver Y-01/Y-02/
+        # Y-03, `hand_sign_tracker.py`/main.py). JJK_MEGUMI queda igual: no es
+        # un sello Naruto y el modelo no lo cubre. `_naruto_seal` sigue
+        # guardando el EVENTO completo para reusar el mismo hold-state-machine
+        # de abajo (mismo truco que el bloque de 2 manos, ver
+        # `_process_two_hand_gestures`).
+        _naruto_seal = "JJK_MEGUMI" if pinch_winner is None and not two_hand_active and _is_jjk_megumi(pts) else None
 
         # TASK-062 fix (verificado en camara real, 2026-08-27): un solo
         # frame de parpadeo a "ningun sello" (ruido de landmark, no un
@@ -1059,6 +903,7 @@ class GestureEngine:
             and not two_hand_active
             and pinch_winner is None
             and self._naruto_hold_seal is None
+            and not external_seal_in_progress
             and self._korean_heart_hold_start is None
         )
         if _swipe_gate:
@@ -1076,7 +921,12 @@ class GestureEngine:
         # curso, o un gesto de 2 manos. "La app en pausa" ya esta cubierto -
         # ese caso ni siquiera llega aca (return temprano + _reset_single_hand_state()).
         if config.DWELL_CLICK_ENABLED:
-            if pinch_winner is not None or two_hand_active or self._naruto_hold_seal is not None:
+            if (
+                pinch_winner is not None
+                or two_hand_active
+                or self._naruto_hold_seal is not None
+                or external_seal_in_progress
+            ):
                 self._dwell_detector.reset()
                 self.dwell_progress = 0.0
             else:

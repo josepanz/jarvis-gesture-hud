@@ -94,8 +94,9 @@ ICON_SPECS = {
     "naruto_ushi": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "pause"},
     "naruto_u": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": None},
     "naruto_uma": {
-        # Redefinido por segunda vez (verificado en camara real) - ver
-        # gestures.py::_is_naruto_uma.
+        # Y-04: la funcion de deteccion geometrica de este sello (redefinida
+        # dos veces en su momento) fue borrada - el modelo lo detecta ahora.
+        # Este icono en si se actualiza en Y-05.
         "hands": 1,
         "extended": {"thumb", "index", "pinky"},
         "pinch": None,
@@ -125,7 +126,8 @@ ICON_SPECS = {
         "pinch": None,
         "glyph": None,
     },
-    "naruto_kai": {"hands": 2, "extended": ({"index", "middle"}, {"index", "middle"}), "pinch": None, "glyph": "close"},
+    # Y-04: naruto_kai se borro (NARUTO_KAI no es uno de los 14 sellos
+    # canonicos, AUDIT.md).
     "naruto_tatsu": {
         "hands": 2,
         "extended": (set(), {"index", "middle", "ring", "pinky"}),
