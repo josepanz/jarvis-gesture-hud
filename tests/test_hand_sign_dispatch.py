@@ -53,5 +53,34 @@ class HandSignDispatchTests(_AppTestCase):
         self.app.hand_sign_tracker.process.assert_not_called()
 
 
+class HandSignSequenceDispatchTests(_AppTestCase):
+    """Y-07 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): main.py
+    alimenta cada sello CONFIRMADO al `sequence_tracker` real (no mockeado -
+    es logica pura, sin costo de inferencia) - completar una secuencia agrega
+    su evento JUTSU_* a `sign_events`, que se despacha por el mismo camino."""
+
+    def setUp(self):
+        super().setUp()
+        self.app.hand_sign_tracker = MagicMock()
+        self.app.tracker.process = MagicMock(
+            return_value=[Hand(fist_hand(0.3, 0.5), "Left"), Hand(fist_hand(0.6, 0.5), "Right")]
+        )
+        self.app.cap.read.return_value = (True, _FRAME)
+
+    def _run_frames(self, sign_events_per_frame):
+        self.app.cap.isOpened.side_effect = [True] * len(sign_events_per_frame) + [False]
+        self.app.hand_sign_tracker.process.side_effect = [[e] for e in sign_events_per_frame]
+        self.app.run()
+
+    def test_completing_a_sequence_dispatches_its_action(self):
+        self._run_frames(["NARUTO_HITSUJI", "NARUTO_MI", "NARUTO_TORA"])  # JUTSU_BUNSHIN
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+
+    def test_an_incomplete_sequence_never_dispatches(self):
+        self._run_frames(["NARUTO_HITSUJI", "NARUTO_MI"])  # falta NARUTO_TORA
+        self.mock_mouse_pyautogui.mouseDown.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

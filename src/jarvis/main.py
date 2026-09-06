@@ -127,6 +127,7 @@ from jarvis.core.undo_redo import UndoRedoController
 from jarvis.core.voice_intent_resolver import DEFAULT_PHRASE_BINDINGS, VoiceIntentResolver
 from jarvis.gestures import GestureEngine
 from jarvis.hand_tracker import HandTracker
+from jarvis.hand_sign_sequence import SequenceTracker
 from jarvis.hand_sign_tracker import HandSignTracker
 from jarvis.hand_visualizer import draw_hand_overlay
 from jarvis.hud_keyboard import HUDKeyboard
@@ -235,6 +236,14 @@ GESTURE_DEFAULT_BINDINGS = {
     # tests/test_temporal_gesture.py::test_a_sustained_hold_that_eventually_releases_does_not_fire).
     "NARUTO_GASSHO": "CLOSE_APP",
     "NARUTO_MIZUNOE": "SCROLL_LEFT",
+    # Y-07 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): secuencias de
+    # sellos (jarvis.hand_sign_sequence.SequenceTracker), decodificadas de
+    # jutsu.csv del proyecto original - 3 combos representativos, no las 14
+    # (una de ellas tiene 44 sellos, impracticable a mano). Reusan acciones
+    # ya asignadas, con tema libre (mismo criterio que JJK/comunes abajo).
+    "JUTSU_BUNSHIN": "DOUBLE_CLICK",  # clonarse -> duplicar el click
+    "JUTSU_KAWARIMI": "UNDO",  # sustituirse por un doble -> deshacer
+    "JUTSU_KATON": "ZOOM_IN",  # bola de fuego -> el efecto mas "grande" disponible
     # TASK-070 (Fase 6): sellos JJK. El vocabulario fijo de acciones
     # (VALID_ACTIONS, 14 en total) ya esta agotado por los 12 sellos Naruto
     # de arriba - queda UNA sola accion sin usar (RIGHT_CLICK). Las otras 2
@@ -333,6 +342,10 @@ class JarvisApp:
             # de sellos, igual que HandTracker/PoseTracker arriba - un fallo de
             # carga tampoco puede terminar en un traceback crudo.
             self.hand_sign_tracker = HandSignTracker() if config.HAND_SIGN_MODEL_ENABLED else None
+            # Y-07: historial de sellos -> secuencia -> accion. Sin costo de
+            # inferencia propio (solo agrupa eventos NARUTO_* que el tracker
+            # de arriba ya confirmo), asi que no necesita su propio flag.
+            self.sequence_tracker = SequenceTracker() if self.hand_sign_tracker is not None else None
         except Exception as exc:
             _logger.error(
                 "no se pudo descargar/cargar el modelo de manos - revisá la conexión "
@@ -859,6 +872,16 @@ class JarvisApp:
             sign_events = []
             if self.hand_sign_tracker is not None and len(hands) == 2:
                 sign_events = self.hand_sign_tracker.process(raw_frame)
+
+            # Y-07: cada sello CONFIRMADO (no cada cuadro) alimenta el
+            # historial de secuencias - una secuencia completa agrega su
+            # propio evento (JUTSU_*) a sign_events, que entra al mismo
+            # dispatch de siempre mas abajo.
+            if self.sequence_tracker is not None:
+                for _sign_event in list(sign_events):
+                    _sequence_event = self.sequence_tracker.record(_sign_event)
+                    if _sequence_event is not None:
+                        sign_events.append(_sequence_event)
 
             external_seal_in_progress = (
                 self.hand_sign_tracker is not None and self.hand_sign_tracker.hold_seal is not None

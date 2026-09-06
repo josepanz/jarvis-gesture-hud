@@ -191,3 +191,9 @@ DWELL_CLICK_ENABLED = False
 # tiene que ser comodo de completar a proposito e incomodo de completar sin
 # querer.
 DWELL_DURATION_MS = 900
+
+# Y-07 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): secuencias de
+# sellos -> una accion. Mismo valor que `sign_interval` del proyecto original
+# (NARUTO-HandSignDetection) - copiado directo de una referencia que ya
+# funciona, no medido en esta camara.
+NARUTO_SEQUENCE_INTERVAL_SECONDS = 2.0

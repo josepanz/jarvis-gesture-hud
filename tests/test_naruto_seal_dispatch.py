@@ -116,6 +116,24 @@ class DefaultBindingTests(_AppTestCase):
         self.app._dispatch_bound_event("NARUTO_MIZUNOE")  # default: SCROLL_LEFT
         self.mock_mouse_pyautogui.hscroll.assert_called()
 
+    def test_jutsu_bunshin_default_binding_dispatches_the_right_command(self):
+        # Y-07 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): secuencia
+        # de sellos - mismo _dispatch_bound_event, el evento lo arma
+        # SequenceTracker en vez de HandSignTracker, pero el dispatch es
+        # identico al resto (no distingue por origen).
+        self.app._dispatch_bound_event("JUTSU_BUNSHIN")  # default: DOUBLE_CLICK
+        self.mock_mouse_pyautogui.mouseDown.assert_called_once()
+        self.mock_mouse_pyautogui.mouseUp.assert_called_once()
+
+    def test_jutsu_kawarimi_default_binding_dispatches_the_right_command(self):
+        self.app._dispatch_bound_event("VOLUME_UP")
+        self.app._dispatch_bound_event("JUTSU_KAWARIMI")  # default: UNDO
+        self.assertTrue(self.mock_os.volume_down.called)  # deshace el VolumeUp
+
+    def test_jutsu_katon_default_binding_dispatches_the_right_command(self):
+        self.app._dispatch_bound_event("JUTSU_KATON")  # default: ZOOM_IN
+        self.mock_mouse_pyautogui.scroll.assert_called()
+
     def test_jjk_seal_default_binding_dispatches_the_right_command(self):
         # TASK-070 (Fase 6): mismo _dispatch_bound_event, extendido al
         # prefijo JJK_ en run() - la resolucion del binding en si nunca miro

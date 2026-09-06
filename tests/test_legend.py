@@ -9,10 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from jarvis.gesture_icons import ICON_SPECS  # noqa: E402
 from jarvis.legend import ENTRIES, build_legend_entries, build_legend_text  # noqa: E402
 
-# Snapshot actualizado (Y-06, `openspec/changes/hand-sign-fidelity/WORKPLAN.md`):
-# 2 filas nuevas (Gassho/Mizunoe) - el padding (ljust) crecio porque
-# "Sello Gassho (manos juntas en oración, palmas planas)" supera a la
-# anterior mas larga (la fila de swipe).
+# Snapshot actualizado (Y-07, `openspec/changes/hand-sign-fidelity/WORKPLAN.md`):
+# 3 filas nuevas (secuencias de sellos) - el padding (ljust) no cambio, la
+# fila mas larga sigue siendo "Sello Gassho (manos juntas en oración,
+# palmas planas)".
 _EXPECTED_TEXT = (
     "JARVIS — Gestos\n"
     "\n"
@@ -46,6 +46,9 @@ _EXPECTED_TEXT = (
     "Sello Tatsu (manos en rombo, dedos curvados)           →  Volumen +\n"
     "Sello Gassho (manos juntas en oración, palmas planas)  →  Cerrar Jarvis\n"
     "Sello Mizunoe (manos entrelazadas, parecido a Inu)     →  Scroll izquierda\n"
+    "Secuencia Hitsuji→Mi→Tora (Bunshin)                    →  Doble click\n"
+    "Secuencia Hitsuji→I→Ushi→Inu→Mi (Kawarimi)             →  Deshacer\n"
+    "Secuencia Mi→Tora→Saru→I→Uma→Tora (Katon)              →  Zoom +\n"
     "Sello Gojo (marco en L, 2 manos arriba)                →  Click derecho\n"
     "Sello Sukuna (chasquido pulgar-medio)                  →  Captura\n"
     "Sello Megumi (índice+medio+anular)                     →  Silenciar sistema\n"

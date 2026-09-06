@@ -54,6 +54,12 @@ ENTRIES = [
     # distingue igual (salian gratis) y usan el mismo mecanismo de hold.
     ("Sello Gassho (manos juntas en oración, palmas planas)", "Cerrar Jarvis", "naruto_gassho"),
     ("Sello Mizunoe (manos entrelazadas, parecido a Inu)", "Scroll izquierda", "naruto_mizunoe"),
+    # Y-07: secuencias de sellos (jarvis.hand_sign_sequence), decodificadas de
+    # jutsu.csv del proyecto original - config.NARUTO_SEQUENCE_INTERVAL_SECONDS
+    # (2s) sin ningun sello nuevo reinicia el combo a medio hacer.
+    ("Secuencia Hitsuji→Mi→Tora (Bunshin)", "Doble click", "jutsu_bunshin"),
+    ("Secuencia Hitsuji→I→Ushi→Inu→Mi (Kawarimi)", "Deshacer", "jutsu_kawarimi"),
+    ("Secuencia Mi→Tora→Saru→I→Uma→Tora (Katon)", "Zoom +", "jutsu_katon"),
     # TASK-070 (Fase 6): sellos JJK, sostenidos config.NARUTO_TWOHAND_HOLD_SECONDS
     # (Gojo) o config.NARUTO_SEAL_HOLD_SECONDS (Megumi) - Sukuna es temporal
     # (ImpulseDetector), sin hold.

@@ -160,6 +160,23 @@ ICON_SPECS = {
         "glyph": "close",
     },
     "naruto_mizunoe": {"hands": 2, "extended": ({"pinky"}, {"pinky"}), "pinch": None, "glyph": "arrow_left"},
+    # Y-07: secuencias de sellos - el modelo de icono no puede representar
+    # una secuencia de poses, asi que cada uno usa un set de dedos propio +
+    # un glyph tematico con la accion default (double_dot=duplicar,
+    # arrow_left=deshacer/"volver", zoom=el efecto de Katon).
+    "jutsu_bunshin": {"hands": 2, "extended": ({"index"}, {"index"}), "pinch": None, "glyph": "double_dot"},
+    "jutsu_kawarimi": {
+        "hands": 2,
+        "extended": ({"thumb", "index"}, {"thumb", "index"}),
+        "pinch": None,
+        "glyph": "arrow_left",
+    },
+    "jutsu_katon": {
+        "hands": 2,
+        "extended": ({"index", "middle", "ring", "pinky"}, {"index", "middle", "ring", "pinky"}),
+        "pinch": None,
+        "glyph": "zoom",
+    },
     # TASK-070 (Fase 6): sellos JJK.
     "jjk_gojo_domain": {
         # Marco en L (pulgar+indice) de ambas manos - set de dedos extendidos

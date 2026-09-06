@@ -77,6 +77,10 @@ HOLD_CAPABLE_EVENTS = frozenset(
         "NARUTO_UMA", "NARUTO_HITSUJI", "NARUTO_SARU", "NARUTO_TORI", "NARUTO_INU", "NARUTO_I",
         "NARUTO_GASSHO", "NARUTO_MIZUNOE",
         "JJK_GOJO_DOMAIN",
+        # Y-07: una secuencia completa (3-6 sellos, cada uno con su propio
+        # hold) es mas dificil de disparar sin querer que un sello suelto -
+        # se listan igual de "hold capable" por completitud.
+        "JUTSU_BUNSHIN", "JUTSU_KAWARIMI", "JUTSU_KATON",
         # holds propios
         "KOREAN_HEART", "LOCK_SESSION",
     }
