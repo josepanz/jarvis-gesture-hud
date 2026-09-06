@@ -89,27 +89,40 @@ ICON_SPECS = {
     "key_toggle_legend": {"hands": 0, "key_label": "H"},
     "key_mirror": {"hands": 0, "key_label": "M"},
     "key_legend_opacity": {"hands": 0, "key_label": "+/-"},
-    # TASK-063 (Fase 4): un icono por sello Naruto de 1 mano - spec.md #3.4.
-    "naruto_tora": {"hands": 1, "extended": {"index", "middle"}, "pinch": ("index", "middle"), "glyph": "camera"},
-    "naruto_ushi": {"hands": 1, "extended": {"index"}, "pinch": None, "glyph": "pause"},
-    "naruto_u": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": None},
+    # Y-05 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 12 sellos
+    # reales son todos de 2 MANOS (AUDIT.md) - estos 8 pasan de hands=1 a
+    # hands=2 (duplicando el mismo set de dedos en ambas manos). El modelo de
+    # icono no representa manos entrelazadas ni su forma real (fotografiada en
+    # docs/gesture-reference/canonical/), asi que varios quedan parecidos
+    # entre si - se distinguen por el glyph, mismo criterio ya aceptado para
+    # naruto_ne/naruto_mi mas abajo.
+    "naruto_tora": {
+        "hands": 2,
+        "extended": ({"index", "middle"}, {"index", "middle"}),
+        "pinch": ("index", "middle"),
+        "glyph": "camera",
+    },
+    "naruto_ushi": {"hands": 2, "extended": ({"index"}, {"index"}), "pinch": None, "glyph": "pause"},
+    "naruto_u": {"hands": 2, "extended": ({"index", "middle"}, {"index", "middle"}), "pinch": None, "glyph": None},
     "naruto_uma": {
-        # Y-04: la funcion de deteccion geometrica de este sello (redefinida
-        # dos veces en su momento) fue borrada - el modelo lo detecta ahora.
-        # Este icono en si se actualiza en Y-05.
-        "hands": 1,
-        "extended": {"thumb", "index", "pinky"},
+        "hands": 2,
+        "extended": ({"thumb", "index", "pinky"}, {"thumb", "index", "pinky"}),
         "pinch": None,
         "glyph": "zoom",
     },
-    "naruto_hitsuji": {"hands": 1, "extended": {"index", "middle"}, "pinch": None, "glyph": "close"},
-    # Saru/I: mismo set de dedos extendidos (solo el pulgar) - se
-    # distinguen entre si por el glyph (keyboard vs lock), la direccion real
-    # del pulgar (arriba vs costado) no es representable en este modelo
-    # simple de iconos.
-    "naruto_saru": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "keyboard"},
-    "naruto_inu": {"hands": 1, "extended": {"pinky"}, "pinch": None, "glyph": None},
-    "naruto_i": {"hands": 1, "extended": {"thumb"}, "pinch": None, "glyph": "lock"},
+    "naruto_hitsuji": {
+        "hands": 2,
+        "extended": ({"index", "middle"}, {"index", "middle"}),
+        "pinch": None,
+        "glyph": "close",
+    },
+    # Saru/I: mismo set de dedos extendidos (solo el pulgar) en ambas manos -
+    # se distinguen entre si por el glyph (keyboard vs lock), igual que antes
+    # de Y-05 (ninguna de las 2 formas reales es representable en este modelo
+    # simple de iconos).
+    "naruto_saru": {"hands": 2, "extended": ({"thumb"}, {"thumb"}), "pinch": None, "glyph": "keyboard"},
+    "naruto_inu": {"hands": 2, "extended": ({"pinky"}, {"pinky"}), "pinch": None, "glyph": None},
+    "naruto_i": {"hands": 2, "extended": ({"thumb"}, {"thumb"}), "pinch": None, "glyph": "lock"},
     # TASK-066 (Fase 5): sellos de 2 manos - proxy grueso (design.md §5.1),
     # el modelo de icono no representa distancia entre manos ni orientacion
     # real, asi que Ne/Mi se distinguen solo por el glyph.
