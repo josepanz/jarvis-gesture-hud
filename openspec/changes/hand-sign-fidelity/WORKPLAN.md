@@ -44,6 +44,37 @@ antes, qué cambiaste, cuántos tests hay ahora y si algo quedó raro.
 
 **Excepción**: si una tarea "no reproduce", anotala como tal y seguí sin esperar.
 
+### Cómo se le pide (prompt para copiar y pegar)
+
+```
+Leé openspec/changes/hand-sign-fidelity/WORKPLAN.md, secciones §0.1, §1, §2 y la de
+la tarea <ID>. Ejecutá SOLO la tarea <ID>.
+
+Contexto: los sellos de una mano que este proyecto implementó son formas inventadas
+que no corresponden a ningún sello real; la decisión ya tomada es reemplazarlos por
+el modelo YOLOX de C:\workspace\NARUTO-HandSignDetection (MIT, ya clonado local).
+El análisis completo está en AUDIT.md, al lado del WORKPLAN.
+
+Reglas:
+- Hacé primero la "Verificación previa obligatoria" de la tarea, si la tiene. Si no
+  reproduce lo descrito, no toques código: anotalo en §8 y decímelo.
+- No re-audites el proyecto ni rediscutas la decisión: el análisis ya está hecho y
+  está medido. Si encontrás evidencia de que algo del plan está mal, PARÁ y decilo,
+  no improvises un plan nuevo.
+- No lances subagentes. La tarea ya trae archivos, líneas y trampas: leé esos.
+- Usá `venv\Scripts\python`, NO el `python` del sistema (el global no tiene
+  cv2/mediapipe y la suite falla con 47 errores de import ajenos a tu cambio).
+- No leas ARCHITECTURE.md completo (son ~1500 líneas): grep a la sección puntual.
+- Prestá atención a la sección "Trampas verificadas" de la tarea: están ahí porque
+  ya se comprobó que rompen la tarea si se ignoran.
+- Al terminar: DoD del §1.2, commit con el mensaje de la tarea, casilla marcada en
+  §8 (commit docs: aparte), y pará.
+```
+
+Para encadenar varias tareas de un mismo workflow en una sola sesión, cambiá
+`SOLO la tarea <ID>` por `las tareas <ID> y <ID>, en ese orden, parando y reportando
+entre cada una`.
+
 ### Economía de tokens
 
 - **Una sesión nueva por workflow.** Este archivo es autocontenido justamente para
