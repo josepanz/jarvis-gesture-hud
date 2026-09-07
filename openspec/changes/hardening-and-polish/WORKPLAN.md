@@ -194,9 +194,9 @@ de funcionalidad o riesgo de seguridad real · **MEDIO** = bug con workaround ·
 **Nuevos, hallados en Workflow 6 (cámara real, José, 2026-09-07) — sin workflow ni
 tarea asignada todavía, requieren decisión de diseño antes de codificar:**
 
-| H-26 | MEDIO | gestos | Sukuna↔`RIGHT_CLICK` (V-05): confirmado en vivo, "no hace enseguida" además de la colisión ya conocida — posible causa adicional de latencia percibida, no solo el umbral compartido |
-| H-27 | MEDIO | gestos | El gesto de 2 puños (pausa/despausa) se confunde con la intención de click cerca de los bordes/esquinas de pantalla (ej. al ir a "Inicio") — no investigado aún si es geometría de la mano cerca del borde de cuadro o solapamiento real con el umbral de `both_fists` |
-| H-28 | MEDIO | UI/legend | El panel transparente de gestos (`overlay.py`, `init_legend`) ocupa toda la mitad de pantalla del lado elegido, no es minimizable ni tiene scroll — con la lista completa de gestos no entra cómodo. Ya existe `TOGGLE_LEGEND`/alpha, pero no resuelve tamaño/scroll |
+| H-26 | MEDIO | gestos | ~~Sukuna↔`RIGHT_CLICK` (V-05)~~ **RESUELTO** (mitigado): `RIGHT_CLICK_CONFIRM_FRAMES` (6) separado para el pinch "middle" — un snap real ya no se queda quieto en la banda 15-20px lo suficiente para confirmar el click derecho antes de completarse |
+| H-27 | MEDIO | gestos | ~~El gesto de 2 puños se confunde con click cerca de bordes/esquinas~~ **RESUELTO** (mitigado): `both_fists` ahora exige `PAUSE_MAX_DISTANCE_FRACTION` (0.35) entre ambas manos, no solo el gate laxo de "misma persona" (0.55) |
+| H-28 | MEDIO | UI/legend | ~~El panel transparente de gestos ocupa toda la mitad de pantalla, no es minimizable ni tiene scroll~~ **RESUELTO**: paginado (`LEGEND_PAGE_SIZE=12`) + colapsable, con controles ◀/▶/▁ en una ventanita aparte no click-through (mismo patrón que el ícono de engranaje) |
 
 **Descartados explícitamente (auditados y NO son bugs — no los "arregles"):**
 
