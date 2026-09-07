@@ -60,6 +60,14 @@ class _AppTestCase(unittest.TestCase):
             patch("jarvis.actions.system.CrossPlatformOS"),
             patch("cv2.VideoCapture"),
             patch("jarvis.hand_tracker.HandTracker.__init__", return_value=None),
+            # Sin esto, cada JarvisApp() de este archivo (y de todo lo que
+            # importa _AppTestCase) cargaba un onnxruntime.InferenceSession
+            # REAL - HandSignModel no tenia el mismo mockeo que HandTracker de
+            # arriba. Barato en Windows, pero confirmado en CI (macOS) que
+            # crear muchas sesiones reales seguidas en el mismo proceso
+            # termina en Segmentation fault (exit code 139) a mitad de la
+            # suite - no un fallo de assert, un crash nativo del proceso.
+            patch("jarvis.hand_sign_model.HandSignModel.__init__", return_value=None),
             patch("pyautogui.size", return_value=(1920, 1080)),
             # No se necesita un motor TTS real para estos tests (a diferencia
             # de manual_main_integration_check.py, que lo mantiene real a
