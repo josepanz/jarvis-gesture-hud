@@ -16,9 +16,17 @@ class LockSessionWindowsTests(unittest.TestCase):
     @patch("jarvis.os_native.platform.system", return_value="Windows")
     @patch("jarvis.os_native.subprocess.run")
     def test_windows_does_not_shell_out(self, mock_run, _mock_platform):
-        with patch("ctypes.windll.user32.LockWorkStation", create=True) as mock_lock:
+        # ctypes.windll no existe en absoluto fuera de Windows (ni siquiera
+        # como atributo lazy) - patch(..., create=True) sobre un atributo
+        # ANIDADO (user32.LockWorkStation) no alcanza si el primer segmento
+        # de la ruta (windll) tampoco existe, lo que rompia este test en CI
+        # (macOS/Linux) con AttributeError apenas se pusheo por primera vez.
+        # Se patchea windll en si con un MagicMock (create=True) para poder
+        # seguir verificando esta rama especifica de Windows en CUALQUIER
+        # runner, en vez de saltear el test en 2 de las 3 plataformas de CI.
+        with patch("ctypes.windll", MagicMock(), create=True) as mock_windll:
             CrossPlatformOS.lock_session()
-            mock_lock.assert_called_once()
+            mock_windll.user32.LockWorkStation.assert_called_once()
         mock_run.assert_not_called()
 
 
