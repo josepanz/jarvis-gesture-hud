@@ -1562,7 +1562,16 @@ escribilo con lo que encontraste en vez de borrarla.
 - [~] V-02 sellos Naruto de dos manos — **SUPERADO** por la misma auditoría: de los 5,
       sólo Ne y Mi son correctos, Tori está definido al revés y Kai no existe entre los
       14 canónicos. Reemplazado por Y-V1
-- [ ] V-03 JJK + Clap + corazón coreano
+- [~] V-03 JJK + Clap + corazón coreano — **PARCIAL** (verificado en cámara
+      real, José, 2026-09-07): **Clap confirmado** (dispara `KEYBOARD_TOGGLE`,
+      confirmado por José: "si funciono"). **Gojo domain, JJK Megumi y
+      corazón coreano NO reprodujeron** pese a varios intentos guiados -
+      ninguno de los 3 llegó a disparar su evento en la sesión. No se tocó
+      código/umbrales sin datos que lo justifiquen (regla del proyecto) - la
+      sesión se interrumpió antes de aislar si es umbral, geometría de mano
+      dificil de sostener frente a cámara, o ambas cosas. Queda pendiente
+      una sesión dedicada a estos 3, uno a la vez, con instrumentación de
+      diagnóstico (ángulo/distancia real medidos) antes de tocar ningún valor
 - [x] V-04 confirmar o revertir EMA_ALPHA 0.25 · **revertido a 0.35** (verificado
       en cámara real, José, 2026-09-07: a 0.25 el puntero se sintió "impreciso
       y con mucha latencia, tarda en moverse, no se siente natural" — bajar el
