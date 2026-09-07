@@ -212,25 +212,34 @@ class ScreenOverlay:
         # reserva una franja SIN superposicion para los controles (mismo
         # lado del panel) y el panel se corre para dejarle lugar - z-order
         # deja de importar porque nunca se tocan.
-        # winfo_reqwidth()/reqheight() (tamaño PEDIDO al geometry manager), no
-        # winfo_width()/height() (tamaño real ya mapeado en pantalla) -
-        # confirmado en CI (macOS): estos ultimos pueden seguir siendo 1x1 en
-        # este punto si la ventana todavia no termino de mapearse via el
-        # window manager, lo que dejaba practicamente sin franja reservada y
-        # los controles terminaban superpuestos con el panel (Windows no
-        # mostro el problema, pero el req-size es correcto ahi tambien).
+        # Causa real del overlap visto en CI (macOS), confirmado con Mac real
+        # (2026-09-07) - no era timing/mapeo como se penso originalmente: en
+        # macOS, el SO clampea la posicion Y de una ventana overrideredirect
+        # para que nunca quede debajo de la barra de menu, sin importar lo
+        # que pida geometry() (ej.: pedir "+16+16" via geometry() puede
+        # terminar en winfo_y()==25, no 16 - confirmado con repro minimo,
+        # sin nada de jarvis). Si esta franja se calcula asumiendo que los
+        # controles quedan exactamente en LEGEND_MARGIN, el panel invade el
+        # espacio que el SO le robo a los controles. En vez de asumir/
+        # duplicar esa logica de clamping (distinta por plataforma y version
+        # de SO), se lee la posicion YA RESUELTA de los controles
+        # (winfo_y()/winfo_height(), post-clamping) y el panel se ancla a
+        # partir de ahi - nunca se superponen sea cual sea el offset que el
+        # SO haya aplicado.
         win = self._legend_window
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        controls_h = 0
+        x = sw - w - LEGEND_MARGIN if "right" in corner else LEGEND_MARGIN
         if self._legend_controls_window is not None:
             self._legend_controls_window.update_idletasks()
-            # max(..., 20): piso de seguridad - un reqheight en 0/1 (medido en
+            controls_y = self._legend_controls_window.winfo_y()
+            # max(..., 20): piso de seguridad - una altura en 0/1 (medida en
             # CI de macOS antes de este fix) no debe colapsar la franja
             # reservada a la nada.
-            controls_h = max(self._legend_controls_window.winfo_reqheight(), 20) + 4
-        x = sw - w - LEGEND_MARGIN if "right" in corner else LEGEND_MARGIN
-        y = LEGEND_MARGIN + controls_h if "top" in corner else sh - h - LEGEND_MARGIN - controls_h
+            controls_h = max(self._legend_controls_window.winfo_height(), 20)
+            y = controls_y + controls_h + 4 if "top" in corner else controls_y - h - 4
+        else:
+            y = LEGEND_MARGIN if "top" in corner else sh - h - LEGEND_MARGIN
         win.geometry(f"+{x}+{y}")
 
     # --- H-28: controles de pagina/colapso (ventana aparte, no click-through,

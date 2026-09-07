@@ -1697,12 +1697,28 @@ ya existente. Sin cambios en `.github/workflows/ci.yml` ni en código de
 tests. Verificado en Mac real: 763 tests, 3 corridas seguidas, cero crashes
 (exit 134/139 desaparece por completo).
 
-**Nota aparte, no tocada**: `test_controls_never_overlap_the_panel`
-(`test_overlay.py`) sigue fallando de forma no determinística en este
-hardware incluso con el fix de arriba - es el problema YA documentado en el
-punto 3 de "Lo ya descartado" (geometría con `winfo_width()/height()` no
-confiable antes de mapearse). Distinto issue, pre-existente, fuera del
-alcance de este arreglo.
+**Segundo hallazgo, mismo día**: con el crash resuelto, la suite corría
+completa pero `test_controls_never_overlap_the_panel` (`test_overlay.py`)
+seguía fallando en CI real (no localmente con Tk 9 de Homebrew - otra
+diferencia de version que casi vuelve a esconder el problema). El punto 3 de
+"Lo ya descartado" atribuía esto a timing/mapeo de `winfo_width()/height()`.
+Con Mac real resultó ser otra cosa, 100% determinística: **macOS clampea la
+posición Y de una ventana `overrideredirect` para que nunca quede debajo de
+la barra de menú**, sin importar lo que pida `geometry()` (repro mínimo, sin
+nada de `jarvis`: pedir `geometry("+16+16")` en un `Toplevel` con
+`overrideredirect(True)` puede terminar con `winfo_y()==25`, no 16). La
+franja reservada para los controles del legend (`_position_legend()`,
+`overlay.py`) asumía que estos quedaban exactamente en `LEGEND_MARGIN` (16px)
+- el panel invadía los ~9px que el SO le robaba a los controles. No es solo
+un artefacto de test: es un bug real de posicionamiento (el mismo tipo de
+problema que motivó H-28 originalmente - controles inclickeables por
+solaparse con el panel). Arreglado en `overlay.py`
+(`_position_legend()`): en vez de recalcular una posición asumida, se lee la
+posición YA RESUELTA de la ventana de controles (`winfo_y()`/
+`winfo_height()`, post-clamping) y el panel se ancla a partir de ahí -
+funciona sea cual sea el offset que el SO haya aplicado, sin necesidad de
+conocer ni duplicar esa lógica de clamping. Verificado en Mac real: 763
+tests, 3 corridas seguidas, `OK (skipped=9)` - CERO failures, cero crashes.
 
 ---
 
