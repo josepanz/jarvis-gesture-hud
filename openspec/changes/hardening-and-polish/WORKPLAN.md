@@ -1608,10 +1608,10 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ---
 
-## 12.1 Bloqueante abierto: CI de macOS crashea (branch `feature/pose-ownership-and-visualization`)
+## 12.1 CI de macOS crasheaba (branch `feature/pose-ownership-and-visualization`)
 
-**Estado: sin resolver, pendiente de acceso a un Mac real (2026-09-07).** Windows y
-Linux corren los 763 tests en verde de forma consistente. macOS falla de forma
+**Estado: RESUELTO (2026-09-07, con acceso a un Mac real).** Windows y
+Linux corren los 763 tests en verde de forma consistente. macOS fallaba de forma
 **determinística** (3 corridas seguidas, mismo punto exacto) con:
 
 ```
@@ -1648,20 +1648,61 @@ ninguno resolvió ESTE crash):
    pasa siempre en la primera inicialización de Tk-Aqua del proceso, sin importar
    en qué test ocurra.
 
-**Hipótesis con más peso, sin verificar**: conflicto conocido entre OpenCV
-(`cv2`, importado indirectamente por casi todo el proyecto vía
-`jarvis.hand_tracker`/`jarvis.main` mucho antes de que cualquier test toque Tk) y
-Tkinter compitiendo por el mismo `NSApplication` singleton de Cocoa dentro de UN
-solo proceso, en el runner `macos-latest` de GitHub Actions. Si es así, el arreglo
-real no es de código de la app sino de **cómo CI invoca los tests**: correr los
-archivos que crean ventanas Tk reales (`test_overlay.py`, `test_settings_ui.py`) en
-un proceso `python -m unittest` SEPARADO del resto, solo para el job de macOS, en
-`.github/workflows/ci.yml`. Sin un Mac no se pudo confirmar ni intentar.
+**Hipótesis original (con acceso solo a Windows), REFUTADA con un Mac real**:
+se sospechaba un conflicto entre el *import* de OpenCV/mediapipe y Tkinter
+compitiendo por el mismo `NSApplication` de Cocoa. Con hardware real (Intel,
+macOS 12.7.6, más una build de `_tkinter` compilada a mano contra Tcl/Tk
+8.6.18 - la misma rama 8.6.x que usa el Python de `actions/setup-python` en
+macOS, para reproducir fielmente y no contra Tcl/Tk 9.x de Homebrew, que
+resultó tener timings distintos) se descartó por completo: `import cv2`,
+`import mediapipe`, `import jarvis.main` completo, en cualquier orden
+relativo a `import tkinter`, **nunca** crashea por sí solo. El repro real es
+mucho más específico y no tiene nada que ver con el orden de imports.
 
-**Cómo reproducir en un Mac real**: `git checkout feature/pose-ownership-and-visualization`,
-`pip install -r requirements.txt`, `python -m unittest discover -s tests -v` -
-debería crashear cerca del final de `test_os_native.py`/inicio de `test_overlay.py`
-con el mismo mensaje de arriba.
+**Causa real (confirmada con repro mínimo, sin nada de `jarvis` ni de
+`unittest` de por medio)**:
+
+```python
+import cv2, numpy as np
+cv2.imshow("x", np.zeros((480, 640, 3), dtype=np.uint8))
+cv2.waitKey(1)             # cv2.imshow crea una ventana Cocoa real (highgui)
+import tkinter as tk
+tk.Tk().update()           # <- crashea ACA con el mismo NSInvalidArgumentException
+```
+
+En macOS, el backend `highgui` de OpenCV usa Cocoa/AppKit para dibujar la
+ventana de `cv2.imshow()` - eso reclama el `NSApplication` del proceso para
+sí mismo. El primer `tk.Tk()` que el proceso crea DESPUÉS hereda ese estado
+y crashea en su primer `update()` (a veces como `NSInvalidArgumentException`
+en `'-[NSApplication macOSVersion]'`, exit 134; a veces como segfault llano,
+exit 139 - mismo mecanismo, síntoma no siempre idéntico).
+
+`_AppTestCase` (`test_naruto_seal_dispatch.py`) mockea `cv2.VideoCapture`
+desde el principio, pero **nunca mockeó `cv2.imshow`/`cv2.waitKey`** -
+`JarvisApp.run()` los llama de verdad en cada frame (no forman parte del
+"hardware" que `_AppTestCase` se propuso aislar; nadie los miró porque no
+tocan disco ni red). Cualquier test que herede de `_AppTestCase` y llame a
+`self.app.run()` - `test_hand_sign_dispatch.py` es el primero
+alfabéticamente que lo hace - deja el proceso con Cocoa ya corrompido mucho
+antes de que `test_overlay.py`/`test_settings_ui.py` toquen Tk por primera
+vez. Por eso ningún repro basado solo en imports (el de la sesión de
+Windows, o los primeros intentos de esta misma sesión) lo disparaba: hacía
+falta la ejecución real de `run()`, no solo la carga de módulos.
+
+**Fix aplicado** (`tests/test_naruto_seal_dispatch.py`,
+`_AppTestCase.setUp()`): agregar `patch("cv2.imshow")` y
+`patch("cv2.waitKey", return_value=-1)` junto al `patch("cv2.VideoCapture")`
+ya existente. Sin cambios en `.github/workflows/ci.yml` ni en código de
+`src/jarvis/` - era puramente un hueco en el mockeo de hardware de los
+tests. Verificado en Mac real: 763 tests, 3 corridas seguidas, cero crashes
+(exit 134/139 desaparece por completo).
+
+**Nota aparte, no tocada**: `test_controls_never_overlap_the_panel`
+(`test_overlay.py`) sigue fallando de forma no determinística en este
+hardware incluso con el fix de arriba - es el problema YA documentado en el
+punto 3 de "Lo ya descartado" (geometría con `winfo_width()/height()` no
+confiable antes de mapearse). Distinto issue, pre-existente, fuera del
+alcance de este arreglo.
 
 ---
 

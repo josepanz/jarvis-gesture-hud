@@ -59,6 +59,20 @@ class _AppTestCase(unittest.TestCase):
             patch("jarvis.actions.macro.pyautogui"),  # TASK-076: HotkeyCommand tiene su propio import de pyautogui
             patch("jarvis.actions.system.CrossPlatformOS"),
             patch("cv2.VideoCapture"),
+            # Causa real del crash de CI en macOS (ver WORKPLAN 12.1): no es
+            # un conflicto por import de OpenCV (descartado con repro
+            # minimo en hardware real) - run() llama a cv2.imshow()/
+            # cv2.waitKey() de verdad en cada frame (nunca estuvieron
+            # mockeados, a diferencia de VideoCapture arriba). En macOS,
+            # cv2.imshow() crea una ventana Cocoa real via el backend
+            # highgui de OpenCV, que reclama NSApplication para si mismo -
+            # el primer tk.Tk() que el proceso crea DESPUES de eso hereda
+            # ese estado y crashea (NSInvalidArgumentException en
+            # '-[NSApplication macOSVersion]') en su primer update(). Repro
+            # minimo sin nada de jarvis ni de este archivo: cv2.imshow(...)
+            # + cv2.waitKey(1) seguido de tk.Tk().update() alcanza solo.
+            patch("cv2.imshow"),
+            patch("cv2.waitKey", return_value=-1),
             patch("jarvis.hand_tracker.HandTracker.__init__", return_value=None),
             # Sin esto, cada JarvisApp() de este archivo (y de todo lo que
             # importa _AppTestCase) cargaba un onnxruntime.InferenceSession
