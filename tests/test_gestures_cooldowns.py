@@ -90,7 +90,7 @@ class ClickCooldownTests(unittest.TestCase):
 class RightClickCooldownTests(unittest.TestCase):
     def test_second_right_click_within_cooldown_is_suppressed(self):
         engine = GestureEngine()
-        regr.process_confirmed(engine, regr.right_click_hand())
+        regr.process_confirmed_right_click(engine, regr.right_click_hand())
         # Force a fresh was_right_pinching edge without relying on some other
         # fixture's pose to "release" the middle-thumb pinch - flat() doesn't
         # (every landmark collapses to ~the same point, so it trivially still
@@ -104,7 +104,7 @@ class RightClickCooldownTests(unittest.TestCase):
 
     def test_right_click_fires_again_once_cooldown_expires(self):
         engine = GestureEngine()
-        regr.process_confirmed(engine, regr.right_click_hand())
+        regr.process_confirmed_right_click(engine, regr.right_click_hand())
         engine.was_right_pinching = False
         _expire_cooldown(engine, COOLDOWN_RIGHT_CLICK)
         _, _, events = regr.process(engine, regr.right_click_hand())
@@ -122,12 +122,12 @@ class IndependentCooldownRegressionTests(unittest.TestCase):
         engine = GestureEngine()
         _, _, click_events = regr.process_confirmed(engine, regr.pinch_click_hand(pinched=True))
         self.assertIn("PINCH_DOWN", click_events)
-        _, _, rc_events = regr.process_confirmed(engine, regr.right_click_hand())
+        _, _, rc_events = regr.process_confirmed_right_click(engine, regr.right_click_hand())
         self.assertIn("RIGHT_CLICK", rc_events)
 
     def test_left_click_immediately_after_right_click_is_not_suppressed(self):
         engine = GestureEngine()
-        _, _, rc_events = regr.process_confirmed(engine, regr.right_click_hand())
+        _, _, rc_events = regr.process_confirmed_right_click(engine, regr.right_click_hand())
         self.assertIn("RIGHT_CLICK", rc_events)
         _, _, click_events = regr.process_confirmed(engine, regr.pinch_click_hand(pinched=True))
         self.assertIn("PINCH_DOWN", click_events)

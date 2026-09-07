@@ -31,6 +31,23 @@ PINCH_ZOOM = 25
 PINCH_VOLUME = 28
 PINCH_SCREENSHOT = 20
 PINCH_CONFIRM_FRAMES = 2  # frames seguidos bajo el umbral antes de confirmar un pinch - absorbe ruido de un solo frame
+# H-26/V-05 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2/§8),
+# confirmado en camara real (José, 2026-09-07: "se confunde con click derecho
+# y no hace enseguida"). Causa real: PINCH_RIGHT_CLICK (20px) es MAS LAXO que
+# JJK_SUKUNA_CONTACT_THRESHOLD (15px, gestures.py), asi que al cerrar pulgar y
+# medio para un snap, la distancia cruza 20px varios frames ANTES de llegar a
+# los 15px que arma el detector de Sukuna - con solo PINCH_CONFIRM_FRAMES (2,
+# ~100ms) el click derecho ya confirma y dispara ahi, antes de que el snap
+# tenga chance de completarse. Confirmacion mas larga solo para este dedo
+# (no para los demas pinches, que no compiten con ningun gesto de impulso):
+# un snap real sigue cerrando mas alla de 15px dentro de esta ventana y nunca
+# llega a sostenerse quieto en la banda 15-20px lo suficiente para confirmar;
+# un click derecho deliberado (pulgar+medio sostenidos, sin intencion de
+# soltar) si la sostiene. Retrasa el click derecho genuino ~150-200ms mas que
+# antes - aceptado a cambio de no disparar solo junto con un snap. Razonado,
+# no medido en camara todavia; si el click derecho se siente demasiado lento
+# ahora, medir antes de bajarlo de nuevo a ciegas.
+RIGHT_CLICK_CONFIRM_FRAMES = 6
 PALM_OPEN_MIN_SPREAD = 60
 SILENCE_TUCK_MAX = 40
 
@@ -52,6 +69,22 @@ SILENCE_COOLDOWN = 0.8
 LOCK_HOLD_SECONDS = 1.5
 CLOSE_APP_HOLD_SECONDS = 1.5
 PAUSE_HOLD_SECONDS = 1.2
+# H-27 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2), confirmado en
+# camara real (José, 2026-09-07: al hacer click cerca de "Inicio" - una mano
+# activa cerca del borde de pantalla/cuadro - se confunde con el gesto de 2
+# punos de pausa). `both_fists` solo exigia hasta ahora que las 2 manos sean
+# "de la misma persona" (TWO_HAND_MAX_CENTER_DISTANCE_FRACTION=0.55, un gate
+# laxo pensado para descartar una SEGUNDA PERSONA de fondo, no para exigir
+# cercania real) - una mano activa estirada hacia un borde y la otra en reposo
+# en cualquier otra parte del cuadro (ej. sobre el teclado, con los dedos
+# naturalmente curvados) pasa ese gate sin problema. Un gesto de pausa
+# deliberado (2 punos levantados juntos frente a la camara, ver docstring de
+# _process_two_hand_gestures) tiene las manos mucho mas cerca entre si que
+# eso - mismo principio que JJK_GOJO_MAX_DISTANCE_FRACTION (0.30) para el
+# marco de Gojo. Razonado, no medido en camara todavia; no resuelve un
+# eventual falso _is_fist de la propia mano activa por landmarks ruidosos
+# cerca del borde del cuadro (sin diagnosticar, ver H-27 en WORKPLAN.md).
+PAUSE_MAX_DISTANCE_FRACTION = 0.35
 META_HOLD_SECONDS = 0.6
 VOLUME_DELTA_THRESHOLD = 0.03
 TWO_HAND_ZOOM_DELTA_PX = 15

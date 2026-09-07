@@ -300,8 +300,13 @@ class GestureEngine:
         # pisen entre si. confirma tras config.PINCH_CONFIRM_FRAMES frames seguidos
         # bajo el umbral - absorbe el ruido de un solo frame (mano relajada
         # moviendose cerca del umbral, medido en camara real - ver config.py).
+        # "middle" usa RIGHT_CLICK_CONFIRM_FRAMES en vez del comun (H-26/V-05,
+        # confirmado en camara real: sin esto, un snap de Sukuna confirma
+        # click derecho antes de completarse - ver config.py).
         self._pinch_debouncers = {
-            name: ConsecutiveFrameDebouncer(config.PINCH_CONFIRM_FRAMES)
+            name: ConsecutiveFrameDebouncer(
+                config.RIGHT_CLICK_CONFIRM_FRAMES if name == "middle" else config.PINCH_CONFIRM_FRAMES
+            )
             for name in ("index", "middle", "ring", "pinky")
         }
 
@@ -469,7 +474,16 @@ class GestureEngine:
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
         both_shaka = _is_shaka(p1) and _is_shaka(p2)
-        both_fists = _is_fist(p1) and _is_fist(p2)
+        # H-27, confirmado en camara real (2026-09-07, ver config.py): sin el
+        # gate de distancia, una mano activa lejos (ej. estirada hacia un
+        # borde de pantalla) mas una mano en reposo en cualquier otra parte
+        # curvada de forma casual bastaba para "ser 2 punos" y confundirse
+        # con la pausa. Mismo principio que JJK_GOJO_MAX_DISTANCE_FRACTION.
+        both_fists = (
+            _is_fist(p1)
+            and _is_fist(p2)
+            and (_hands_distance(p1, p2, w, h) / math.hypot(w, h)) <= config.PAUSE_MAX_DISTANCE_FRACTION
+        )
 
         # TASK-071 (Fase 7): CLAP. Alimentado SIN gate (mismo motivo que
         # Sukuna - el detector necesita la distancia real cuadro a cuadro
@@ -636,12 +650,13 @@ class GestureEngine:
         # SIN el gate de pinch_winner/two_hand_active (el detector necesita
         # la distancia real cuadro a cuadro para reconocer el patron
         # baja-sube; alimentarlo a medias romperia su maquina de estados).
-        # Riesgo de colision CONOCIDO Y NO VERIFICADO (documentado, no
-        # resuelto): un snap real pasa primero por PINCH_RIGHT_CLICK (20px,
-        # mas laxo que el umbral de contacto de Sukuna, 15px) camino al
-        # contacto mas ajustado - RIGHT_CLICK podria disparar en el mismo
-        # gesto fisico. Pendiente de la prueba integral final (posposicion
-        # pedida explicitamente, ver ARCHITECTURE.md).
+        # H-26/V-05: colision con RIGHT_CLICK CONFIRMADA en camara real
+        # (2026-09-07, ver config.py) - mitigada, no eliminada, subiendo la
+        # confirmacion del pinch "middle" a RIGHT_CLICK_CONFIRM_FRAMES. Un
+        # snap real pasa primero por PINCH_RIGHT_CLICK (20px, mas laxo que el
+        # umbral de contacto de Sukuna, 15px) camino al contacto mas ajustado;
+        # con suficiente confirmacion, un snap ya no se queda quieto ahi lo
+        # bastante para que RIGHT_CLICK confirme antes de completarse.
         if self._sukuna_detector.update(d_thumb_middle, now) and not two_hand_active:
             events.append("JJK_SUKUNA")
 

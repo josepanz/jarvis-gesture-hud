@@ -334,20 +334,35 @@ def process(engine, pts, **kwargs):
     return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H, **kwargs)
 
 
-def confirm_pinch(engine, pts):
+def confirm_pinch(engine, pts, frames=None):
     """1.5 (measured on real camera): a pinch-family finger needs
     config.PINCH_CONFIRM_FRAMES consecutive frames under its threshold before
     it's allowed to win pinch_winner, absorbing relaxed-hand noise. Call this
     before a test's own process() calls so the FIRST of those already counts
-    as "confirmed" (does CONFIRM_FRAMES - 1 warmup calls at the same pose)."""
-    for _ in range(config.PINCH_CONFIRM_FRAMES - 1):
+    as "confirmed" (does CONFIRM_FRAMES - 1 warmup calls at the same pose).
+    `frames` overrides the default - pass config.RIGHT_CLICK_CONFIRM_FRAMES for
+    the middle-finger/right-click pinch (H-26/V-05: confirms slower than the
+    others on purpose, see config.py)."""
+    for _ in range((frames if frames is not None else config.PINCH_CONFIRM_FRAMES) - 1):
         process(engine, pts)
 
 
-def process_confirmed(engine, pts):
+def process_confirmed(engine, pts, frames=None):
     """confirm_pinch() then one more process() call - for tests asserting an
     edge-triggered pinch-family gesture fires on first genuine, held contact."""
-    confirm_pinch(engine, pts)
+    confirm_pinch(engine, pts, frames=frames)
+    return process(engine, pts)
+
+
+def confirm_right_click_pinch(engine, pts):
+    """Same as confirm_pinch(), but for the middle-finger/right-click pinch,
+    which confirms after config.RIGHT_CLICK_CONFIRM_FRAMES instead of the
+    shared config.PINCH_CONFIRM_FRAMES (H-26/V-05, see config.py)."""
+    confirm_pinch(engine, pts, frames=config.RIGHT_CLICK_CONFIRM_FRAMES)
+
+
+def process_confirmed_right_click(engine, pts):
+    confirm_right_click_pinch(engine, pts)
     return process(engine, pts)
 
 
@@ -383,12 +398,12 @@ class LeftClickDragTests(unittest.TestCase):
 class RightClickTests(unittest.TestCase):
     def test_pinch_thumb_middle_fires_right_click(self):
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
     def test_does_not_repeat_within_cooldown(self):
         engine = GestureEngine()
-        confirm_pinch(engine, right_click_hand())
+        confirm_right_click_pinch(engine, right_click_hand())
         process(engine, right_click_hand())  # confirmed - fires here
         _, _, events = process(engine, right_click_hand())
         self.assertNotIn("RIGHT_CLICK", events)
@@ -657,6 +672,26 @@ class TwoHandMasterGestureTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertTrue(engine.active)  # nunca se pauso
 
+    def test_fists_far_apart_do_not_pause(self):
+        # H-27 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2),
+        # confirmado en camara real (José, 2026-09-07): una mano activa
+        # estirada hacia un borde de pantalla mas una mano en reposo en
+        # cualquier otra parte del cuadro, ambas curvadas, se confundia con
+        # el gesto de pausa. Mismo par de manos que test_both_fists_held_pauses
+        # pero mas separadas - por encima de PAUSE_MAX_DISTANCE_FRACTION (0.35)
+        # y por debajo de TWO_HAND_MAX_CENTER_DISTANCE_FRACTION (0.55, el gate
+        # mas laxo de "misma persona" que corre primero), para probar
+        # especificamente este gate y no el otro.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.2, 0.5), "Left"), Hand(fist_hand(0.8, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+        self.assertTrue(engine.active)  # nunca se pauso
+
     def test_both_shaka_held_closes(self):
         import time
 
@@ -744,7 +779,7 @@ class PinchPriorityTests(unittest.TestCase):
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
@@ -810,7 +845,7 @@ class Pinch3DDistanceTests(unittest.TestCase):
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
@@ -832,12 +867,12 @@ class ClickCooldownIndependenceTests(unittest.TestCase):
     def test_genuine_right_click_shortly_after_a_genuine_left_click_still_fires(self):
         engine = GestureEngine()
         process_confirmed(engine, pinch_click_hand(pinched=True))
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertIn("RIGHT_CLICK", events)
 
     def test_genuine_left_click_shortly_after_a_genuine_right_click_still_fires(self):
         engine = GestureEngine()
-        process_confirmed(engine, right_click_hand())
+        process_confirmed_right_click(engine, right_click_hand())
         _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertIn("PINCH_DOWN", events)
 
@@ -873,19 +908,25 @@ class PinchDebouncerIndependenceTests(unittest.TestCase):
         engine = GestureEngine()
         pts = index_and_middle_concurrent_pinch_hand()
         # Frame 1: both under their own threshold, neither confirmed yet
-        # (PINCH_CONFIRM_FRAMES=2).
+        # (index needs PINCH_CONFIRM_FRAMES=2).
         _, _, events1 = process(engine, pts)
         self.assertEqual(events1, [])
-        # Frame 2: both confirmed now, but index is closer and wins - only
-        # PINCH_DOWN fires. Middle's own streak reached the confirm threshold
-        # too, it just isn't the winner this frame.
+        # Frame 2: index's own streak (2) completes and it wins (closer) -
+        # only PINCH_DOWN fires. Middle's streak keeps accruing toward its
+        # own, longer RIGHT_CLICK_CONFIRM_FRAMES (H-26/V-05, see config.py) -
+        # it just isn't the winner this frame.
         _, _, events2 = process(engine, pts)
         self.assertEqual(events2, ["PINCH_DOWN"])
-        # Frame 3: index releases, middle is now the only active candidate.
-        # RIGHT_CLICK fires on this VERY frame, with no extra warmup - proof
-        # middle's confirm streak was never reset by index's activity.
-        _, _, events3 = process(engine, right_click_hand())
-        self.assertIn("RIGHT_CLICK", events3)
+        # Keep feeding the same pose until middle's own streak would be
+        # complete too (still not winning - index remains closer and already
+        # confirmed, so nothing new fires here).
+        for _ in range(config.RIGHT_CLICK_CONFIRM_FRAMES - 2):
+            process(engine, pts)
+        # Now index releases: middle is the only active candidate. RIGHT_CLICK
+        # fires on this VERY frame, with no extra warmup - proof middle's
+        # confirm streak was never reset by index's activity.
+        _, _, events_final = process(engine, right_click_hand())
+        self.assertIn("RIGHT_CLICK", events_final)
 
 
 def two_hand_process(engine, primary_pts, other_pts):
@@ -1145,9 +1186,10 @@ class JJKGestureTests(unittest.TestCase):
 
     def test_a_sustained_pinch_fires_right_click_not_sukuna(self):
         engine = GestureEngine()
-        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(config.RIGHT_CLICK_CONFIRM_FRAMES - 1):
+            engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
         _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
-        self.assertIn("RIGHT_CLICK", events)  # confirmado tras 2 frames seguidos en contacto (PINCH_CONFIRM_FRAMES)
+        self.assertIn("RIGHT_CLICK", events)  # confirmado tras RIGHT_CLICK_CONFIRM_FRAMES frames seguidos en contacto (H-26/V-05)
 
         # Sostenido mucho mas alla de la ventana de Sukuna (JJK_SUKUNA_MAX_WINDOW_SECONDS) -
         # mismo truco de rebobinar el reloj interno que el resto del archivo.
@@ -1155,6 +1197,19 @@ class JJKGestureTests(unittest.TestCase):
         engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
         _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
         self.assertNotIn("JJK_SUKUNA", events)
+
+    def test_a_quick_snap_like_pass_does_not_confirm_right_click(self):
+        # H-26/V-05, confirmado en camara real (José, 2026-09-07): "se
+        # confunde con click derecho" - antes de RIGHT_CLICK_CONFIRM_FRAMES
+        # (config.py), solo PINCH_CONFIRM_FRAMES (2) bastaba para confirmar
+        # el click derecho, mucho antes de que un snap real (que sigue
+        # cerrando mas alla de la banda 15-20px) tuviera chance de
+        # completarse. Con la ventana mas larga, ese mismo numero de frames
+        # ya no alcanza.
+        engine = GestureEngine()
+        for _ in range(config.PINCH_CONFIRM_FRAMES):
+            _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("RIGHT_CLICK", events)
 
     def test_none_of_the_existing_gesture_fixtures_leak_a_jjk_event(self):
         existing_fixtures = {
