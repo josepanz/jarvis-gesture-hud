@@ -67,5 +67,111 @@ class LegendMissingIconTests(unittest.TestCase):
         self.assertEqual(self.overlay._legend_icons, [])
 
 
+def _n_entries(n):
+    return [(f"Gesto {i}", f"Accion {i}", None) for i in range(n)]
+
+
+class LegendPaginationTests(unittest.TestCase):
+    """H-28 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2),
+    confirmado en camara real (José, 2026-09-07): con las 44 entradas reales
+    el panel sin paginar ocupaba toda la mitad de pantalla del lado
+    anclado - paginado a LEGEND_PAGE_SIZE por pagina en vez de todo junto."""
+
+    def setUp(self):
+        self.overlay = ScreenOverlay()
+        self.addCleanup(self.overlay.close)
+
+    def _row_count(self):
+        # Cada fila de gesto es un Label de texto en la columna 1 (mas el
+        # titulo, que vive en la columna 0 con columnspan=2) - contar los
+        # widgets de la columna 1 no depende de si hay icono o no.
+        return len(
+            [
+                w
+                for w in self.overlay._legend_container.winfo_children()
+                if int(w.grid_info().get("column", -1)) == 1
+            ]
+        )
+
+    def test_only_one_page_worth_of_rows_renders_at_a_time(self):
+        from jarvis.overlay import LEGEND_PAGE_SIZE
+
+        self.overlay.init_legend(_n_entries(LEGEND_PAGE_SIZE * 3 + 5), title="Test")
+        self.overlay.pump()
+        self.assertEqual(self._row_count(), LEGEND_PAGE_SIZE)
+        self.assertEqual(self.overlay._legend_total_pages, 4)
+
+    def test_next_page_shows_the_next_slice_and_wraps_around(self):
+        from jarvis.overlay import LEGEND_PAGE_SIZE
+
+        entries = _n_entries(LEGEND_PAGE_SIZE + 3)
+        self.overlay.init_legend(entries, title="Test")
+        self.overlay.pump()
+        self.assertEqual(self.overlay._legend_page, 0)
+
+        self.overlay._legend_next_page()
+        self.overlay.pump()
+        self.assertEqual(self.overlay._legend_page, 1)
+        self.assertEqual(self._row_count(), 3)  # ultima pagina, resto parcial
+
+        self.overlay._legend_next_page()  # da la vuelta
+        self.overlay.pump()
+        self.assertEqual(self.overlay._legend_page, 0)
+
+    def test_prev_page_wraps_backward_from_the_first_page(self):
+        from jarvis.overlay import LEGEND_PAGE_SIZE
+
+        self.overlay.init_legend(_n_entries(LEGEND_PAGE_SIZE + 3), title="Test")
+        self.overlay.pump()
+        self.overlay._legend_prev_page()
+        self.overlay.pump()
+        self.assertEqual(self.overlay._legend_page, 1)  # ultima pagina
+
+    def test_clicking_next_page_control_advances_the_page(self):
+        from jarvis.overlay import LEGEND_PAGE_SIZE
+
+        self.overlay.init_legend(_n_entries(LEGEND_PAGE_SIZE + 3), title="Test")
+        self.overlay.pump()
+        # Mismo patron de test_clicking_the_gear_label_invokes_the_callback:
+        # un update() completo antes del evento sintetico.
+        self.overlay._legend_controls_window.update()
+        next_label = self.overlay._legend_controls_window.winfo_children()[0].winfo_children()[2]
+        next_label.event_generate("<Button-1>", when="now")
+        self.overlay.pump()
+        self.assertEqual(self.overlay._legend_page, 1)
+
+    def test_collapse_hides_all_rows_and_expand_restores_them(self):
+        from jarvis.overlay import LEGEND_PAGE_SIZE
+
+        self.overlay.init_legend(_n_entries(LEGEND_PAGE_SIZE), title="Test")
+        self.overlay.pump()
+        self.assertEqual(self._row_count(), LEGEND_PAGE_SIZE)
+
+        self.overlay._legend_toggle_collapsed()
+        self.overlay.pump()
+        self.assertEqual(self._row_count(), 0)
+        self.assertTrue(self.overlay._legend_window.winfo_exists())  # sigue viva, solo vacia
+
+        self.overlay._legend_toggle_collapsed()
+        self.overlay.pump()
+        self.assertEqual(self._row_count(), LEGEND_PAGE_SIZE)
+
+    def test_legend_panel_remains_click_through_with_controls(self):
+        # H-28 no puede volver clickeable el panel en si (rompe el diseño
+        # "no bloquea clicks al escritorio") - solo la ventanita de controles,
+        # separada, es clickeable (mismo patron que init_gear_icon).
+        self.overlay.init_legend(_n_entries(3), title="Test")
+        self.overlay.pump()
+        self.assertTrue(self.overlay._legend_window.winfo_exists())
+        self.assertTrue(self.overlay._legend_controls_window.winfo_exists())
+
+    def test_toggling_legend_visibility_also_hides_the_controls(self):
+        self.overlay.init_legend(_n_entries(3), title="Test")
+        self.overlay.pump()
+        self.overlay.set_legend_visible(False)
+        self.overlay.pump()
+        self.assertEqual(str(self.overlay._legend_controls_window.state()), "withdrawn")
+
+
 if __name__ == "__main__":
     unittest.main()
