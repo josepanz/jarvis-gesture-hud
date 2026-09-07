@@ -36,6 +36,13 @@ class VoiceIntentResolver:
     def register(self, phrase, intent_name):
         self._bindings[phrase.strip().lower()] = intent_name
 
+    @property
+    def phrase_bindings(self):
+        """TASK-079 (Fase 8, spec.md #8.2): copia de solo lectura - el
+        settings screen las LISTA (informativo), no las reasigna a traves
+        de este objeto."""
+        return dict(self._bindings)
+
     def resolve(self, text):
         """text: already-transcribed text (as if STT already ran). Returns an
         Intent (source="VOICE") for the first registered phrase found as a

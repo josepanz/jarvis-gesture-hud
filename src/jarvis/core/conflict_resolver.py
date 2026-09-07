@@ -1,4 +1,6 @@
-"""Gesture conflict resolver (TASK-022, spec.md #14/#18/#19).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+Gesture conflict resolver (TASK-022, spec.md #14/#18/#19).
 
 "When multiple gestures are possible, the system SHALL use deterministic priority
 [...] The system MUST prevent mutually exclusive gestures from triggering

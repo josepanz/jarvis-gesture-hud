@@ -1,5 +1,12 @@
-opencv-python
-mediapipe
-pyautogui
-numpy
-pyttsx3
+# Pineado con techo compatible: mediapipe 0.10.30 elimino la API mp.solutions
+# de los wheels de Windows sin aviso y obligo a reescribir hand_tracker.py
+# sobre la Tasks API. Techos evitan que un `pip install` futuro traiga una
+# version que vuelva a romper algo asi. Versiones tomadas de `pip freeze` del
+# venv de desarrollo, verificadas contra la suite completa.
+opencv-python>=5.0.0.93,<6
+mediapipe>=1.0.1,<1.1
+pyautogui>=0.9.54,<0.10
+numpy>=2.5.2,<3
+pyttsx3>=2.99,<3
+Pillow>=12.3.0,<13
+onnxruntime>=1.29.0,<2

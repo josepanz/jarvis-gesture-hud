@@ -1,4 +1,6 @@
-"""Intent convergence support (TASK-049, proposal.md #5.4, spec.md #38).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+Intent convergence support (TASK-049, proposal.md #5.4, spec.md #38).
 
 "The Intent Engine MUST NOT care whether an intent came from: gesture; voice;
 keyboard; future vision. ... The Command layer SHALL remain the same." (proposal.md

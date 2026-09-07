@@ -1,4 +1,6 @@
-"""GestureStateMachine (TASK-014, spec.md #3).
+"""PoC / no cableado (ver openspec/changes/hardening-and-polish/WORKPLAN.md §9).
+
+GestureStateMachine (TASK-014, spec.md #3).
 
 Standalone, tested state machine matching spec.md's documented states and the two
 explicit transition paths (happy path, and CANDIDATE -> CANCELLED -> IDLE). NOT

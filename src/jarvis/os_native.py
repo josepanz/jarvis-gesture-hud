@@ -1,7 +1,7 @@
 """Comandos nativos por sistema operativo: lock de sesion, volumen, screenshot."""
 
-import os
 import platform
+import subprocess
 import time
 from pathlib import Path
 
@@ -22,11 +22,28 @@ class CrossPlatformOS:
 
             ctypes.windll.user32.LockWorkStation()
         elif sys_name == "Darwin":
-            os.system(
-                "/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend"
+            subprocess.run(
+                [
+                    "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+                    "-suspend",
+                ]
             )
         elif sys_name == "Linux":
-            os.system("xdg-screensaver lock || gnome-screensaver-command -l || loginctl lock-session")
+            fallbacks = [
+                ["xdg-screensaver", "lock"],
+                ["gnome-screensaver-command", "-l"],
+                ["loginctl", "lock-session"],
+            ]
+            for cmd in fallbacks:
+                try:
+                    if subprocess.run(cmd).returncode == 0:
+                        return
+                except FileNotFoundError:
+                    continue
+            raise RuntimeError(
+                "no se encontro ningun mecanismo de bloqueo de sesion "
+                "(xdg-screensaver, gnome-screensaver-command, loginctl)"
+            )
 
     @staticmethod
     def take_screenshot():

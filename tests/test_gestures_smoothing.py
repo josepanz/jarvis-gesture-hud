@@ -32,8 +32,12 @@ class SmoothingToggleTests(unittest.TestCase):
         engine = GestureEngine()
         self.assertTrue(engine.smoothing_enabled)
         screen_xy, _, _ = engine.process([Hand(_flat_hand(), "Right")], 640, 480, 1920, 1080)
-        # Same result the pre-TASK-018 code always produced for this input (EMA
-        # from prev=(0,0) toward the target, alpha=0.35): regression pin.
+        # EMA from prev=(0,0) toward the target: regression pin. V-04
+        # (`openspec/changes/hardening-and-polish/WORKPLAN.md` §8), verificado
+        # en camara real 2026-09-07: revertido 0.25 -> 0.35 (bajarlo no
+        # arreglo el "impreciso" reportado y sumo latencia perceptible) - de
+        # vuelta a (336, 189), el valor que daba 0.35 antes del cambio del
+        # 2026-08-30.
         self.assertEqual(screen_xy, (336, 189))
 
     def test_disabled_smoothing_snaps_directly_to_target(self):

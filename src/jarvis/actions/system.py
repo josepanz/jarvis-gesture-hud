@@ -73,8 +73,9 @@ class VolumeDownCommand(Command):
 
 
 class MuteCommand(Command):
-    """No gesture currently triggers this - same gap that existed before this
-    migration (see task report). Included for completeness of "system actions"."""
+    """Reachable via voice ("MUTE" in VALID_ACTIONS) and, since Fase 4/6,
+    also as the default binding for several gestures (NARUTO_HITSUJI,
+    JJK_MEGUMI) - see main.py's GESTURE_DEFAULT_BINDINGS."""
 
     @property
     def metadata(self):

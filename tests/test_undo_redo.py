@@ -173,5 +173,60 @@ class RedoTests(unittest.TestCase):
         self.assertTrue(controller.can_redo())  # still there to retry
 
 
+class RedoInvalidationTests(unittest.TestCase):
+    """H-11: la pila de redo tiene que invalidarse ante un comando nuevo,
+    como cualquier undo/redo real - antes nada la limpiaba."""
+
+    def test_clear_redo_empties_a_pending_redo(self):
+        history = CommandHistory()
+        history.record(_ReversibleCommand(), CommandResult.ok())
+        controller = UndoRedoController(history)
+        controller.undo()
+        self.assertTrue(controller.can_redo())
+
+        controller.clear_redo()
+
+        self.assertFalse(controller.can_redo())
+
+    def test_is_replaying_is_true_only_during_undo_and_redo(self):
+        history = CommandHistory()
+        replaying_during_undo = []
+        replaying_during_redo = []
+
+        class _ProbeCommand(_ReversibleCommand):
+            def undo(_self):
+                replaying_during_undo.append(controller.is_replaying)
+                return super().undo()
+
+            def execute(_self):
+                replaying_during_redo.append(controller.is_replaying)
+                return super().execute()
+
+        history.record(_ProbeCommand(), CommandResult.ok())
+        controller = UndoRedoController(history)
+
+        self.assertFalse(controller.is_replaying)
+        controller.undo()
+        self.assertEqual(replaying_during_undo, [True])
+        self.assertFalse(controller.is_replaying)
+        controller.redo()
+        self.assertEqual(replaying_during_redo, [True])
+        self.assertFalse(controller.is_replaying)
+
+    def test_undo_then_redo_immediately_still_works(self):
+        # No-regresion: sin ningun comando nuevo en el medio, undo -> redo
+        # se comporta exactamente igual que antes de este fix.
+        history = CommandHistory()
+        cmd = _ReversibleCommand()
+        history.record(cmd, CommandResult.ok())
+        controller = UndoRedoController(history)
+
+        controller.undo()
+        result = controller.redo()
+
+        self.assertTrue(result.success)
+        self.assertEqual(cmd.execute_calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

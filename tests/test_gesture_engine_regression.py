@@ -10,14 +10,16 @@ the real GestureEngine before being accepted into this file.
 """
 
 import sys
+import time
 import unittest
 from collections import namedtuple
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jarvis import config  # noqa: E402
-from jarvis.gestures import GestureEngine  # noqa: E402
+from jarvis.gestures import COOLDOWN_CLICK, GestureEngine  # noqa: E402
 from jarvis.gestures import _is_shaka  # noqa: E402
 from jarvis.hand_tracker import Hand  # noqa: E402
 
@@ -143,6 +145,30 @@ def volume_hand(cx=0.5, cy=0.5, pinky_y=None):
     return pts
 
 
+def ring_pinky_ghost_hand(cx=0.5, cy=0.5, pinky_y=None, d_thumb_ring_px=20.5, d_thumb_pinky_px=21.0):
+    """H-06: el anular queda a `d_thumb_ring_px` del pulgar (por defecto en la
+    banda 20-25px: activo para el viejo max(PINCH_SCREENSHOT, PINCH_ZOOM)=25,
+    pero por debajo del umbral real de NINGUNA de sus dos acciones con el
+    indice recogido - screenshot pide <20, zoom pide indice extendido) y el
+    menique a `d_thumb_pinky_px` (por defecto un pellizco de volumen genuino,
+    mas lejos que el anular pero bajo PINCH_VOLUME=28 - la colision numerica
+    verificada en H-06). Pulgar/anular/menique se mueven juntos en Y (mismo
+    patron que volume_hand) para poder variar `pinky_y` y probar la direccion
+    del volumen sin alterar ninguna de las dos distancias al pulgar."""
+    y = cy if pinky_y is None else pinky_y
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, y, 0)
+    pts[20] = Landmark(cx + d_thumb_pinky_px / W, y, 0)
+    pts[18] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx, cy + 0.1, 0)  # indice recogido (tip por debajo del pip)
+    pts[6] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[10] = Landmark(cx + 0.15, cy - 0.15, 0)
+    pts[16] = Landmark(cx + d_thumb_ring_px / W, y, 0)
+    pts[14] = Landmark(cx, y, 0)
+    return pts
+
+
 def screenshot_hand(cx=0.5, cy=0.5):
     pts = flat(cx, cy)
     pts[4] = Landmark(cx, cy, 0)
@@ -191,6 +217,29 @@ def fist_opening_transition_hand(cx=0.5, cy=0.5):
     pts[10] = Landmark(cx, cy, 0)
     pts[16] = Landmark(cx, cy - 0.1, 0)  # ring EXTENDED (not curled) - the fix's whole point
     pts[14] = Landmark(cx, cy, 0)
+    return pts
+
+
+def pinch_shaped_like_shaka_hand(cx=0.5, cy=0.5):
+    """Real-camera regression (José, 2026-08-30): identical to a genuine
+    Shaka in every respect _is_shaka's original 5 conditions checked (pinky
+    extended, thumb "extended" i.e. tip above its own MCP, index/middle/ring
+    curled) EXCEPT thumb and index are pinched together (0.01 apart) instead
+    of held apart - reproducing an ordinary index+thumb click pinch whose
+    incidental other-finger curl happened to satisfy every one of those 5
+    conditions by coincidence, none of which ever checked thumb-index
+    distance."""
+    pts = flat(cx, cy)
+    pts[20] = Landmark(cx, cy - 0.1, 0)  # pinky extended
+    pts[18] = Landmark(cx, cy, 0)
+    pts[12] = Landmark(cx, cy + 0.05, 0)  # middle curled
+    pts[10] = Landmark(cx, cy, 0)
+    pts[16] = Landmark(cx, cy + 0.05, 0)  # ring curled
+    pts[14] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.05, 0)  # thumb tip above its own mcp ("extended")
+    pts[2] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.01, cy - 0.05, 0)  # index tip PINCHED against the thumb tip
+    pts[6] = Landmark(cx, cy - 0.08, 0)  # index pip above the tip ("curled" per _is_shaka's own metric)
     return pts
 
 
@@ -281,24 +330,39 @@ def two_way_tie_pinch_hand(cx=0.5, cy=0.5):
     return pts
 
 
-def process(engine, pts):
-    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+def process(engine, pts, **kwargs):
+    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H, **kwargs)
 
 
-def confirm_pinch(engine, pts):
+def confirm_pinch(engine, pts, frames=None):
     """1.5 (measured on real camera): a pinch-family finger needs
     config.PINCH_CONFIRM_FRAMES consecutive frames under its threshold before
     it's allowed to win pinch_winner, absorbing relaxed-hand noise. Call this
     before a test's own process() calls so the FIRST of those already counts
-    as "confirmed" (does CONFIRM_FRAMES - 1 warmup calls at the same pose)."""
-    for _ in range(config.PINCH_CONFIRM_FRAMES - 1):
+    as "confirmed" (does CONFIRM_FRAMES - 1 warmup calls at the same pose).
+    `frames` overrides the default - pass config.RIGHT_CLICK_CONFIRM_FRAMES for
+    the middle-finger/right-click pinch (H-26/V-05: confirms slower than the
+    others on purpose, see config.py)."""
+    for _ in range((frames if frames is not None else config.PINCH_CONFIRM_FRAMES) - 1):
         process(engine, pts)
 
 
-def process_confirmed(engine, pts):
+def process_confirmed(engine, pts, frames=None):
     """confirm_pinch() then one more process() call - for tests asserting an
     edge-triggered pinch-family gesture fires on first genuine, held contact."""
-    confirm_pinch(engine, pts)
+    confirm_pinch(engine, pts, frames=frames)
+    return process(engine, pts)
+
+
+def confirm_right_click_pinch(engine, pts):
+    """Same as confirm_pinch(), but for the middle-finger/right-click pinch,
+    which confirms after config.RIGHT_CLICK_CONFIRM_FRAMES instead of the
+    shared config.PINCH_CONFIRM_FRAMES (H-26/V-05, see config.py)."""
+    confirm_pinch(engine, pts, frames=config.RIGHT_CLICK_CONFIRM_FRAMES)
+
+
+def process_confirmed_right_click(engine, pts):
+    confirm_right_click_pinch(engine, pts)
     return process(engine, pts)
 
 
@@ -306,7 +370,9 @@ class PointerAndSmoothingTests(unittest.TestCase):
     def test_pointer_moves_with_smoothing(self):
         engine = GestureEngine()
         screen_xy, _, _ = process(engine, flat(0.5, 0.5))
-        self.assertEqual(screen_xy, (336, 189))  # regression pin (see test_gestures_smoothing.py too)
+        # Regression pin (see test_gestures_smoothing.py too) - V-04 verificado
+        # en camara real 2026-09-07: revertido 0.25 -> 0.35, back to (336, 189).
+        self.assertEqual(screen_xy, (336, 189))
 
 
 class LeftClickDragTests(unittest.TestCase):
@@ -332,12 +398,12 @@ class LeftClickDragTests(unittest.TestCase):
 class RightClickTests(unittest.TestCase):
     def test_pinch_thumb_middle_fires_right_click(self):
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
     def test_does_not_repeat_within_cooldown(self):
         engine = GestureEngine()
-        confirm_pinch(engine, right_click_hand())
+        confirm_right_click_pinch(engine, right_click_hand())
         process(engine, right_click_hand())  # confirmed - fires here
         _, _, events = process(engine, right_click_hand())
         self.assertNotIn("RIGHT_CLICK", events)
@@ -370,6 +436,63 @@ class ScrollTests(unittest.TestCase):
         _, _, events = process(engine, pts2)
         self.assertNotIn("SCROLL_UP", events)
 
+    # TASK: rediseño de scroll (hallazgo de camara real, José, 2026-08-30) -
+    # forma sin cambios, direccion ahora sale de la posicion respecto a una
+    # base fijada al entrar al gesto, no de un delta cuadro-a-cuadro. Nuevo:
+    # scroll horizontal, con el mismo criterio.
+    def test_index_moving_right_scrolls_right(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.65, cy=0.5))
+        self.assertIn("SCROLL_RIGHT", events)
+
+    def test_index_moving_left_scrolls_left(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.65, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.5, cy=0.5))
+        self.assertIn("SCROLL_LEFT", events)
+
+    def test_a_small_tremor_within_the_threshold_fires_nothing(self):
+        # Con el delta cuadro-a-cuadro viejo, cualquier micro-temblor podia
+        # disparar (e invertir) un scroll - la base fija absorbe eso.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        _, _, events = process(engine, scroll_hand(cy=0.49))
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_holding_away_from_the_baseline_keeps_scrolling_every_frame(self):
+        # A diferencia del delta viejo (exigia seguir moviendose para seguir
+        # scrolleando), sostener la mano lejos de la base ahora sigue
+        # disparando cuadro a cuadro mientras se mantiene ahi - como un
+        # joystick, pedido explicito de José.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        pts = scroll_hand(cy=0.35)
+        _, _, events1 = process(engine, pts)
+        _, _, events2 = process(engine, pts)
+        self.assertIn("SCROLL_UP", events1)
+        self.assertIn("SCROLL_UP", events2)
+
+    def test_a_mostly_vertical_move_never_also_fires_horizontal(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cx=0.5, cy=0.5))
+        _, _, events = process(engine, scroll_hand(cx=0.52, cy=0.35))  # mucho mas vertical que horizontal
+        self.assertIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_LEFT", events)
+        self.assertNotIn("SCROLL_RIGHT", events)
+
+    def test_releasing_the_shape_resets_the_baseline(self):
+        # Soltar el gesto y volver a levantar la mano en OTRA posicion fija
+        # una base NUEVA ahi - no arrastra la base vieja.
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.5))
+        process(engine, open_palm_hand())  # suelta la forma - reinicia la base
+        process(engine, scroll_hand(cy=0.2))  # nueva base, lejos de la vieja
+        _, _, events = process(engine, scroll_hand(cy=0.2))  # sin moverse de la base nueva
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
 
 class ZoomTests(unittest.TestCase):
     def test_ring_moving_up_zooms_in(self):
@@ -401,6 +524,38 @@ class VolumeTests(unittest.TestCase):
         process(engine, volume_hand(pinky_y=0.35))
         _, _, events = process(engine, volume_hand(pinky_y=0.5))
         self.assertIn("VOLUME_DOWN", events)
+
+
+class RingPinchPriorityBandTests(unittest.TestCase):
+    """H-06: el anular ya no puede ganar pinch_winner con un umbral que su
+    pose actual no puede disparar - antes de este fix, la banda 20-25px con
+    el indice recogido dejaba al anular "activo" (max(SCREENSHOT, ZOOM)=25)
+    sin cumplir el umbral real de ninguna de sus dos acciones, ganandole la
+    prioridad al menique y comiendose el evento de volumen legitimo."""
+
+    def test_band_with_index_curled_produces_volume_event_instead_of_nothing(self):
+        confirm_hand = ring_pinky_ghost_hand(pinky_y=0.5, d_thumb_ring_px=20.5)
+        engine = GestureEngine()
+        confirm_pinch(engine, confirm_hand)
+        process(engine, confirm_hand)
+        _, _, events = process(engine, ring_pinky_ghost_hand(pinky_y=0.35, d_thumb_ring_px=20.5))
+        self.assertIn("VOLUME_UP", events)
+
+    def test_band_with_index_curled_never_fires_screenshot_or_zoom(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, ring_pinky_ghost_hand(d_thumb_ring_px=20.5))
+        self.assertNotIn("SCREENSHOT", events)
+        self.assertNotIn("ZOOM_IN", events)
+        self.assertNotIn("ZOOM_OUT", events)
+
+    def test_never_two_pinch_families_fire_in_the_same_frame(self):
+        confirm_hand = ring_pinky_ghost_hand(pinky_y=0.5, d_thumb_ring_px=20.5)
+        engine = GestureEngine()
+        confirm_pinch(engine, confirm_hand)
+        process(engine, confirm_hand)
+        _, _, events = process(engine, ring_pinky_ghost_hand(pinky_y=0.35, d_thumb_ring_px=20.5))
+        fired = [e for e in events if e in ("SCREENSHOT", "ZOOM_IN", "ZOOM_OUT", "VOLUME_UP", "VOLUME_DOWN")]
+        self.assertEqual(fired, ["VOLUME_UP"])
 
 
 class ScreenshotTests(unittest.TestCase):
@@ -458,6 +613,36 @@ class LockSessionTests(unittest.TestCase):
         # silently regress.
         self.assertFalse(_is_shaka(fist_opening_transition_hand()))
 
+    def test_a_pinch_that_happens_to_match_shakas_other_4_fingers_is_not_read_as_shaka(self):
+        # Real-camera regression (José, 2026-08-30): clicking with an
+        # index+thumb pinch triggered LOCK_SESSION unintentionally. None of
+        # _is_shaka's 5 original conditions checks thumb-to-index distance -
+        # a real pinch's thumb often reads as "extended" (tip above its own
+        # MCP) and the pinky can stay incidentally extended too, so all 5
+        # matched by coincidence. This fixture reproduces exactly that:
+        # identical to a genuine Shaka in every OTHER respect, except thumb
+        # and index are pinched together (0.01 apart) instead of separated.
+        pts = pinch_shaped_like_shaka_hand()
+        self.assertFalse(_is_shaka(pts))
+
+        engine = GestureEngine()
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
+    def test_an_ordinary_pinch_click_held_a_long_time_never_locks(self):
+        # Same real-world scenario, using the actual PINCH_CLICK fixture
+        # already used elsewhere in this file (not a Shaka-shaped one) -
+        # holding a normal click pinch, however long, must never accidentally
+        # accumulate LOCK_SESSION's hold.
+        engine = GestureEngine()
+        pts = pinch_click_hand(pinched=True)
+        process(engine, pts)
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("LOCK_SESSION", events)
+
 
 class TwoHandMasterGestureTests(unittest.TestCase):
     def test_both_fists_held_pauses(self):
@@ -470,6 +655,42 @@ class TwoHandMasterGestureTests(unittest.TestCase):
         _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
         self.assertEqual(events, ["TOGGLE_ACTIVE"])
         self.assertFalse(engine.active)
+
+    def test_external_seal_in_progress_suppresses_pause(self):
+        # Y-08 (hallazgo de camara real con Jose, 2026-09-06, WORKPLAN.md §6):
+        # varios sellos reales curvan los dedos de las 2 manos lo bastante
+        # como para matchear _is_fist tambien - sin este gate, sostener un
+        # sello ya reconocido por el modelo completaba de paso el hold de
+        # PAUSA y disparaba TOGGLE_ACTIVE sin querer.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.3, 0.5), "Left"), Hand(fist_hand(0.6, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H, external_seal_in_progress=True)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H, external_seal_in_progress=True)
+        self.assertEqual(events, [])
+        self.assertTrue(engine.active)  # nunca se pauso
+
+    def test_fists_far_apart_do_not_pause(self):
+        # H-27 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2),
+        # confirmado en camara real (José, 2026-09-07): una mano activa
+        # estirada hacia un borde de pantalla mas una mano en reposo en
+        # cualquier otra parte del cuadro, ambas curvadas, se confundia con
+        # el gesto de pausa. Mismo par de manos que test_both_fists_held_pauses
+        # pero mas separadas - por encima de PAUSE_MAX_DISTANCE_FRACTION (0.35)
+        # y por debajo de TWO_HAND_MAX_CENTER_DISTANCE_FRACTION (0.55, el gate
+        # mas laxo de "misma persona" que corre primero), para probar
+        # especificamente este gate y no el otro.
+        import time
+
+        engine = GestureEngine()
+        hands = [Hand(fist_hand(0.2, 0.5), "Left"), Hand(fist_hand(0.8, 0.5), "Right")]
+        engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        engine.pause_hold_start = time.time() - 2.0
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+        self.assertTrue(engine.active)  # nunca se pauso
 
     def test_both_shaka_held_closes(self):
         import time
@@ -510,7 +731,8 @@ class PrimaryHandContinuityTests(unittest.TestCase):
         # hands[0] by construction (documented, correct behavior for that case,
         # not what this test is about).
         right_moving = Hand(flat(0.8, 0.5), "Right")
-        engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)
+        for _ in range(10):  # deja converger el suavizado - el test es sobre
+            engine.process([right_moving], W, H, SCREEN_W, SCREEN_H)  # continuidad, no sobre la velocidad de EMA_ALPHA
 
         # Now a second, idle hand appears and is listed FIRST. If continuity
         # didn't work, naively using hands[0] would jump the pointer to the idle
@@ -557,7 +779,7 @@ class PinchPriorityTests(unittest.TestCase):
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
@@ -623,7 +845,7 @@ class Pinch3DDistanceTests(unittest.TestCase):
         self.assertEqual(events, ["PINCH_DOWN"])
 
         engine = GestureEngine()
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertEqual(events, ["RIGHT_CLICK"])
 
         engine = GestureEngine()
@@ -645,14 +867,66 @@ class ClickCooldownIndependenceTests(unittest.TestCase):
     def test_genuine_right_click_shortly_after_a_genuine_left_click_still_fires(self):
         engine = GestureEngine()
         process_confirmed(engine, pinch_click_hand(pinched=True))
-        _, _, events = process_confirmed(engine, right_click_hand())
+        _, _, events = process_confirmed_right_click(engine, right_click_hand())
         self.assertIn("RIGHT_CLICK", events)
 
     def test_genuine_left_click_shortly_after_a_genuine_right_click_still_fires(self):
         engine = GestureEngine()
-        process_confirmed(engine, right_click_hand())
+        process_confirmed_right_click(engine, right_click_hand())
         _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
         self.assertIn("PINCH_DOWN", events)
+
+
+def index_and_middle_concurrent_pinch_hand(cx=0.5, cy=0.5):
+    """A-02 (WORKPLAN.md §9) regression fixture: index AND middle both under
+    their OWN pinch threshold in the same frame - index closer, so it wins
+    pinch_winner every frame while middle keeps accruing its own confirm streak
+    "in the background." Ring/pinky pushed far away so only these two compete."""
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.002, cy, 0)  # index: closest, wins pinch_winner
+    pts[6] = Landmark(cx + 0.05, cy, 0)
+    pts[12] = Landmark(cx + 0.005, cy, 0)  # middle: also under threshold, but farther
+    pts[10] = Landmark(cx + 0.05, cy, 0)
+    pts[16] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[14] = Landmark(cx + 0.15, cy - 0.15, 0)
+    pts[20] = Landmark(cx + 0.3, cy - 0.3, 0)
+    pts[18] = Landmark(cx + 0.15, cy - 0.15, 0)
+    return pts
+
+
+class PinchDebouncerIndependenceTests(unittest.TestCase):
+    """A-02 (WORKPLAN.md §9): the pinch-family confirm streak must track EACH
+    finger independently. A single ConsecutiveFrameDebouncer instance shared
+    across all 4 fingers (instead of one instance per finger) would see a
+    different "key" every time the candidate loop moves to the next finger
+    WITHIN THE SAME FRAME and reset the shared streak on every iteration -
+    nothing would ever confirm. This proves progress genuinely accrues per
+    finger, independently of which one is currently winning pinch_winner."""
+
+    def test_middle_keeps_confirming_while_index_is_winning(self):
+        engine = GestureEngine()
+        pts = index_and_middle_concurrent_pinch_hand()
+        # Frame 1: both under their own threshold, neither confirmed yet
+        # (index needs PINCH_CONFIRM_FRAMES=2).
+        _, _, events1 = process(engine, pts)
+        self.assertEqual(events1, [])
+        # Frame 2: index's own streak (2) completes and it wins (closer) -
+        # only PINCH_DOWN fires. Middle's streak keeps accruing toward its
+        # own, longer RIGHT_CLICK_CONFIRM_FRAMES (H-26/V-05, see config.py) -
+        # it just isn't the winner this frame.
+        _, _, events2 = process(engine, pts)
+        self.assertEqual(events2, ["PINCH_DOWN"])
+        # Keep feeding the same pose until middle's own streak would be
+        # complete too (still not winning - index remains closer and already
+        # confirmed, so nothing new fires here).
+        for _ in range(config.RIGHT_CLICK_CONFIRM_FRAMES - 2):
+            process(engine, pts)
+        # Now index releases: middle is the only active candidate. RIGHT_CLICK
+        # fires on this VERY frame, with no extra warmup - proof middle's
+        # confirm streak was never reset by index's activity.
+        _, _, events_final = process(engine, right_click_hand())
+        self.assertIn("RIGHT_CLICK", events_final)
 
 
 def two_hand_process(engine, primary_pts, other_pts):
@@ -778,6 +1052,684 @@ class BackgroundHandFilterTests(unittest.TestCase):
         engine.pause_hold_start = time.time() - 2.0
         _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
         self.assertIn("TOGGLE_ACTIVE", events)
+
+
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 8 fixtures de
+# sellos Naruto de 1 mano (naruto_tora_hand...naruto_i_hand) y
+# NARUTO_SEAL_FIXTURES se borraron aca junto con la deteccion geometrica que
+# probaban (AUDIT.md: 6 de 8 no correspondian a ningun sello real). `_naruto_base`
+# sobrevive: `jjk_megumi_hand()` (mas abajo) lo sigue usando como scaffold -
+# JJK Megumi no es un sello Naruto y el modelo no lo cubre.
+def _naruto_base(cx, cy):
+    pts = flat(cx, cy)
+    pts[5] = Landmark(cx - 0.06, cy, 0)  # index mcp
+    pts[9] = Landmark(cx - 0.02, cy, 0)  # middle mcp
+    pts[13] = Landmark(cx + 0.02, cy, 0)  # ring mcp
+    pts[17] = Landmark(cx + 0.06, cy, 0)  # pinky mcp
+    return pts
+
+
+def hold_naruto(engine, pts):
+    """Primer process() arma el hold; se retrocede el reloj interno mas alla
+    de NARUTO_SEAL_HOLD_SECONDS y se llama process() de nuevo - mismo patron
+    que LockSessionTests/TwoHandMasterGestureTests usan para LOCK_SESSION/
+    TOGGLE_ACTIVE/CLOSE_APP."""
+    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+    engine._naruto_hold_start = time.time() - 1.0
+    return engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+
+
+# Y-04: NarutoOneHandSealTests (probaba los 8 sellos de 1 mano de arriba) se
+# borro entera junto con la deteccion que ejercitaba.
+
+
+# Y-04: ne_hand/mi_hand/tori_hand/kai_hand_1/kai_hand_2/tatsu_hand_1/tatsu_hand_2
+# y TWOHAND_SEAL_FIXTURES (Ne/Mi/Tori/Kai/Tatsu por geometria) se borraron -
+# reemplazados por el modelo YOLOX. `hold_twohand_seal()` sobrevive (mas abajo):
+# lo sigue usando JJK_GOJO_DOMAIN, que no es un sello Naruto y el modelo no
+# lo cubre.
+def hold_twohand_seal(engine, p1, p2):
+    hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+    engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+    engine._twohand_seal_hold_start = time.time() - 2.0
+    return engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+
+
+# Y-04: NarutoTwoHandSealTests (probaba Ne/Mi/Tori/Kai/Tatsu por geometria) se
+# borro entera - el modelo YOLOX los reemplaza.
+
+
+# TASK-068/069/070 (Fase 6): gestos JJK. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo -
+# incluye el censo de colision pedido explicitamente por design.md §6.4
+# (contra las fases 1/4/5 y entre si), aunque la verificacion en CAMARA REAL
+# (a diferencia de la Fase 4) queda pospuesta a la prueba integral final,
+# pedida explicitamente por el usuario.
+def jjk_megumi_hand(cx=0.5, cy=0.5):
+    # Identica a naruto_hitsuji_hand salvo el anular (16/14): EXTENDIDO aca,
+    # RECOGIDO en Hitsuji - esa es la unica diferencia entre las 2 fixtures,
+    # a proposito, para que el discriminador quede aislado (design.md §6.3).
+    pts = _naruto_base(cx, cy)
+    pts[8] = Landmark(cx - 0.02, cy - 0.08, 0)  # indice cruza a la derecha
+    pts[6] = Landmark(cx - 0.06, cy - 0.03, 0)
+    pts[12] = Landmark(cx - 0.09, cy - 0.08, 0)  # medio cruza a la izquierda
+    pts[10] = Landmark(cx - 0.02, cy - 0.03, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)  # anular EXTENDIDO
+    pts[14] = Landmark(cx + 0.02, cy - 0.03, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)  # menique recogido
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[4] = Landmark(cx - 0.04, cy - 0.04, 0)
+    pts[2] = Landmark(cx - 0.05, cy - 0.01, 0)
+    return pts
+
+
+def jjk_gojo_hand(cx=0.5, cy=0.3):
+    # Marco en L: pulgar recto hacia arriba (vector vertical puro desde su
+    # mcp), indice recto hacia el costado (vector horizontal puro desde su
+    # mcp) - perpendiculares por construccion. Resto de los dedos sin
+    # overridear (curl ambiguo, no importa para este chequeo).
+    pts = flat(cx, cy)
+    pts[2] = Landmark(cx, cy, 0)
+    pts[4] = Landmark(cx, cy - 0.15, 0)
+    pts[5] = Landmark(cx, cy, 0)
+    pts[8] = Landmark(cx + 0.15, cy, 0)
+    return pts
+
+
+def sukuna_contact_hand(cx=0.5, cy=0.5):
+    # Misma forma que right_click_hand a proposito (design.md §6.2: Sukuna
+    # reusa d_thumb_middle, el snap ES ese pellizco, solo que rapido).
+    return right_click_hand(cx, cy)
+
+
+def sukuna_release_hand(cx=0.5, cy=0.5):
+    pts = list(right_click_hand(cx, cy))
+    pts[12] = Landmark(cx + 0.15, cy, 0)  # medio bien separado del pulgar
+    return pts
+
+
+class JJKGestureTests(unittest.TestCase):
+    def test_megumi_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_naruto(engine, jjk_megumi_hand())
+        self.assertEqual(events, ["JJK_MEGUMI"])
+
+    # Y-04: test_megumi_is_geometrically_distinguished_from_hitsuji_by_the_ring_finger
+    # se borro - probaba que Megumi no colisionaba con la deteccion geometrica
+    # de Hitsuji (ya borrada); sin esa deteccion, Megumi es el unico sello de
+    # 1 mano que queda, no hay colision que verificar.
+
+    def test_gojo_domain_fires_only_its_own_event_after_the_hold(self):
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.25), jjk_gojo_hand(0.52, 0.25))
+        self.assertEqual(events, ["JJK_GOJO_DOMAIN"])
+
+    def test_gojo_domain_does_not_fire_before_the_hold_completes(self):
+        engine = GestureEngine()
+        hands = [Hand(jjk_gojo_hand(0.42, 0.25), "Left"), Hand(jjk_gojo_hand(0.52, 0.25), "Right")]
+        _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+        self.assertEqual(events, [])
+
+    def test_gojo_domain_does_not_fire_when_hands_are_low_in_frame(self):
+        # Mismas 2 manos, mas abajo en el cuadro - JJK_GOJO_MAX_AVG_WRIST_Y
+        # (mitad superior) deberia excluirlo.
+        engine = GestureEngine()
+        _, _, events = hold_twohand_seal(engine, jjk_gojo_hand(0.42, 0.75), jjk_gojo_hand(0.52, 0.75))
+        self.assertEqual(events, [])
+
+    def test_a_fast_snap_fires_sukuna_not_right_click(self):
+        engine = GestureEngine()
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("JJK_SUKUNA", events)
+        self.assertNotIn("RIGHT_CLICK", events)
+
+    def test_a_sustained_pinch_fires_right_click_not_sukuna(self):
+        engine = GestureEngine()
+        for _ in range(config.RIGHT_CLICK_CONFIRM_FRAMES - 1):
+            engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("RIGHT_CLICK", events)  # confirmado tras RIGHT_CLICK_CONFIRM_FRAMES frames seguidos en contacto (H-26/V-05)
+
+        # Sostenido mucho mas alla de la ventana de Sukuna (JJK_SUKUNA_MAX_WINDOW_SECONDS) -
+        # mismo truco de rebobinar el reloj interno que el resto del archivo.
+        engine._sukuna_detector._contact_time = time.time() - 1.0
+        engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process([Hand(sukuna_release_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("JJK_SUKUNA", events)
+
+    def test_a_quick_snap_like_pass_does_not_confirm_right_click(self):
+        # H-26/V-05, confirmado en camara real (José, 2026-09-07): "se
+        # confunde con click derecho" - antes de RIGHT_CLICK_CONFIRM_FRAMES
+        # (config.py), solo PINCH_CONFIRM_FRAMES (2) bastaba para confirmar
+        # el click derecho, mucho antes de que un snap real (que sigue
+        # cerrando mas alla de la banda 15-20px) tuviera chance de
+        # completarse. Con la ventana mas larga, ese mismo numero de frames
+        # ya no alcanza.
+        engine = GestureEngine()
+        for _ in range(config.PINCH_CONFIRM_FRAMES):
+            _, _, events = engine.process([Hand(sukuna_contact_hand(), "Right")], W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("RIGHT_CLICK", events)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_jjk_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                engine._naruto_hold_start = time.time() - 1.0
+                _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e.startswith("JJK_")],
+                    f"{name} unexpectedly produced a JJK_* event: {events}",
+                )
+
+    # Y-04: test_no_naruto_seal_fixture_triggers_a_jjk_event se borro - usaba
+    # NARUTO_SEAL_FIXTURES (los 8 sellos de 1 mano ya borrados).
+
+    def test_no_existing_two_hand_fixture_leaks_gojo_domain(self):
+        existing_pairs = {
+            "both_fists": (fist_hand(0.3, 0.5), fist_hand(0.6, 0.5)),
+            "both_shaka": (shaka_hand(0.3, 0.5), shaka_hand(0.6, 0.5)),
+        }
+        for name, (p1, p2) in existing_pairs.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                hands = [Hand(p1, "Left"), Hand(p2, "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertNotIn("JJK_GOJO_DOMAIN", events)
+
+    # Y-04: test_no_twohand_naruto_seal_fixture_leaks_gojo_domain se borro -
+    # usaba TWOHAND_SEAL_FIXTURES (Ne/Mi/Tori/Kai/Tatsu por geometria, ya
+    # borrados).
+
+
+# TASK-071/072/073 (Fase 7): gestos comunes. Mismo criterio de fixtures
+# verificadas contra el GestureEngine real que el resto del archivo.
+def clap_hand(cx=0.5, cy=0.5):
+    # Los 4 dedos (no el pulgar) bien extendidos parejos (curl_ratio=1.0,
+    # AFUERA de la banda "entrelazada" 0.2-0.8 que usan Ne/Mi/Kai/Tatsu) y el
+    # pulgar en una posicion neutra que no forma el angulo de 90 grados de
+    # Gojo ni pellizca nada - a proposito, para que 2 de estas manos NUNCA
+    # satisfagan ningun gesto de 2 manos EXISTENTE sin importar la distancia
+    # entre ellas (verificado explicitamente mas abajo).
+    pts = [Landmark(cx, cy, 0) for _ in range(21)]
+    pts[0] = Landmark(cx, cy + 0.2, 0)
+    pts[5] = Landmark(cx - 0.06, cy, 0)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.06, cy - 0.15, 0)
+    pts[9] = Landmark(cx - 0.02, cy, 0)
+    pts[10] = Landmark(cx - 0.02, cy - 0.05, 0)
+    pts[12] = Landmark(cx - 0.02, cy - 0.15, 0)
+    pts[13] = Landmark(cx + 0.02, cy, 0)
+    pts[14] = Landmark(cx + 0.02, cy - 0.05, 0)
+    pts[16] = Landmark(cx + 0.02, cy - 0.15, 0)
+    pts[17] = Landmark(cx + 0.06, cy, 0)
+    pts[18] = Landmark(cx + 0.06, cy - 0.05, 0)
+    pts[20] = Landmark(cx + 0.06, cy - 0.15, 0)
+    pts[2] = Landmark(cx - 0.1, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.15, cy + 0.1, 0)
+    return pts
+
+
+def korean_heart_hand(cx=0.5, cy=0.5):
+    # Identica a un puno (los 4 dedos recogidos) salvo el pulgar: en vez de
+    # recogido junto a la mano (como en Saru/I), la punta del pulgar (4)
+    # queda MUY cerca del PRIMER nudillo del indice (6) - no de su punta
+    # (8), que es lo que exige PINCH_CLICK - la distincion geometrica que
+    # design.md §7.2 pide. Verificado explicitamente mas abajo que
+    # d_thumb_index (punta a punta) queda por ENCIMA de PINCH_CLICK, y que
+    # el offset pulgar-palma no cruza los umbrales de Saru ni de I.
+    pts = _naruto_base(cx, cy)
+    pts[6] = Landmark(cx - 0.06, cy - 0.05, 0)
+    pts[8] = Landmark(cx - 0.05, cy + 0.02, 0)
+    pts[10] = Landmark(cx - 0.02, cy, 0)
+    pts[12] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[14] = Landmark(cx + 0.02, cy, 0)
+    pts[16] = Landmark(cx + 0.02, cy + 0.05, 0)
+    pts[18] = Landmark(cx + 0.06, cy, 0)
+    pts[20] = Landmark(cx + 0.06, cy + 0.05, 0)
+    pts[2] = Landmark(cx - 0.02, cy + 0.05, 0)
+    pts[4] = Landmark(cx - 0.055, cy - 0.048, 0)
+    return pts
+
+
+class ClapTests(unittest.TestCase):
+    def test_hands_closing_then_separating_fires_clap_once(self):
+        engine = GestureEngine()
+        contact = [Hand(clap_hand(0.48, 0.5), "Left"), Hand(clap_hand(0.52, 0.5), "Right")]
+        release = [Hand(clap_hand(0.2, 0.5), "Left"), Hand(clap_hand(0.78, 0.5), "Right")]
+        engine.process(contact, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(release, W, H, SCREEN_W, SCREEN_H)
+        self.assertIn("CLAP", events)
+
+    def test_hands_passing_near_without_reaching_contact_does_not_fire_clap(self):
+        engine = GestureEngine()
+        # Nunca cruza CLAP_CONTACT_MAX_DISTANCE_FRACTION (0.12) en ningun momento.
+        far = [Hand(clap_hand(0.35, 0.5), "Left"), Hand(clap_hand(0.60, 0.5), "Right")]
+        near = [Hand(clap_hand(0.42, 0.5), "Left"), Hand(clap_hand(0.58, 0.5), "Right")]
+        engine.process(far, W, H, SCREEN_W, SCREEN_H)
+        _, _, events = engine.process(near, W, H, SCREEN_W, SCREEN_H)
+        self.assertNotIn("CLAP", events)
+
+    def test_clap_hand_pair_never_matches_an_existing_two_hand_gesture(self):
+        # Verifica explicitamente la premisa de la que depende todo lo de
+        # arriba: 2 clap_hand(), a cualquier distancia relevante, no
+        # satisfacen ningun gesto de 2 manos EXISTENTE (shaka/puños/pinch/
+        # Naruto/JJK) - si lo hicieran, la jerarquia bloquearia CLAP.
+        for label, (cx1, cx2) in {
+            "contact": (0.48, 0.52),
+            "release": (0.2, 0.78),
+            "near_miss": (0.42, 0.58),
+        }.items():
+            with self.subTest(pair=label):
+                engine = GestureEngine()
+                hands = [Hand(clap_hand(cx1, 0.5), "Left"), Hand(clap_hand(cx2, 0.5), "Right")]
+                engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                engine._twohand_seal_hold_start = time.time() - 2.0
+                engine.pause_hold_start = time.time() - 2.0
+                engine.close_hold_start = time.time() - 2.0
+                _, _, events = engine.process(hands, W, H, SCREEN_W, SCREEN_H)
+                self.assertFalse(
+                    [e for e in events if e != "CLAP"],
+                    f"{label} unexpectedly produced a non-CLAP event: {events}",
+                )
+
+
+class KoreanHeartTests(unittest.TestCase):
+    def test_a_fast_touch_and_release_fires_pinch_down_up_only(self):
+        engine = GestureEngine()
+        _, _, events = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertEqual(events, ["PINCH_DOWN"])
+        self.assertNotIn("KOREAN_HEART", events)
+
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("KOREAN_HEART", events)
+
+    def test_a_sustained_pose_past_the_hold_fires_korean_heart_without_pinch_down(self):
+        engine = GestureEngine()
+        pts = korean_heart_hand()
+        _, _, events = process(engine, pts)
+        self.assertNotIn("PINCH_DOWN", events)
+        self.assertNotIn("KOREAN_HEART", events)  # todavia no se cumplio el hold
+
+        engine._korean_heart_hold_start = time.time() - 2.0
+        _, _, events = process(engine, pts)
+        self.assertIn("KOREAN_HEART", events)
+        self.assertNotIn("PINCH_DOWN", events)
+
+    def test_korean_heart_shape_never_wins_pinch_winner_index(self):
+        # design.md §7.2: la unica forma de garantizar "nunca dispara
+        # PINCH_DOWN" por construccion (no solo por umbral) es que
+        # d_thumb_index (punta a punta) quede estructuralmente por ENCIMA de
+        # PINCH_CLICK para esta forma.
+        pts = korean_heart_hand()
+        w, h = W, H
+        thumb, index = pts[4], pts[8]
+        d_thumb_index = GestureEngine._dist3(thumb, index, w, h)
+        self.assertGreaterEqual(d_thumb_index, config.PINCH_CLICK)
+
+    def test_none_of_the_existing_gesture_fixtures_leak_a_korean_heart_event(self):
+        existing_fixtures = {
+            "pinch_click": pinch_click_hand(),
+            "right_click": right_click_hand(),
+            "scroll": scroll_hand(),
+            "zoom": zoom_hand(),
+            "open_palm": open_palm_hand(),
+            "silence": silence_hand(),
+            "volume": volume_hand(),
+            "screenshot": screenshot_hand(),
+            "shaka": shaka_hand(),
+            "fist": fist_hand(),
+            "flat": flat(),
+        }
+        for name, pts in existing_fixtures.items():
+            with self.subTest(fixture=name):
+                engine = GestureEngine()
+                for _ in range(3):
+                    process(engine, pts)
+                engine._korean_heart_hold_start = time.time() - 2.0
+                _, _, events = process(engine, pts)
+                self.assertNotIn("KOREAN_HEART", events, f"{name} unexpectedly produced KOREAN_HEART: {events}")
+
+
+class HandLossStateResetTests(unittest.TestCase):
+    """H-05: process() volvia temprano (mano perdida, o app en pausa) SIN
+    resetear ningun estado de una mano - un hold viejo (lock_start_time,
+    _naruto_hold_start, _korean_heart_hold_start) sobrevivia intacto y
+    completaba instantaneamente al primer cuadro con la mano de vuelta, sin
+    cumplir su hold real. La rama de 2 manos (pause_hold_start, etc.) ya
+    reseteaba correctamente; esta es la asimetria que le faltaba a la de 1
+    mano."""
+
+    def test_shaka_survives_hand_loss_does_not_lock_on_return(self):
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0  # ya supera LOCK_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)  # la mano sale de cuadro
+        _, _, events = process(engine, shaka_hand())  # misma Shaka de vuelta
+        self.assertNotIn("LOCK_SESSION", events)  # no dispara en el primer cuadro
+
+    def test_shaka_locks_after_a_full_new_hold_following_hand_loss(self):
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        process(engine, shaka_hand())  # rearranca el hold en este cuadro
+        engine.lock_start_time = time.time() - 2.0  # completa un hold nuevo entero
+        _, _, events = process(engine, shaka_hand())
+        self.assertIn("LOCK_SESSION", events)
+
+    def test_one_hand_seal_survives_hand_loss_does_not_complete_on_return(self):
+        # Y-04: JJK_MEGUMI en vez de NARUTO_TORA (borrado) - unico sello de 1
+        # mano que queda, mismo mecanismo (_naruto_hold_start).
+        engine = GestureEngine()
+        pts = jjk_megumi_hand()
+        process(engine, pts)
+        engine._naruto_hold_start = time.time() - 2.0  # ya supera NARUTO_SEAL_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, pts)
+        self.assertEqual(events, [])
+
+    def test_korean_heart_survives_hand_loss_does_not_complete_on_return(self):
+        engine = GestureEngine()
+        pts = korean_heart_hand()
+        process(engine, pts)
+        engine._korean_heart_hold_start = time.time() - 2.0  # ya supera KOREAN_HEART_HOLD_SECONDS
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, pts)
+        self.assertNotIn("KOREAN_HEART", events)
+
+    def test_scroll_baseline_recaptures_after_hand_loss_no_spurious_scroll(self):
+        engine = GestureEngine()
+        process(engine, scroll_hand(cy=0.2))  # base vieja, lejos de donde vuelve
+        engine.process([], W, H, SCREEN_W, SCREEN_H)
+        _, _, events = process(engine, scroll_hand(cy=0.5))  # primer cuadro de vuelta = nueva base
+        self.assertNotIn("SCROLL_UP", events)
+        self.assertNotIn("SCROLL_DOWN", events)
+
+    def test_pause_mid_hold_resets_the_hold_on_resume(self):
+        # Y-04: JJK_MEGUMI en vez de NARUTO_TORA (borrado).
+        engine = GestureEngine()
+        pts = jjk_megumi_hand()
+        process(engine, pts)
+        engine._naruto_hold_start = time.time() - 2.0
+        engine.active = False
+        engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)  # en pausa, no procesa gestos de 1 mano
+        engine.active = True
+        _, _, events = process(engine, pts)  # reanuda: el hold tiene que arrancar de cero
+        self.assertEqual(events, [])
+
+    def test_a_normal_continuous_hold_still_fires_without_hand_loss(self):
+        # No-regresion: sin perder la mano en el medio, el hold sigue
+        # completando exactamente igual que antes de este fix.
+        engine = GestureEngine()
+        process(engine, shaka_hand())
+        engine.lock_start_time = time.time() - 2.0
+        _, _, events = process(engine, shaka_hand())
+        self.assertIn("LOCK_SESSION", events)
+
+
+def pointer_only_hand(cx=0.5, cy=0.5):
+    """flat() con el pulgar bien separado del indice: a diferencia de
+    flat() a secas (pellizca "por construccion", d_thumb_index=0 - ver
+    NarutoOneHandSealTests), esta jamas confirma un pinch aunque se procese
+    2+ veces seguidas, asi que sirve como mano neutral de verdad para
+    DwellClickTests (dwell no tiene forma propia, pero SI se suspende si
+    pinch_winner queda activo)."""
+    pts = flat(cx, cy)
+    pts[4] = Landmark(cx - 0.3, cy, 0)
+    return pts
+
+
+class DwellClickTests(unittest.TestCase):
+    """C-01 (WORKPLAN.md §10, workflow 8): dwell-click - apuntar y sostener
+    quieto, sin pinch. Opt-in (config.DWELL_CLICK_ENABLED, apagado por
+    defecto)."""
+
+    def test_disabled_by_default_never_fires(self):
+        # No-regresion: el estado por defecto es apagado, asi que toda la
+        # suite existente (que nunca prende el flag) tiene que seguir
+        # identica - incluso con el indice quieto el tiempo suficiente para
+        # completar el dwell si estuviera prendido.
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        process(engine, pts)
+        engine._dwell_detector._start_time = time.time() - 1.0
+        _, _, events = process(engine, pts)
+        self.assertNotIn("DWELL_CLICK", events)
+
+    def test_enabled_and_still_fires_once_on_completion(self):
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts)
+            engine._dwell_detector._start_time = time.time() - 1.0  # > DWELL_DURATION_MS (900ms)
+            _, _, events = process(engine, pts)
+            self.assertEqual(events, ["DWELL_CLICK"])
+            # despues de disparar, no vuelve a disparar sin moverse y volver
+            # a quedarse quieto - el reset() interno reinicia la cuenta.
+            _, _, events2 = process(engine, pts)
+            self.assertNotIn("DWELL_CLICK", events2)
+
+    def test_moving_past_cancel_distance_resets_progress(self):
+        engine = GestureEngine()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pointer_only_hand(0.5, 0.5))
+            engine._dwell_detector._start_time = time.time() - 1.0  # completaria si no se moviera
+            process(engine, pointer_only_hand(0.9, 0.9))  # se mueve mas alla de cancel_distance
+            self.assertEqual(engine.dwell_progress, 0.0)
+            _, _, events = process(engine, pointer_only_hand(0.9, 0.9))
+            self.assertNotIn("DWELL_CLICK", events)
+
+    def test_holding_a_seal_never_completes_dwell(self):
+        # Colision critica documentada: DwellDetector.DEFAULT_DURATION_MS
+        # (600ms) coincide EXACTAMENTE con NARUTO_SEAL_HOLD_SECONDS*1000 -
+        # sostener un sello no puede completar tambien el dwell. Y-04:
+        # JJK_MEGUMI en vez de NARUTO_TORA (borrado) - mismo mecanismo
+        # (_naruto_hold_seal/NARUTO_SEAL_HOLD_SECONDS), unico sello de 1 mano
+        # que queda.
+        engine = GestureEngine()
+        pts = jjk_megumi_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            _, _, events = hold_naruto(engine, pts)
+            self.assertIn("JJK_MEGUMI", events)
+            self.assertNotIn("DWELL_CLICK", events)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            _, _, events2 = process(engine, pts)
+            self.assertNotIn("DWELL_CLICK", events2)
+
+    def test_external_seal_in_progress_suppresses_dwell(self):
+        # Y-04 (trampa 2, WORKPLAN.md): los 12 sellos reales ahora los
+        # detecta HandSignTracker (Y-02) FUERA de este motor - sin esta
+        # suspension explicita, sostener el indice quieto mientras el modelo
+        # reconoce un sello de 2 manos completaria tambien el dwell.
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts, external_seal_in_progress=True)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            _, _, events = process(engine, pts, external_seal_in_progress=True)
+            self.assertNotIn("DWELL_CLICK", events)
+
+    def test_paused_never_completes_dwell(self):
+        engine = GestureEngine()
+        pts = pointer_only_hand()
+        with patch("jarvis.config.DWELL_CLICK_ENABLED", True):
+            process(engine, pts)
+            engine._dwell_detector._start_time = time.time() - 1.0
+            engine.active = False
+            _, _, events = engine.process([Hand(pts, "Right")], W, H, SCREEN_W, SCREEN_H)
+            self.assertNotIn("DWELL_CLICK", events)
+
+
+class DoubleClickTests(unittest.TestCase):
+    """C-02 (WORKPLAN.md §10, workflow 8): doble click re-anclado - dos
+    pinches (index) completos dentro de DoubleClickDetector.max_interval_ms
+    (450ms) producen un DOUBLE_CLICK ademas del PINCH_UP normal."""
+
+    def test_a_single_click_never_produces_a_double_click_event(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        _, _, events = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events)
+        self.assertNotIn("DOUBLE_CLICK", events)
+
+    def test_second_rapid_pinch_downs_event_is_actually_suppressed_by_the_cooldown(self):
+        # Causa raiz documentada en el WORKPLAN: CLICK_COOLDOWN (300ms) es
+        # mas chico que el intervalo de doble click de Windows (~500ms), asi
+        # que el PINCH_DOWN de un segundo pellizco rapido y genuino NUNCA se
+        # emite - DOUBLE_CLICK es lo unico que representa ese segundo click.
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        _, _, events_down = process(engine, pinch_click_hand(pinched=True))
+        self.assertNotIn("PINCH_DOWN", events_down)  # tragado por el cooldown
+
+    def test_two_rapid_pinches_within_the_interval_produce_a_double_click(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))  # click 2: PINCH_DOWN suprimido
+        _, _, events = process(engine, pinch_click_hand(pinched=False))  # click 2: release
+        self.assertIn("PINCH_UP", events)
+        self.assertIn("DOUBLE_CLICK", events)
+
+    def test_pinches_separated_by_more_than_the_interval_are_two_normal_clicks(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        # Simula que paso mas que el intervalo Y que el cooldown de click ya
+        # expiro (en la app real, los 2 avanzan con el mismo reloj de pared).
+        engine._double_click_detector._last_click_time = time.time() - 1.0
+        engine.cooldowns.reset(COOLDOWN_CLICK)
+
+        _, _, events_down = process_confirmed(engine, pinch_click_hand(pinched=True))
+        self.assertIn("PINCH_DOWN", events_down)  # click 2: normal, no bloqueado
+        _, _, events_up = process(engine, pinch_click_hand(pinched=False))
+        self.assertIn("PINCH_UP", events_up)
+        self.assertNotIn("DOUBLE_CLICK", events_up)
+
+    def test_three_rapid_pinches_are_a_pair_plus_a_single_not_a_triple(self):
+        engine = GestureEngine()
+        process_confirmed(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=False))  # click 1 (single)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))
+        _, _, events2 = process(engine, pinch_click_hand(pinched=False))  # click 2 -> double
+        self.assertIn("DOUBLE_CLICK", events2)
+
+        confirm_pinch(engine, pinch_click_hand(pinched=True))
+        process(engine, pinch_click_hand(pinched=True))
+        _, _, events3 = process(engine, pinch_click_hand(pinched=False))  # click 3 -> single otra vez
+        self.assertNotIn("DOUBLE_CLICK", events3)
+
+
+def _swipe_events(events):
+    return [e for e in events if e.startswith("SWIPE_")]
+
+
+class SwipeTests(unittest.TestCase):
+    """C-03 (WORKPLAN.md §10, workflow 8): swipe con puño cerrado, 1 mano -
+    la tarea de mayor riesgo de colision de las 3 (por eso se hizo ultima)."""
+
+    def test_fast_fist_movement_in_each_direction_fires_the_right_swipe(self):
+        cases = [
+            ((0.2, 0.5), (0.6, 0.5), "SWIPE_RIGHT"),
+            ((0.6, 0.5), (0.2, 0.5), "SWIPE_LEFT"),
+            ((0.5, 0.2), (0.5, 0.6), "SWIPE_DOWN"),
+            ((0.5, 0.6), (0.5, 0.2), "SWIPE_UP"),
+        ]
+        for start, end, expected in cases:
+            with self.subTest(expected=expected):
+                engine = GestureEngine()
+                process(engine, fist_hand(*start))
+                _, _, events = process(engine, fist_hand(*end))
+                self.assertEqual(events, [expected])
+
+    def test_a_long_but_slow_movement_never_fires(self):
+        # Criterio explicito del spec original: distancia sin velocidad no alcanza.
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5))
+        x0, y0, _ = engine._swipe_detector._start
+        engine._swipe_detector._start = (x0, y0, time.time() - 0.5)
+        # 0.2 de distancia en ~500ms = 0.4/s, por debajo de min_velocity (0.5/s).
+        _, _, events = process(engine, fist_hand(0.4, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_fast_movement_without_the_fist_pose_never_fires(self):
+        engine = GestureEngine()
+        process(engine, pointer_only_hand(0.2, 0.5))
+        _, _, events = process(engine, pointer_only_hand(0.6, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_losing_the_fist_pose_mid_window_cancels_it(self):
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5))  # arranca la ventana
+        process(engine, open_palm_hand(0.3, 0.5))  # pierde el puño a mitad de camino - cancela
+        # de vuelta en puño, pero es una ventana NUEVA (recien arranca en este cuadro).
+        _, _, events = process(engine, fist_hand(0.6, 0.5))
+        self.assertEqual(_swipe_events(events), [])
+
+    def test_no_existing_fixture_ever_produces_a_swipe(self):
+        # Censo de colisiones contra el resto de las poses de 1 mano
+        # existentes, movidas rapido de un lado al otro del frame. Y-04:
+        # los 8 fixtures naruto_*_hand se borraron junto con la deteccion
+        # geometrica que probaban - JJK_MEGUMI/KOREAN_HEART (matchean
+        # _is_fist, verificado, no solo razonado - ver el gate en
+        # gestures.py) siguen siendo el caso real que puede fallar.
+        fixtures = {
+            "JJK_MEGUMI": jjk_megumi_hand,
+            "KOREAN_HEART": korean_heart_hand,
+            "OPEN_PALM": open_palm_hand,
+            "SILENCE": silence_hand,
+            "SHAKA": shaka_hand,
+            "SCREENSHOT": screenshot_hand,
+            "SCROLL": scroll_hand,
+            "ZOOM": zoom_hand,
+            "VOLUME": volume_hand,
+            "PINCH_CLICK": pinch_click_hand,
+            "RIGHT_CLICK": right_click_hand,
+        }
+        for name, fixture_fn in fixtures.items():
+            with self.subTest(pose=name):
+                engine = GestureEngine()
+                process(engine, fixture_fn(0.2, 0.5))
+                _, _, events = process(engine, fixture_fn(0.6, 0.5))
+                self.assertEqual(_swipe_events(events), [])
+
+    def test_external_seal_in_progress_suppresses_swipe(self):
+        # Y-04 (trampa 2, WORKPLAN.md): los 12 sellos reales ahora los
+        # detecta HandSignTracker (Y-02) FUERA de este motor - sin esta
+        # suspension explicita, la mano "ancla" de un sello de 2 manos
+        # (a menudo con dedos curvados, matchea _is_fist) podria disparar un
+        # swipe con el mismo movimiento de muñeca que arma el sello.
+        engine = GestureEngine()
+        process(engine, fist_hand(0.2, 0.5), external_seal_in_progress=True)
+        _, _, events = process(engine, fist_hand(0.6, 0.5), external_seal_in_progress=True)
+        self.assertEqual(_swipe_events(events), [])
 
 
 if __name__ == "__main__":

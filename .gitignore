@@ -6,3 +6,4 @@ build/work/
 dist/
 captures/*.png
 assets/*.task
+assets/gesture_icons/

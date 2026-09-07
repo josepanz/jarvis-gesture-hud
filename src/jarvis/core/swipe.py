@@ -5,9 +5,11 @@ end_position, delta, duration, velocity. Minimum displacement and velocity MUST 
 configurable. A swipe MUST NOT be triggered by slow cursor movement."
 
 Standalone, tested detector operating in the same normalized [0,1] landmark
-coordinate space GestureEngine already uses - NOT wired into it. No existing
-gesture or action maps to "swipe" in this app; wiring it in without a defined
-target action would be guessing at scope beyond what this task asks for.
+coordinate space GestureEngine already uses. Wired into `GestureEngine`
+(C-03, WORKPLAN.md §10, `hardening-and-polish`), gated on a closed fist
+(single hand) so ordinary pointer movement never triggers it - see
+gestures.py's `process()` for the gate and main.py's `_dispatch()` for
+SWIPE_LEFT/RIGHT's default `alt+left`/`alt+right` binding.
 """
 
 import math
@@ -28,6 +30,15 @@ class SwipeDetector:
         self.min_velocity = min_velocity
         self.max_duration_ms = max_duration_ms
         self._start = None  # (x, y, timestamp)
+
+        # V-10 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §10):
+        # diagnostico en vivo para la verificacion en camara real - la
+        # distancia/velocidad/duracion del ultimo intento medido (candidato
+        # que llego a `min_distance`, dispare o no por velocidad), para poder
+        # leer numeros reales en vez de estimar.
+        self.last_distance = None
+        self.last_velocity = None
+        self.last_duration_ms = None
 
     def update(self, x, y, timestamp):
         """Feed one frame's tracked position + timestamp (seconds). Returns
@@ -52,6 +63,9 @@ class SwipeDetector:
 
         duration_s = max(dt_ms / 1000, 1e-6)
         velocity = distance / duration_s
+        self.last_distance = distance
+        self.last_velocity = velocity
+        self.last_duration_ms = dt_ms
         if velocity < self.min_velocity:
             self._start = (x, y, timestamp)  # moved far but too slowly - not a swipe
             return None

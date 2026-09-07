@@ -21,6 +21,12 @@ import math
 import time
 
 from jarvis import config
+from jarvis.core.cooldown import CooldownRegistry
+from jarvis.core.debounce import ConsecutiveFrameDebouncer, MissToleranceCounter
+from jarvis.core.double_click import DoubleClickDetector
+from jarvis.core.dwell import DwellDetector
+from jarvis.core.swipe import SwipeDetector
+from jarvis.temporal_gesture import ImpulseDetector
 
 META_ACTIONS = {
     1: "TOGGLE_LEGEND",
@@ -28,6 +34,16 @@ META_ACTIONS = {
     3: "LEGEND_ALPHA_UP",
     4: "LEGEND_ALPHA_DOWN",
 }
+
+# TASK: A-01 (WORKPLAN.md §9) - nombres de accion para CooldownRegistry. Constantes,
+# no strings sueltos en cada sitio de uso: un typo en un string literal desactivaria
+# el cooldown en silencio (CooldownRegistry.try_fire de una accion no registrada
+# nunca bloquea).
+COOLDOWN_CLICK = "click"
+COOLDOWN_RIGHT_CLICK = "right_click"
+COOLDOWN_SCREENSHOT = "screenshot"
+COOLDOWN_KEYBOARD_TOGGLE = "keyboard_toggle"
+COOLDOWN_SILENCE = "silence"
 
 
 def _interp(value, in_min, in_max, out_min, out_max):
@@ -49,6 +65,22 @@ def _is_shaka(pts):
     # LOCK_SESSION sin que el usuario hiciera Shaka a proposito. Un Shaka real
     # (hang loose) tiene el anular curvado tambien, asi que este chequeo no
     # le saca alcance al gesto genuino.
+    #
+    # Hallazgo de camara real (José, 2026-08-30): el pinch de click
+    # (indice+pulgar) se confundia con Shaka y disparaba LOCK_SESSION sin
+    # querer. Ninguna de las 5 condiciones de arriba chequea la distancia
+    # pulgar-indice - durante un pinch real el pulgar sube (pts[4].y<pts[2].y,
+    # "extendido") y el menique a menudo queda relajado/extendido tambien,
+    # cumpliendo las 5 por casualidad. Un Shaka genuino tiene el pulgar bien
+    # separado del indice (apuntan en direcciones opuestas por construccion:
+    # pulgar hacia arriba/costado, indice recogido hacia la palma) - un pinch
+    # real, por definicion, los tiene juntos. Umbral razonado (no medido en
+    # camara todavia): bien por encima del rango de pinch/ruido de mano
+    # relajada documentado en config.py (maximo ~15.5px de indice sobre un
+    # frame de 640px, ~0.024 normalizado) y bien por debajo de la separacion
+    # esperable de un Shaka genuino.
+    if math.hypot(pts[4].x - pts[8].x, pts[4].y - pts[8].y) < config.SHAKA_MIN_THUMB_INDEX_GAP:
+        return False
     return (
         pts[20].y < pts[18].y
         and pts[4].y < pts[2].y
@@ -60,6 +92,128 @@ def _is_shaka(pts):
 
 def _extended_finger_count(pts):
     return sum(1 for i in (8, 12, 16, 20) if pts[i].y < pts[i - 2].y)
+
+
+def _fingers_curled(pts, *tips):
+    return all(pts[t].y > pts[t - 2].y for t in tips)
+
+
+def _fingers_extended(pts, *tips):
+    return all(pts[t].y < pts[t - 2].y for t in tips)
+
+
+def _orientation(a, b, c):
+    return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y)
+
+
+def _segments_cross(p1, p2, p3, p4):
+    """True si el segmento p1->p2 cruza geometricamente al segmento p3->p4
+    (interseccion real, por orientacion/producto cruzado) - no solo si algun
+    par de puntos quedo en un orden lateral distinto al esperado."""
+    d1 = _orientation(p3, p4, p1)
+    d2 = _orientation(p3, p4, p2)
+    d3 = _orientation(p1, p2, p3)
+    d4 = _orientation(p1, p2, p4)
+    return (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0)
+
+
+def _fingers_crossed(pts, tip_a, mcp_a, tip_b, mcp_b):
+    """True si el segmento MCP->punta de un dedo cruza geometricamente al del
+    otro, DENTRO de una misma mano.
+
+    Reemplaza una v1 que solo comparaba el ORDEN lateral de las 2 puntas
+    contra el orden de los MCP - verificado en camara real (2026-08-27) que
+    esa v1 daba falso positivo ~60-70% del tiempo con 2 dedos simplemente
+    juntos/paralelos (Tora), porque el orden de las puntas se invierte con
+    el ruido normal de landmark sin que los dedos esten realmente cruzados.
+    Esta v2 exige que los 2 SEGMENTOS completos (nudillo a punta) se corten
+    entre si - una condicion mucho mas especifica de un cruce real - medida
+    en la misma sesion contra un intento genuino de Hitsuji: subio la
+    confiabilidad de ~63% a un rango utilizable para sostener el hold."""
+    return _segments_cross(pts[mcp_a], pts[tip_a], pts[mcp_b], pts[tip_b])
+
+
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los sellos de una
+# mano que este proyecto inventaba (Tora/Ushi/U/Uma/Hitsuji/Saru/Inu/I) fueron
+# borrados aca - AUDIT.md midio que 6 de 8 no correspondian a ningun sello
+# real (los 14 sellos canonicos se hacen con las DOS manos). Reemplazados por
+# el modelo YOLOX de `hand_sign_tracker.py`, que corre cuando hay 2 manos en
+# cuadro (ver main.py). `_is_jjk_megumi` (mas abajo) no se toca: JJK Megumi no
+# es un sello Naruto y el modelo no lo cubre.
+
+
+# `_hands_distance`/`_hand_center` (usados por `_is_jjk_gojo_domain`, mas
+# abajo - unico sello de 2 manos que queda detectado por geometria, no por el
+# modelo).
+def _hand_center(pts, w, h):
+    xs = [p.x for p in pts]
+    ys = [p.y for p in pts]
+    return (sum(xs) / len(xs)) * w, (sum(ys) / len(ys)) * h
+
+
+def _hands_distance(p1, p2, w, h):
+    c1x, c1y = _hand_center(p1, w, h)
+    c2x, c2y = _hand_center(p2, w, h)
+    return math.hypot(c2x - c1x, c2y - c1y)
+
+
+# TASK-068 (Fase 6): JJK_GOJO_DOMAIN (2 manos, estatico, Pattern B per
+# design.md §1.5 - la condicion es el angulo/posicion ENTRE las 2 manos, no
+# 2 formas de una sola mano clasificadas por separado) y JJK_MEGUMI (1 mano,
+# estatico). Umbrales razonados, no medidos - misma salvedad que Fase 5,
+# pendiente de la prueba integral final (posposicion pedida explicitamente).
+def _thumb_index_angle_deg(pts):
+    """Angulo (0-180) entre el vector pulgar (MCP->punta) y el vector indice
+    (MCP->punta) de una mano - la 'L' del marco de Gojo es ~90 grados."""
+    tx, ty = pts[4].x - pts[2].x, pts[4].y - pts[2].y
+    ix, iy = pts[8].x - pts[5].x, pts[8].y - pts[5].y
+    mag_t, mag_i = math.hypot(tx, ty), math.hypot(ix, iy)
+    if mag_t == 0 or mag_i == 0:
+        return 0.0
+    cos_angle = max(-1.0, min(1.0, (tx * ix + ty * iy) / (mag_t * mag_i)))
+    return math.degrees(math.acos(cos_angle))
+
+
+def _is_jjk_gojo_domain(p1, p2, w, h):
+    angle1 = _thumb_index_angle_deg(p1)
+    angle2 = _thumb_index_angle_deg(p2)
+    l_shaped = (
+        abs(angle1 - 90) <= config.JJK_GOJO_ANGLE_TOLERANCE_DEGREES
+        and abs(angle2 - 90) <= config.JJK_GOJO_ANGLE_TOLERANCE_DEGREES
+    )
+    if not l_shaped:
+        return False
+    close = (_hands_distance(p1, p2, w, h) / math.hypot(w, h)) <= config.JJK_GOJO_MAX_DISTANCE_FRACTION
+    raised = (p1[0].y + p2[0].y) / 2 < config.JJK_GOJO_MAX_AVG_WRIST_Y
+    return close and raised
+
+
+def _is_jjk_megumi(pts):
+    # Invocacion de las sombras - familia visual de Hitsuji (indice+medio
+    # cruzados) pero distinguida EXPLICITAMENTE por la posicion del anular
+    # (extendido, no recogido) per design.md §6.3 - no puede colisionar con
+    # la forma base de Tora/U/Hitsuji, que exige el anular recogido.
+    if not (_fingers_extended(pts, 8, 12, 16) and _fingers_curled(pts, 20)):
+        return False
+    return _fingers_crossed(pts, 8, 5, 12, 9)
+
+
+# TASK-071 (Fase 7): CLAP. design.md §7.1 pide el centro de PALMA (promedio
+# de landmarks 0/5/9/13/17), no el centro de los 21 puntos (`_hand_center`,
+# usado por los sellos de 2 manos) ni el punto medio de pellizco (usado por
+# el zoom de 2 manos) - 3 nociones de "centro de mano" distintas, cada una
+# ya en uso por un gesto distinto de este archivo.
+def _palm_center(pts, w, h):
+    idx = (0, 5, 9, 13, 17)
+    xs = [pts[i].x for i in idx]
+    ys = [pts[i].y for i in idx]
+    return (sum(xs) / len(xs)) * w, (sum(ys) / len(ys)) * h
+
+
+def _palm_centers_distance(p1, p2, w, h):
+    c1x, c1y = _palm_center(p1, w, h)
+    c2x, c2y = _palm_center(p2, w, h)
+    return math.hypot(c2x - c1x, c2y - c1y)
 
 
 def _bbox_area_fraction(landmarks, w, h):
@@ -78,9 +232,10 @@ def filter_plausible_hands(hands, w, h):
     gestos, de 1 o 2 manos. Si quedan mas de 2 plausibles se queda con las 2
     mas grandes (HandLandmarker ya limita a config.MAX_HANDS, esto deja el
     criterio explicito sin depender de eso)."""
-    plausible = [hand for hand in hands if _bbox_area_fraction(hand.landmarks, w, h) >= config.MIN_HAND_AREA_FRACTION]
-    plausible.sort(key=lambda hand: _bbox_area_fraction(hand.landmarks, w, h), reverse=True)
-    return plausible[:2]
+    scored = [(hand, _bbox_area_fraction(hand.landmarks, w, h)) for hand in hands]
+    plausible = [(hand, area) for hand, area in scored if area >= config.MIN_HAND_AREA_FRACTION]
+    plausible.sort(key=lambda pair: pair[1], reverse=True)
+    return [hand for hand, _ in plausible[:2]]
 
 
 def hands_plausibly_same_person(h1, h2, w, h):
@@ -111,21 +266,49 @@ class GestureEngine:
         self.prev_x, self.prev_y = 0, 0
         self.was_pinching = False
         self.was_right_pinching = False
-        self.prev_scroll_y = None
+        # TASK: rediseño de scroll (hallazgo de camara real, José, 2026-08-30:
+        # "arriba/abajo se confunde"). Antes: delta cuadro-a-cuadro de
+        # index.y (habia que seguir moviendo la mano para seguir scrolleando,
+        # y un solo cuadro de temblor invertia el signo). Ahora: posicion
+        # "base" (donde el usuario levanto la mano por primera vez en esta
+        # forma) fijada al entrar al gesto - la direccion sale de cuanto se
+        # aleja la punta del indice de esa base, no de un delta instantaneo.
+        self.scroll_baseline = None  # (x, y) normalizado, o None si el gesto no esta activo
         self.prev_zoom_y = None
         self.prev_pinky_y = None
         self.lock_start_time = None
-        self.last_click_time = 0.0
-        self.last_right_click_time = 0.0
-        self.last_screenshot_time = 0.0
-        self.last_toggle_time = 0.0
-        self.last_silence_time = 0.0
+        # TASK: A-01 (WORKPLAN.md §9) - antes 5 campos `last_*_time` ad hoc, uno por
+        # accion, cada uno comparado a mano contra su propia constante *_COOLDOWN de
+        # config.py. clock=time.time porque GestureEngine entero corre sobre
+        # time.time() (el `now` de process()), no time.monotonic (default de
+        # CooldownRegistry) - preservar esa semantica exacta es lo que mantiene los
+        # tests que manipulan el tiempo funcionando igual.
+        self.cooldowns = CooldownRegistry(
+            {
+                COOLDOWN_CLICK: config.CLICK_COOLDOWN,
+                COOLDOWN_RIGHT_CLICK: config.RIGHT_CLICK_COOLDOWN,
+                COOLDOWN_SCREENSHOT: config.SCREENSHOT_COOLDOWN,
+                COOLDOWN_KEYBOARD_TOGGLE: config.KEYBOARD_TOGGLE_COOLDOWN,
+                COOLDOWN_SILENCE: config.SILENCE_COOLDOWN,
+            },
+            clock=time.time,
+        )
 
-        # Cuantos frames seguidos lleva cada dedo por debajo de su umbral de pinch -
-        # confirmado (config.PINCH_CONFIRM_FRAMES) recien entra a competir por
-        # pinch_winner. Absorbe el ruido de un solo frame (mano relajada moviendose
-        # cerca del umbral, medido en camara real - ver config.py).
-        self._pinch_streak = {"index": 0, "middle": 0, "ring": 0, "pinky": 0}
+        # TASK: A-02 (WORKPLAN.md §9) - una instancia POR DEDO, no una compartida:
+        # ConsecutiveFrameDebouncer.observe() resetea la racha cuando cambia la
+        # clave observada, asi que un solo debouncer para los 4 dedos haria que se
+        # pisen entre si. confirma tras config.PINCH_CONFIRM_FRAMES frames seguidos
+        # bajo el umbral - absorbe el ruido de un solo frame (mano relajada
+        # moviendose cerca del umbral, medido en camara real - ver config.py).
+        # "middle" usa RIGHT_CLICK_CONFIRM_FRAMES en vez del comun (H-26/V-05,
+        # confirmado en camara real: sin esto, un snap de Sukuna confirma
+        # click derecho antes de completarse - ver config.py).
+        self._pinch_debouncers = {
+            name: ConsecutiveFrameDebouncer(
+                config.RIGHT_CLICK_CONFIRM_FRAMES if name == "middle" else config.PINCH_CONFIRM_FRAMES
+            )
+            for name in ("index", "middle", "ring", "pinky")
+        }
 
         self.pause_hold_start = None
         self.close_hold_start = None
@@ -135,6 +318,60 @@ class GestureEngine:
         self.meta_consumed = False
 
         self._primary_pos = None  # (x, y) normalizado del indice de la ultima mano "activa"
+        self.last_primary_landmarks = None  # TASK-057: para que hand_visualizer distinga mano primaria
+
+        self._naruto_hold_seal = None  # TASK-062: que sello se esta sosteniendo ahora (o None)
+        self._naruto_hold_start = None
+        # A-02: tolerancia de fallos - sobrevive NARUTO_SEAL_MISS_TOLERANCE frames
+        # seguidos de parpadeo de clasificacion sin tirar el hold en curso.
+        self._naruto_miss_tolerance = MissToleranceCounter(config.NARUTO_SEAL_MISS_TOLERANCE)
+
+        self._twohand_seal_hold_name = None  # TASK-064/065: sello de 2 manos sostenido ahora (o None)
+        self._twohand_seal_hold_start = None
+        self._twohand_seal_miss_tolerance = MissToleranceCounter(config.NARUTO_SEAL_MISS_TOLERANCE)
+
+        # TASK-069 (Fase 6): snap de Sukuna - primer uso de ImpulseDetector,
+        # alimentado con d_thumb_middle SIN el gate de pinch_winner (necesita
+        # ver la distancia real cuadro a cuadro para reconocer el patron
+        # baja-sube; el propio detector ya distingue un snap de un hold
+        # sostenido, ver temporal_gesture.py).
+        self._sukuna_detector = ImpulseDetector(
+            config.JJK_SUKUNA_CONTACT_THRESHOLD,
+            config.JJK_SUKUNA_RELEASE_THRESHOLD,
+            config.JJK_SUKUNA_MAX_WINDOW_SECONDS,
+        )
+
+        # TASK-071 (Fase 7): CLAP - segunda instancia de ImpulseDetector
+        # (design.md §7.1 pide explicitamente reusar el primitivo, no
+        # reimplementarlo), sobre la distancia entre centros de PALMA
+        # (fraccion de la diagonal del frame, mismas unidades que los
+        # umbrales de 2 manos existentes).
+        self._clap_detector = ImpulseDetector(
+            config.CLAP_CONTACT_MAX_DISTANCE_FRACTION,
+            config.CLAP_RELEASE_MIN_DISTANCE_FRACTION,
+            config.CLAP_MAX_WINDOW_SECONDS,
+        )
+
+        self._korean_heart_hold_start = None  # TASK-072: mismo mecanismo que LOCK_SESSION
+
+        # C-01 (WORKPLAN.md §10): dwell-click. clock=time.time (no el
+        # time.monotonic default de DwellDetector) por el mismo motivo que
+        # CooldownRegistry arriba - GestureEngine entero corre sobre
+        # time.time(), y los tests manipulan el reloj escribiendo directo
+        # sobre atributos internos (ver tests/test_gesture_engine_regression.py).
+        self._dwell_detector = DwellDetector(duration_ms=config.DWELL_DURATION_MS, clock=time.time)
+        self.dwell_progress = 0.0  # publico: main.py lo lee para dibujar draw_dwell_progress()
+
+        # C-02 (WORKPLAN.md §10): clasificador de doble click. clock=time.time
+        # por la misma razon que CooldownRegistry/DwellDetector arriba - vive
+        # dentro del engine porque necesita interactuar con self.cooldowns
+        # (bypassear COOLDOWN_CLICK para el segundo click de un par).
+        self._double_click_detector = DoubleClickDetector(clock=time.time)
+
+        # C-03 (WORKPLAN.md §10): swipe con puño cerrado, 1 mano. Defaults de
+        # SwipeDetector (min_distance/min_velocity/max_duration_ms) tal
+        # cual - razonados, no medidos en camara todavia (ver V-10).
+        self._swipe_detector = SwipeDetector()
 
     @staticmethod
     def _dist(p1, p2, w, h):
@@ -169,7 +406,37 @@ class GestureEngine:
         best = min(hands, key=lambda hnd: math.hypot(hnd.landmarks[8].x - px, hnd.landmarks[8].y - py))
         return best.landmarks
 
-    def _process_two_hand_gestures(self, hands, w, h, now):
+    def _reset_single_hand_state(self):
+        """H-05: resetea todo el estado de gestos de UNA mano - se llama cuando no
+        hay mano en cuadro o la app esta en pausa (`not self.active or not hands`).
+        Sin esto, un hold viejo (lock_start_time, _naruto_hold_start,
+        _korean_heart_hold_start) sobrevive intacto a la ausencia de mano y se
+        completa instantaneamente al primer cuadro en que la mano vuelve, sin
+        cumplir su hold real - la misma clase de bug que la rama de 2 manos ya
+        evita en `_process_two_hand_gestures`. NARUTO_SEAL_MISS_TOLERANCE no
+        aplica aca: esa tolerancia es para el parpadeo de clasificacion CON la
+        mano presente, no para la ausencia de mano."""
+        self.was_pinching = False
+        self.was_right_pinching = False
+        self.scroll_baseline = None
+        self.prev_zoom_y = None
+        self.prev_pinky_y = None
+        self.lock_start_time = None
+        for _debouncer in self._pinch_debouncers.values():
+            _debouncer.reset()
+        self._naruto_hold_seal = None
+        self._naruto_hold_start = None
+        self._naruto_miss_tolerance.reset()
+        self._korean_heart_hold_start = None
+        self._dwell_detector.reset()
+        self.dwell_progress = 0.0
+        # C-02: si la mano desaparece a mitad del intervalo de doble click,
+        # que no quede pendiente de emparejar contra un proximo click que ya
+        # ni siquiera es fisicamente el mismo gesto interrumpido.
+        self._double_click_detector.reset()
+        self._swipe_detector.reset()
+
+    def _process_two_hand_gestures(self, hands, w, h, now, external_seal_in_progress=False):
         """Gestos a 2 manos. Devuelve (events, suppress_single_hand_pinch, both_shaka,
         two_hand_active). two_hand_active (TASK-055b) es la condicion geometrica cruda
         de CUALQUIER gesto de 2 manos (shaka/punos/pinch-zoom/menu meta) - no si ese
@@ -178,7 +445,16 @@ class GestureEngine:
         mano "primaria" sin importar que este haciendo la otra (ver design.md TASK-055b:
         antes solo LOCK_SESSION/PINCH_DOWN estaban protegidos, con su propia condicion
         angosta - esta queda igual sin tocar, two_hand_active es la version general
-        nueva para los 7 chequeos que no tenian ninguna proteccion)."""
+        nueva para los 7 chequeos que no tenian ninguna proteccion).
+
+        `external_seal_in_progress` (Y-08, hallazgo de camara real con José,
+        2026-09-06, WORKPLAN.md §6): varios sellos reales curvan bastante los
+        dedos de las 2 manos (Ushi/Saru, por ejemplo) y de paso satisfacen
+        `_is_fist` en ambas - sin este gate, sostener un sello ya reconocido
+        por el modelo el tiempo suficiente tambien completaba el hold de
+        PAUSA (`both_fists`, `PAUSE_HOLD_SECONDS`), disparando TOGGLE_ACTIVE
+        sin querer (observado en vivo armando Ne). Mismo mecanismo que la
+        trampa 2 de Y-04 (dwell/swipe)."""
         events = []
         # TASK-056: ademas de requerir exactamente 2 manos, exige que sean
         # plausiblemente de la misma persona (§1.2/§3B). Si no, cada mano
@@ -191,11 +467,30 @@ class GestureEngine:
             self.meta_pose = None
             self.meta_hold_start = None
             self.meta_consumed = False
+            self._twohand_seal_hold_name = None
+            self._twohand_seal_hold_start = None
+            self._twohand_seal_miss_tolerance.reset()
             return events, False, False, False
 
         p1, p2 = hands[0].landmarks, hands[1].landmarks
         both_shaka = _is_shaka(p1) and _is_shaka(p2)
-        both_fists = _is_fist(p1) and _is_fist(p2)
+        # H-27, confirmado en camara real (2026-09-07, ver config.py): sin el
+        # gate de distancia, una mano activa lejos (ej. estirada hacia un
+        # borde de pantalla) mas una mano en reposo en cualquier otra parte
+        # curvada de forma casual bastaba para "ser 2 punos" y confundirse
+        # con la pausa. Mismo principio que JJK_GOJO_MAX_DISTANCE_FRACTION.
+        both_fists = (
+            _is_fist(p1)
+            and _is_fist(p2)
+            and (_hands_distance(p1, p2, w, h) / math.hypot(w, h)) <= config.PAUSE_MAX_DISTANCE_FRACTION
+        )
+
+        # TASK-071 (Fase 7): CLAP. Alimentado SIN gate (mismo motivo que
+        # Sukuna - el detector necesita la distancia real cuadro a cuadro
+        # para su maquina de estados); el EVENTO se emite mas abajo, una vez
+        # conocida la jerarquia completa de gestos de 2 manos.
+        _clap_dist_frac = _palm_centers_distance(p1, p2, w, h) / math.hypot(w, h)
+        _clap_fired = self._clap_detector.update(_clap_dist_frac, now)
 
         if both_shaka:
             if self.close_hold_start is None:
@@ -206,7 +501,7 @@ class GestureEngine:
         else:
             self.close_hold_start = None
 
-        if both_fists and not both_shaka:
+        if both_fists and not both_shaka and not external_seal_in_progress:
             if self.pause_hold_start is None:
                 self.pause_hold_start = now
             elif now - self.pause_hold_start > config.PAUSE_HOLD_SECONDS:
@@ -259,22 +554,84 @@ class GestureEngine:
             self.meta_hold_start = None
             self.meta_consumed = False
 
-        two_hand_active = both_shaka or both_fists or both_pinching or (fists[0] != fists[1])
+        # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 5
+        # sellos Naruto de 2 manos por geometria (Ne/Mi/Tori/Kai/Tatsu) se
+        # borraron aca - los 12 sellos reales (incluido NARUTO_KAI, que ni
+        # siquiera es uno de los 14 canonicos) los detecta el modelo YOLOX
+        # ahora (`hand_sign_tracker.py`, invocado desde main.py cuando hay 2
+        # manos en cuadro). JJK_GOJO_DOMAIN no es un sello Naruto y el modelo
+        # no lo cubre - se queda, unica familia geometrica que persiste aca
+        # (angulo pulgar-indice, ver `_is_jjk_gojo_domain`).
+        # `_twohand_seal` sigue guardando el EVENTO completo (con prefijo)
+        # para reusar el mismo hold-state-machine de abajo sin duplicar logica.
+        _twohand_seal = None
+        if not both_shaka and not both_fists and not both_pinching and _is_jjk_gojo_domain(p1, p2, w, h):
+            _twohand_seal = "JJK_GOJO_DOMAIN"
+
+        if _twohand_seal is not None:
+            if self._twohand_seal_hold_name != _twohand_seal:
+                self._twohand_seal_hold_name = _twohand_seal
+                self._twohand_seal_hold_start = now
+            elif self._twohand_seal_hold_start is None:
+                self._twohand_seal_hold_start = now
+            elif now - self._twohand_seal_hold_start > config.NARUTO_TWOHAND_HOLD_SECONDS:
+                events.append(_twohand_seal)
+                self._twohand_seal_hold_start = None
+            self._twohand_seal_miss_tolerance.observe(True)
+        elif self._twohand_seal_hold_name is not None:
+            if not self._twohand_seal_miss_tolerance.observe(False):
+                self._twohand_seal_hold_name = None
+                self._twohand_seal_hold_start = None
+
+        # CLAP se emite recien aca, una vez conocida la jerarquia completa de
+        # gestos de 2 manos (Naruto/JJK/shaka/puños/pinch-zoom ya excluidos -
+        # jerarquia, no solapamiento, mismo principio que el resto del
+        # archivo). El detector ya se alimento arriba sin este gate.
+        _clap_happened = _clap_fired and _twohand_seal is None and not both_shaka and not both_fists and not both_pinching
+        if _clap_happened:
+            events.append("CLAP")
+
+        two_hand_active = (
+            both_shaka
+            or both_fists
+            or both_pinching
+            or (fists[0] != fists[1])
+            or _twohand_seal is not None
+            or _clap_happened
+        )
         return events, both_pinching, both_shaka, two_hand_active
 
-    def process(self, hands, w, h, screen_w, screen_h):
+    def process(self, hands, w, h, screen_w, screen_h, external_seal_in_progress=False):
         """Devuelve (screen_xy, cam_xy, events). screen_xy/cam_xy son None si no hay
-        puntero que mover (sin manos, o lectura de gestos en pausa)."""
+        puntero que mover (sin manos, o lectura de gestos en pausa).
+
+        `external_seal_in_progress` (Y-04, trampa 2 de
+        `openspec/changes/hand-sign-fidelity/WORKPLAN.md`): True si
+        `HandSignTracker` (Y-02, corre en main.py, FUERA de este motor) tiene
+        un sello de 2 manos sostenido este cuadro. Este motor ya no detecta
+        esos sellos (el modelo lo hace), pero los gates de dwell (C-01) y
+        swipe (C-03) necesitan seguir sabiendo que uno esta en curso - la
+        garantia vieja (`self._naruto_hold_seal is not None`) dejo de cubrir
+        esos casos apenas la deteccion de 1 mano se borro. Inyectado por
+        quien llama (main.py) en vez de que este motor conozca el tracker -
+        mantiene `GestureEngine` puro/sin I/O (ver docstring del modulo).
+        Y-08 le agrega un segundo uso: tambien suspende el hold de PAUSA
+        (`both_fists`) mientras dura, ver `_process_two_hand_gestures`."""
         now = time.time()
         # TASK-056: filtro de manos implausibles (fondo/otra persona) antes de
         # CUALQUIER logica de gestos, de 1 o 2 manos - ver design.md §1.2.
         hands = filter_plausible_hands(hands, w, h)
-        events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(hands, w, h, now)
+        events, suppress_pinch, both_shaka, two_hand_active = self._process_two_hand_gestures(
+            hands, w, h, now, external_seal_in_progress
+        )
 
         if not self.active or not hands:
+            self.last_primary_landmarks = None
+            self._reset_single_hand_state()
             return None, None, events
 
         pts = self._pick_primary(hands)
+        self.last_primary_landmarks = pts
         thumb, index, middle, ring, pinky = pts[4], pts[8], pts[12], pts[16], pts[20]
 
         raw_x = _interp(index.x, config.POINTER_MARGIN, 1 - config.POINTER_MARGIN, 0, screen_w)
@@ -289,6 +646,20 @@ class GestureEngine:
         d_thumb_pinky = self._dist3(thumb, pinky, w, h)
         d_thumb_pinky_mcp = self._dist(thumb, pts[17], w, h)  # SILENCE - no es pinch-family, queda 2D
 
+        # TASK-069 (Fase 6): snap de Sukuna. Se alimenta con d_thumb_middle
+        # SIN el gate de pinch_winner/two_hand_active (el detector necesita
+        # la distancia real cuadro a cuadro para reconocer el patron
+        # baja-sube; alimentarlo a medias romperia su maquina de estados).
+        # H-26/V-05: colision con RIGHT_CLICK CONFIRMADA en camara real
+        # (2026-09-07, ver config.py) - mitigada, no eliminada, subiendo la
+        # confirmacion del pinch "middle" a RIGHT_CLICK_CONFIRM_FRAMES. Un
+        # snap real pasa primero por PINCH_RIGHT_CLICK (20px, mas laxo que el
+        # umbral de contacto de Sukuna, 15px) camino al contacto mas ajustado;
+        # con suficiente confirmacion, un snap ya no se queda quieto ahi lo
+        # bastante para que RIGHT_CLICK confirme antes de completarse.
+        if self._sukuna_detector.update(d_thumb_middle, now) and not two_hand_active:
+            events.append("JJK_SUKUNA")
+
         # TASK-055: resolucion de prioridad entre gestos de pinch. En un puno con
         # solo pulgar+indice desplegados y pellizcando, las puntas de los demas
         # dedos curvados quedan geometricamente cerca del pulgar (consecuencia
@@ -297,7 +668,20 @@ class GestureEngine:
         # disparaban juntos ("se confunde"). Gana el dedo con distancia mas chica
         # (el pellizco mas ajustado, el mas probable de ser intencional); en un
         # empate exacto gana el primero listado abajo (orden fijo, deterministico).
-        _ring_pinch_threshold = max(config.PINCH_SCREENSHOT, config.PINCH_ZOOM)
+        #
+        # H-06: el anular tiene DOS acciones posibles (screenshot con el indice
+        # recogido, zoom con el indice extendido) con umbrales distintos - antes
+        # competia siempre con max(SCREENSHOT, ZOOM)=25, el umbral MAS LAXO de
+        # los dos, sin importar cual de las dos poses tenia en verdad. En la
+        # banda 20-25px con el indice recogido eso lo dejaba "activo" (gana la
+        # prioridad por distancia mas chica que el menique) sin cumplir el
+        # umbral real de ninguna de sus dos acciones (screenshot pide <20,
+        # zoom pide indice extendido) - cero eventos ese cuadro, y de paso se
+        # comia el evento legitimo del menique (volumen). El anular ahora
+        # compite solo con el umbral que su pose actual puede alcanzar de
+        # verdad.
+        _index_extended = index.y < pts[6].y
+        _ring_pinch_threshold = config.PINCH_ZOOM if _index_extended else config.PINCH_SCREENSHOT
         _pinch_candidates = [
             ("index", d_thumb_index, config.PINCH_CLICK),
             ("middle", d_thumb_middle, config.PINCH_RIGHT_CLICK),
@@ -308,15 +692,12 @@ class GestureEngine:
         # umbral no alcanza - un pinch recien "confirma" tras PINCH_CONFIRM_FRAMES
         # frames seguidos, para no reaccionar al ruido de la mano relajada pasando
         # cerca del umbral en un movimiento normal.
-        for _name, _dist, _threshold in _pinch_candidates:
-            if _dist < _threshold:
-                self._pinch_streak[_name] = min(self._pinch_streak[_name] + 1, config.PINCH_CONFIRM_FRAMES)
-            else:
-                self._pinch_streak[_name] = 0
+        _pinch_confirmed = {
+            _name: self._pinch_debouncers[_name].observe(_name if _dist < _threshold else None)
+            for _name, _dist, _threshold in _pinch_candidates
+        }
         _active_pinches = [
-            (name, dist)
-            for name, dist, threshold in _pinch_candidates
-            if dist < threshold and self._pinch_streak[name] >= config.PINCH_CONFIRM_FRAMES
+            (name, dist) for name, dist, threshold in _pinch_candidates if dist < threshold and _pinch_confirmed[name]
         ]
         pinch_winner = min(_active_pinches, key=lambda p: p[1])[0] if _active_pinches else None
 
@@ -338,20 +719,17 @@ class GestureEngine:
         # TASK-055b: suprimidos mientras la otra mano esta en un gesto de 2 manos -
         # antes corrian igual sobre la mano "primaria" sin importar la otra mano.
         if not two_hand_active and fingers_extended and d_thumb_pinky_mcp < config.SILENCE_TUCK_MAX:
-            if now - self.last_silence_time > config.SILENCE_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_SILENCE):
                 events.append("SILENCE")
-                self.last_silence_time = now
         elif not two_hand_active and fingers_extended and d_thumb_index > config.PALM_OPEN_MIN_SPREAD:
-            if now - self.last_toggle_time > config.KEYBOARD_TOGGLE_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_KEYBOARD_TOGGLE):
                 events.append("KEYBOARD_TOGGLE")
-                self.last_toggle_time = now
 
         # Screenshot: pulgar+anular pinch con índice y meñique recogidos
         screenshot_pinch = not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_SCREENSHOT
         if screenshot_pinch and index.y > pts[6].y and pinky.y > pts[18].y:
-            if now - self.last_screenshot_time > config.SCREENSHOT_COOLDOWN:
+            if self.cooldowns.try_fire(COOLDOWN_SCREENSHOT):
                 events.append("SCREENSHOT")
-                self.last_screenshot_time = now
 
         # Zoom: pulgar+anular pinch con índice extendido, dirección por movimiento vertical del anular
         elif not two_hand_active and pinch_winner == "ring" and d_thumb_ring < config.PINCH_ZOOM and index.y < pts[6].y:
@@ -380,8 +758,24 @@ class GestureEngine:
         # Scroll: índice+medio juntos extendidos, resto de los dedos recogidos
         # (anular Y meñique, no solo anular - pedido explícito para no
         # confundirse con otros gestos que solo recogen el anular), pulgar
-        # separado del índice. Dirección: mover la mano hacia arriba dispara
-        # SCROLL_UP, hacia abajo SCROLL_DOWN (natural, igual que zoom/volumen).
+        # separado del índice - forma sin cambios, pedida explícitamente así
+        # (hallazgo de cámara real, José, 2026-08-30).
+        #
+        # Dirección REDISEÑADA (mismo hallazgo: "arriba/abajo se confunde,
+        # que el movimiento indique el scroll... señalar hacia arriba,
+        # scroll arriba... hacia abajo, scroll abajo, mismo comportamiento
+        # para izquierda/derecha"). Antes: delta cuadro-a-cuadro de index.y -
+        # solo scrolleaba mientras la mano seguía en movimiento activo, y un
+        # solo cuadro de temblor podía invertir el signo. Ahora: se fija una
+        # posición "base" en el primer cuadro que se entra a esta forma
+        # (donde el usuario levantó la mano), y la dirección sale de hacia
+        # dónde se alejó la punta del índice desde esa base - sostenido, no
+        # instantáneo (como un joystick: alejarse de la base y mantenerse
+        # ahí sigue scrolleando, un solo cuadro de temblor ya no invierte
+        # nada). El eje dominante (el de mayor desplazamiento) decide
+        # vertical vs horizontal, así un movimiento mayormente vertical
+        # nunca dispara scroll horizontal de paso y viceversa. Umbral
+        # razonado, no medido en cámara todavía.
         if (
             not two_hand_active
             and index.y < pts[6].y
@@ -390,28 +784,118 @@ class GestureEngine:
             and pinky.y > pts[18].y
             and d_thumb_index > 40
         ):
-            if self.prev_scroll_y is not None:
-                delta = self.prev_scroll_y - index.y
-                if delta > config.VOLUME_DELTA_THRESHOLD:
-                    events.append("SCROLL_UP")
-                elif delta < -config.VOLUME_DELTA_THRESHOLD:
-                    events.append("SCROLL_DOWN")
-            self.prev_scroll_y = index.y
+            if self.scroll_baseline is None:
+                self.scroll_baseline = (index.x, index.y)
+            else:
+                base_x, base_y = self.scroll_baseline
+                dx = index.x - base_x
+                dy = base_y - index.y  # positivo = el indice subio respecto a la base
+                if abs(dy) >= abs(dx):
+                    if dy > config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_UP")
+                    elif dy < -config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_DOWN")
+                else:
+                    if dx > config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_RIGHT")
+                    elif dx < -config.SCROLL_DIRECTION_THRESHOLD:
+                        events.append("SCROLL_LEFT")
         else:
-            self.prev_scroll_y = None
+            self.scroll_baseline = None
+
+        # Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): los 8
+        # sellos Naruto de 1 mano (Tora/Ushi/U/Uma/Hitsuji/Saru/Inu/I) se
+        # borraron aca - AUDIT.md midio que 6 de 8 no correspondian a ningun
+        # sello real (los 14 sellos canonicos son de 2 manos). Ahora los
+        # detecta el modelo YOLOX cuando hay 2 manos en cuadro (ver Y-01/Y-02/
+        # Y-03, `hand_sign_tracker.py`/main.py). JJK_MEGUMI queda igual: no es
+        # un sello Naruto y el modelo no lo cubre. `_naruto_seal` sigue
+        # guardando el EVENTO completo para reusar el mismo hold-state-machine
+        # de abajo (mismo truco que el bloque de 2 manos, ver
+        # `_process_two_hand_gestures`).
+        _naruto_seal = "JJK_MEGUMI" if pinch_winner is None and not two_hand_active and _is_jjk_megumi(pts) else None
+
+        # TASK-062 fix (verificado en camara real, 2026-08-27): un solo
+        # frame de parpadeo a "ningun sello" (ruido de landmark, no un
+        # cambio real de pose) ya no reinicia el hold entero -
+        # NARUTO_SEAL_MISS_TOLERANCE frames de gracia antes de tirar el
+        # progreso, mismo principio que PINCH_CONFIRM_FRAMES pero para no
+        # PERDER una confirmacion en curso en vez de para no adelantarla.
+        if _naruto_seal is not None:
+            if self._naruto_hold_seal != _naruto_seal:
+                self._naruto_hold_seal = _naruto_seal
+                self._naruto_hold_start = now
+            elif self._naruto_hold_start is None:
+                self._naruto_hold_start = now
+            elif now - self._naruto_hold_start > config.NARUTO_SEAL_HOLD_SECONDS:
+                events.append(_naruto_seal)
+                self._naruto_hold_start = None
+            self._naruto_miss_tolerance.observe(True)
+        elif self._naruto_hold_seal is not None:
+            if not self._naruto_miss_tolerance.observe(False):
+                self._naruto_hold_seal = None
+                self._naruto_hold_start = None
+
+        # TASK-072 (Fase 7): Korean finger heart. Pulgar cerca del PRIMER
+        # nudillo del indice (landmark 6), NO de la punta (eso ya es
+        # PINCH_CLICK, d_thumb_index) - la distincion geometrica que
+        # design.md §7.2 pide, y lo que hace que esta forma nunca pueda
+        # ganar pinch_winner=="index" (`d_thumb_index >= PINCH_CLICK` es
+        # estructuralmente incompatible con el umbral de PINCH_CLICK).
+        # `_fingers_curled(pts, 8, 12, 16, 20)` se agrego DESPUES de que el
+        # test de colision encontrara que silence_hand() (pulgar y primer
+        # nudillo del indice coincidentes por construccion, sin relacion
+        # alguna con este gesto) satisfacia igual las 2 condiciones de
+        # arriba - SILENCE exige los 4 dedos extendidos, este gesto es un
+        # puno con solo el pulgar cruzado, asi que la curvatura los separa
+        # estructuralmente (mismo tipo de hallazgo que el de `fist_hand()` en
+        # la Fase 4, ver ARCHITECTURE.md). Sostenido (no edge-triggered como
+        # PINCH_DOWN) para que un toque-y-suelta rapido nunca resuelva a
+        # KOREAN_HEART - mismo mecanismo que LOCK_SESSION/Shaka.
+        d_thumb_index_pip = self._dist3(thumb, pts[6], w, h)
+        korean_heart_shape = (
+            pinch_winner is None
+            and not two_hand_active
+            and d_thumb_index_pip < config.KOREAN_HEART_CONTACT_THRESHOLD
+            and d_thumb_index >= config.PINCH_CLICK
+            and _fingers_curled(pts, 8, 12, 16, 20)
+        )
+        if korean_heart_shape:
+            if self._korean_heart_hold_start is None:
+                self._korean_heart_hold_start = now
+            elif now - self._korean_heart_hold_start > config.KOREAN_HEART_HOLD_SECONDS:
+                events.append("KOREAN_HEART")
+                self._korean_heart_hold_start = None
+        else:
+            self._korean_heart_hold_start = None
 
         # Click izquierdo / drag / selección de tecla HUD (edge-triggered).
         # Suprimido mientras las 2 manos hacen el pinch-zoom, para no disparar un click
         # de paso con la mano que termina siendo "primaria".
         is_pinching = pinch_winner == "index" and d_thumb_index < config.PINCH_CLICK and not suppress_pinch
-        if is_pinching and not self.was_pinching and now - self.last_click_time > config.CLICK_COOLDOWN:
+        if is_pinching and not self.was_pinching and self.cooldowns.try_fire(COOLDOWN_CLICK):
             events.append("PINCH_DOWN")
-            self.last_click_time = now
         elif not is_pinching and self.was_pinching:
             events.append("PINCH_UP")
+            # C-02 (WORKPLAN.md §10): clasificar el click recien completado.
+            # COOLDOWN_CLICK (300ms) es mas chico que el intervalo de doble
+            # click de Windows (~500ms) - un segundo PINCH_DOWN genuino y
+            # rapido puede llegar a estar bloqueado por el cooldown (evento
+            # jamas emitido), pero `was_pinching` igual transiciona a False
+            # aca sin importar el cooldown, asi que este PINCH_UP SI se
+            # emite. No hay forma de "revivir" un PINCH_DOWN ya perdido -
+            # quien despache DOUBLE_CLICK sintetiza el click completo el
+            # mismo, re-anclado a la posicion de pantalla del primero (ver
+            # main.py). reset() del cooldown para que el bypass no bloquee
+            # al SIGUIENTE click normal (no se acumula: DoubleClickDetector
+            # ya limpia su propio streak tras un "double", un tercer click
+            # rapido arranca un par nuevo, nunca un triple).
+            if self._double_click_detector.register_click() == "double":
+                self.cooldowns.reset(COOLDOWN_CLICK)
+                events.append("DOUBLE_CLICK")
         self.was_pinching = is_pinching
 
-        # Click derecho (edge-triggered). Cooldown propio (last_right_click_time) -
+        # Click derecho (edge-triggered). Cooldown propio (COOLDOWN_RIGHT_CLICK) -
         # antes compartia last_click_time con el click izquierdo, asi que un click
         # izquierdo reciente podia "tragarse" un click derecho genuino y no
         # ambiguo hecho poco despues (encontrado documentando TASK-055, arreglado
@@ -420,13 +904,66 @@ class GestureEngine:
         is_right_pinching = (
             not two_hand_active and pinch_winner == "middle" and d_thumb_middle < config.PINCH_RIGHT_CLICK
         )
-        if (
-            is_right_pinching
-            and not self.was_right_pinching
-            and now - self.last_right_click_time > config.RIGHT_CLICK_COOLDOWN
-        ):
+        if is_right_pinching and not self.was_right_pinching and self.cooldowns.try_fire(COOLDOWN_RIGHT_CLICK):
             events.append("RIGHT_CLICK")
-            self.last_right_click_time = now
         self.was_right_pinching = is_right_pinching
+
+        # C-03 (WORKPLAN.md §10): swipe - puño cerrado, 1 mano, movimiento
+        # rapido. Gate de pose (_is_fist) es la forma que queda libre en una
+        # superficie ya saturada: _is_fist() hoy solo participa en gestos de
+        # 2 manos y en 3 poses de 1 mano que SI matchean _is_fist (verificado
+        # contra el censo de fixtures existente, no solo razonado) - NARUTO_SARU
+        # y NARUTO_I (se distinguen por la DIRECCION del pulgar, que
+        # _is_fist ni chequea) ya quedan cubiertos por el gate de "hold de
+        # sello en progreso" (se activa desde el primer cuadro que el sello
+        # se reconoce, antes de completar su propio hold); KOREAN_HEART
+        # tambien matchea _is_fist y NO es un "sello" (su hold vive en
+        # _korean_heart_hold_start, no en _naruto_hold_seal) - se agrega
+        # explicito aca, si no un movimiento rapido de muñeca entrando a esa
+        # pose podria disparar tambien un swipe. Reset() explicito cuando se
+        # pierde la pose - una ventana a medio abrir no puede sobrevivir a
+        # un cambio de gesto. Rastrea la muñeca (pts[0], no el indice) - en
+        # un puño el resto de los dedos esta curvado y es un proxy de
+        # posicion mas ruidoso que la muñeca para el movimiento global de la
+        # mano.
+        _swipe_gate = (
+            _is_fist(pts)
+            and not two_hand_active
+            and pinch_winner is None
+            and self._naruto_hold_seal is None
+            and not external_seal_in_progress
+            and self._korean_heart_hold_start is None
+        )
+        if _swipe_gate:
+            swipe_event = self._swipe_detector.update(pts[0].x, pts[0].y, now)
+            if swipe_event is not None:
+                events.append(swipe_event)
+        else:
+            self._swipe_detector.reset()
+
+        # C-01 (WORKPLAN.md §10): dwell-click - opt-in, sin forma de mano
+        # propia (opera sobre el indice normalizado, igual que el puntero).
+        # Suspendido (con reset() explicito, no solo ignorado - si no, el
+        # progreso sigue acumulando por debajo) mientras cualquier otro
+        # candidato este activo: un pinch, un hold de sello NARUTO_/JJK_ en
+        # curso, o un gesto de 2 manos. "La app en pausa" ya esta cubierto -
+        # ese caso ni siquiera llega aca (return temprano + _reset_single_hand_state()).
+        if config.DWELL_CLICK_ENABLED:
+            if (
+                pinch_winner is not None
+                or two_hand_active
+                or self._naruto_hold_seal is not None
+                or external_seal_in_progress
+            ):
+                self._dwell_detector.reset()
+                self.dwell_progress = 0.0
+            else:
+                self.dwell_progress = self._dwell_detector.update(index.x, index.y)
+                if self.dwell_progress >= 1.0:
+                    events.append("DWELL_CLICK")
+                    self._dwell_detector.reset()
+                    self.dwell_progress = 0.0
+        else:
+            self.dwell_progress = 0.0
 
         return screen_xy, cam_xy, events

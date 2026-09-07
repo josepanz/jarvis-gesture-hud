@@ -12,9 +12,12 @@ relative to current behavior, which is what "Existing default behavior preserved
 (TASK-023) actually requires without touching GestureEngine itself.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from jarvis import config
+
+_logger = logging.getLogger("jarvis.profiles")
 
 SUGGESTED_PROFILE_NAMES = ("default", "coding", "gaming", "presentation", "media")
 
@@ -42,11 +45,26 @@ class Profile:
     dwell: dict = field(default_factory=dict)
     hud: dict = field(default_factory=dict)
     context_rules: dict = field(default_factory=dict)
+    # TASK-075 (Fase 8, design.md §5.2): {nombre_de_atajo: "ctrl+alt+t"} y
+    # {"MACRO:<nombre>": [pasos]} - un gesture_bindings[event] puede apuntar
+    # a una clave de cualquiera de los 2 (ademas de al vocabulario fijo de
+    # VALID_ACTIONS), resuelto en main.py._dispatch_bound_event().
+    custom_shortcuts: dict = field(default_factory=dict)
+    macros: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.name, str) or not self.name:
             raise ValueError(f"name must be a non-empty string, got {self.name!r}")
-        for field_name in ("gesture_bindings", "sensitivity", "cooldowns", "dwell", "hud", "context_rules"):
+        for field_name in (
+            "gesture_bindings",
+            "sensitivity",
+            "cooldowns",
+            "dwell",
+            "hud",
+            "context_rules",
+            "custom_shortcuts",
+            "macros",
+        ):
             value = getattr(self, field_name)
             if not isinstance(value, dict):
                 raise ValueError(f"{field_name} must be a dict, got {value!r}")
@@ -141,3 +159,124 @@ class ProfileManager:
         except (AttributeError, TypeError):
             value = None
         return value if value is not None else _SAFE_DEFAULTS["dwell_duration_ms"]
+
+    # TASK-075 (Fase 8, design.md §5.2/spec.md §8.6): (de)serializacion a/desde
+    # el schema versionado que persiste `jarvis.core.config_store`.
+    # gesture_bindings/custom_shortcuts/macros/context_rules (A-03b) se
+    # persisten - sensitivity/cooldowns/dwell/hud siguen siendo solo-codigo por
+    # ahora (spec.md #8 no los pide persistidos, y `apply.md` §14 pide no
+    # inventar una segunda representacion en memoria para lo que SI se
+    # persiste: este metodo lee directo de los `Profile` ya vivos, no de una
+    # copia aparte).
+    def to_dict(self):
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "profiles": {name: _profile_to_dict(profile) for name, profile in self._profiles.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        """Nunca lanza ante datos malformados/vacios - construye un
+        ProfileManager con los defaults de codigo de siempre en ese caso
+        (spec.md #8.6: "fail gracefully (defaults) on a missing/corrupt
+        file"). El perfil "default" ya sembrado (sensitivity/cooldowns/dwell
+        de `_default_profile()`) se ACTUALIZA con lo persistido en vez de
+        reemplazarse entero - esos campos nunca vinieron del disco."""
+        manager = cls()
+        profiles_data = data.get("profiles") if isinstance(data, dict) else None
+        if not isinstance(profiles_data, dict):
+            return manager
+        for name, profile_data in profiles_data.items():
+            if not isinstance(profile_data, dict):
+                continue
+            if name in manager._profiles:
+                _apply_persisted_fields(manager._profiles[name], profile_data)
+            else:
+                manager.register(_profile_from_dict(name, profile_data))
+        return manager
+
+
+# A-03b (WORKPLAN.md §9, `hardening-and-polish`): 1 -> 2, se agrega
+# context_rules a lo persistido. Un archivo v1 no tiene esa clave -
+# _validated_dict_field() ya trata una clave ausente como {} (ver mas abajo),
+# asi que un archivo v1 sigue leyendose igual, sin necesidad de una rama por
+# version: la compatibilidad hacia atras es gratis por como ya funciona el
+# resto de los campos opcionales de este dict.
+SCHEMA_VERSION = 2
+
+
+def _profile_to_dict(profile):
+    return {
+        "gesture_bindings": dict(profile.gesture_bindings),
+        "custom_shortcuts": dict(profile.custom_shortcuts),
+        "macros": {name: list(steps) for name, steps in profile.macros.items()},
+        "context_rules": {app: dict(bindings) for app, bindings in profile.context_rules.items()},
+    }
+
+
+def _validated_dict_field(data, key):
+    """H-02: `data[key]` si es un dict; si no (JSON sintacticamente valido
+    pero con el tipo equivocado - p. ej. `gesture_bindings` guardado como
+    lista), lo descarta con un log y cae al default de codigo ({}) en vez
+    de dejar que el `.update()`/`.items()` de mas arriba explote."""
+    value = data.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _logger.warning("descartando campo persistido %r de tipo invalido: %r", key, value)
+        return {}
+    return value
+
+
+def _valid_macros(macros_data):
+    """H-01: descarta, con log, cualquier macro cuyos pasos no tengan una
+    forma ejecutable (kind desconocido, pasos que no son una lista de
+    dicts) - un binding roto en el arranque es preferible a un arranque
+    roto. Reusa build_macro_steps() como validador en vez de duplicar acá
+    el vocabulario de kinds de macro.py."""
+    from jarvis.actions.macro import build_macro_steps
+
+    valid = {}
+    for name, steps in macros_data.items():
+        try:
+            build_macro_steps(steps)
+        except (ValueError, TypeError, AttributeError) as exc:
+            _logger.warning("descartando macro %r con pasos invalidos (%s): %r", name, exc, steps)
+            continue
+        valid[name] = list(steps)
+    return valid
+
+
+def _valid_context_rules(rules_data):
+    """A-03b: valida `{app_name: {gesture_type: action_name}}` - cada entrada
+    de app tiene que ser un dict a su vez. `_validated_dict_field()` ya
+    garantiza que `rules_data` en si es un dict, pero JSON sintacticamente
+    valido permite igual `{"notepad.exe": ["no", "es", "un", "dict"]}`: eso
+    pasa ese primer filtro y explota mas arriba, en
+    `resolve_contextual_intent()` (`app_bindings.get(gesture_type)` sobre algo
+    sin `.get()`). Descarta solo la entrada de app invalida - mismo criterio
+    que `_valid_macros()` con una macro rota."""
+    valid = {}
+    for app_name, bindings in rules_data.items():
+        if not isinstance(bindings, dict):
+            _logger.warning("descartando context_rules de la app %r de tipo invalido: %r", app_name, bindings)
+            continue
+        valid[app_name] = dict(bindings)
+    return valid
+
+
+def _apply_persisted_fields(profile, data):
+    profile.gesture_bindings.update(_validated_dict_field(data, "gesture_bindings"))
+    profile.custom_shortcuts.update(_validated_dict_field(data, "custom_shortcuts"))
+    profile.macros.update(_valid_macros(_validated_dict_field(data, "macros")))
+    profile.context_rules.update(_valid_context_rules(_validated_dict_field(data, "context_rules")))
+
+
+def _profile_from_dict(name, data):
+    return Profile(
+        name=name,
+        gesture_bindings=dict(_validated_dict_field(data, "gesture_bindings")),
+        custom_shortcuts=dict(_validated_dict_field(data, "custom_shortcuts")),
+        macros=_valid_macros(_validated_dict_field(data, "macros")),
+        context_rules=_valid_context_rules(_validated_dict_field(data, "context_rules")),
+    )

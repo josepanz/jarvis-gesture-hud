@@ -3,6 +3,15 @@
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
+# V-04 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §8), verificado en
+# camara real (José, 2026-09-07): a 0.25 el puntero se sintio "impreciso Y con
+# mucha latencia... no se siente natural", el sintoma que se queria arreglar
+# no mejoro y se sumo lag perceptible (a 0.25, ~10 frames para asentarse tras
+# un movimiento). Revertido a 0.35 (el valor previo a 2026-08-30) - bajar el
+# alpha no resolvio el "impreciso" reportado entonces, asi que ese sintoma
+# probablemente viene de otro lado (deteccion/mapeo, no el suavizado). Sigue
+# sin medicion fina; si "impreciso" reaparece a 0.35, no volver a bajar este
+# valor a ciegas, investigar la fuente antes (ver hallazgo nuevo en §2).
 EMA_ALPHA = 0.35
 POINTER_MARGIN = 0.1  # recorte de bordes al mapear cámara -> pantalla
 
@@ -22,8 +31,34 @@ PINCH_ZOOM = 25
 PINCH_VOLUME = 28
 PINCH_SCREENSHOT = 20
 PINCH_CONFIRM_FRAMES = 2  # frames seguidos bajo el umbral antes de confirmar un pinch - absorbe ruido de un solo frame
+# H-26/V-05 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2/§8),
+# confirmado en camara real (José, 2026-09-07: "se confunde con click derecho
+# y no hace enseguida"). Causa real: PINCH_RIGHT_CLICK (20px) es MAS LAXO que
+# JJK_SUKUNA_CONTACT_THRESHOLD (15px, gestures.py), asi que al cerrar pulgar y
+# medio para un snap, la distancia cruza 20px varios frames ANTES de llegar a
+# los 15px que arma el detector de Sukuna - con solo PINCH_CONFIRM_FRAMES (2,
+# ~100ms) el click derecho ya confirma y dispara ahi, antes de que el snap
+# tenga chance de completarse. Confirmacion mas larga solo para este dedo
+# (no para los demas pinches, que no compiten con ningun gesto de impulso):
+# un snap real sigue cerrando mas alla de 15px dentro de esta ventana y nunca
+# llega a sostenerse quieto en la banda 15-20px lo suficiente para confirmar;
+# un click derecho deliberado (pulgar+medio sostenidos, sin intencion de
+# soltar) si la sostiene. Retrasa el click derecho genuino ~150-200ms mas que
+# antes - aceptado a cambio de no disparar solo junto con un snap. Razonado,
+# no medido en camara todavia; si el click derecho se siente demasiado lento
+# ahora, medir antes de bajarlo de nuevo a ciegas.
+RIGHT_CLICK_CONFIRM_FRAMES = 6
 PALM_OPEN_MIN_SPREAD = 60
 SILENCE_TUCK_MAX = 40
+
+# Hallazgo de camara real (José, 2026-08-30): el pinch de click (indice+pulgar)
+# se confundia con Shaka y disparaba LOCK_SESSION sin querer - ver el
+# comentario de _is_shaka() en gestures.py para el analisis completo. 0.12
+# normalizado (~77px en un frame de 640px) - bien por encima del ruido de
+# mano relajada en indice (~0.024 normalizado, ver arriba) y de cualquier
+# pinch intencional, bien por debajo de la separacion esperable pulgar-indice
+# de un Shaka genuino. Razonado, no medido en camara todavia.
+SHAKA_MIN_THUMB_INDEX_GAP = 0.12
 
 # Cooldowns (segundos)
 CLICK_COOLDOWN = 0.3
@@ -34,9 +69,87 @@ SILENCE_COOLDOWN = 0.8
 LOCK_HOLD_SECONDS = 1.5
 CLOSE_APP_HOLD_SECONDS = 1.5
 PAUSE_HOLD_SECONDS = 1.2
+# H-27 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §2), confirmado en
+# camara real (José, 2026-09-07: al hacer click cerca de "Inicio" - una mano
+# activa cerca del borde de pantalla/cuadro - se confunde con el gesto de 2
+# punos de pausa). `both_fists` solo exigia hasta ahora que las 2 manos sean
+# "de la misma persona" (TWO_HAND_MAX_CENTER_DISTANCE_FRACTION=0.55, un gate
+# laxo pensado para descartar una SEGUNDA PERSONA de fondo, no para exigir
+# cercania real) - una mano activa estirada hacia un borde y la otra en reposo
+# en cualquier otra parte del cuadro (ej. sobre el teclado, con los dedos
+# naturalmente curvados) pasa ese gate sin problema. Un gesto de pausa
+# deliberado (2 punos levantados juntos frente a la camara, ver docstring de
+# _process_two_hand_gestures) tiene las manos mucho mas cerca entre si que
+# eso - mismo principio que JJK_GOJO_MAX_DISTANCE_FRACTION (0.30) para el
+# marco de Gojo. Razonado, no medido en camara todavia; no resuelve un
+# eventual falso _is_fist de la propia mano activa por landmarks ruidosos
+# cerca del borde del cuadro (sin diagnosticar, ver H-27 en WORKPLAN.md).
+PAUSE_MAX_DISTANCE_FRACTION = 0.35
 META_HOLD_SECONDS = 0.6
 VOLUME_DELTA_THRESHOLD = 0.03
 TWO_HAND_ZOOM_DELTA_PX = 15
+
+# Hallazgo de camara real (José, 2026-08-30): rediseño de scroll - la
+# direccion ahora sale de la distancia normalizada entre la punta del indice
+# y la posicion "base" fijada al entrar al gesto (no de un delta cuadro a
+# cuadro, ver gestures.py). Mas grande que VOLUME_DELTA_THRESHOLD a
+# proposito: ese mide un delta INSTANTANEO entre 2 cuadros consecutivos
+# (siempre chico); esto mide un desplazamiento ACUMULADO desde que se levanto
+# la mano (naturalmente mas grande). Razonado, no medido en camara todavia.
+SCROLL_DIRECTION_THRESHOLD = 0.06
+
+NARUTO_SEAL_HOLD_SECONDS = 0.6  # TASK-062: mismo orden que META_HOLD_SECONDS - deliberado pero rapido
+# Verificado en camara real (2026-08-27): incluso con la forma correcta
+# sostenida a proposito, la clasificacion parpadea a None por 1 frame suelto
+# de tanto en tanto (ruido de landmark/deteccion, no un cambio real de
+# pose). Sin tolerancia, CUALQUIER parpadeo reinicia el hold entero y hace
+# casi imposible acumular 0.6s seguidos en la practica. Mismo principio que
+# PINCH_CONFIRM_FRAMES (TASK-055/1.5), aplicado del lado de "no perder el
+# progreso" en vez de "no confirmar de mas".
+NARUTO_SEAL_MISS_TOLERANCE = 3  # frames seguidos sin match tolerados antes de reiniciar el hold
+
+# TASK-064/065 (Fase 5): sellos Naruto de 2 manos - umbrales RAZONADOS, no
+# medidos en camara real todavia (a diferencia de los de Fase 4, que fueron
+# recalibrados con datos reales despues de fallar en vivo). Pendiente de
+# verificacion real, ver ARCHITECTURE.md.
+NARUTO_TWOHAND_HOLD_SECONDS = 1.2  # igual que PAUSE_HOLD_SECONDS - un gesto de 2 manos mas complejo
+# Y-04 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): NARUTO_TWOHAND_CLASP_MAX_DISTANCE_FRACTION
+# y NARUTO_TWOHAND_FAN_MIN/MAX_DISTANCE_FRACTION se borraron aca - eran los
+# umbrales de la deteccion geometrica de Ne/Mi/Kai/Tatsu/Tori (proxy de
+# distancia/curvatura), reemplazada por el modelo YOLOX.
+
+# TASK-068/069 (Fase 6): gestos Jujutsu Kaisen. Umbrales RAZONADOS, no
+# medidos en camara real todavia - misma salvedad que la Fase 5 (Naruto de 2
+# manos), pendiente de la prueba integral final (José pidio explicitamente
+# posponer TODA verificacion en camara a esa fase, en vez de una por fase
+# como en Fase 4).
+JJK_SUKUNA_CONTACT_THRESHOLD = 15  # mas ajustado que PINCH_RIGHT_CLICK (20): un snap es un toque decidido, no un roce casual
+JJK_SUKUNA_RELEASE_THRESHOLD = 55  # separacion clara, por encima del ruido de mano relajada documentado arriba (~19.2px en medio, el dedo real que alimenta este detector via d_thumb_middle)
+# Hallazgo de camara real (José, 2026-08-30): "el chasquido tardo en
+# responder" - subido de 0.35 a 0.6s. Un snap DELIBERADO frente a una
+# webcam (no un chasquido veloz de verdad) probablemente tarda mas de 350ms
+# en completar el contacto->separacion; con la ventana vieja, un intento un
+# poco lento nunca llegaba a completarse dentro de ella y el detector
+# expiraba sin disparar (ver ImpulseDetector, temporal_gesture.py) - eso se
+# percibe como "no responde" o "tarda", no como una accion mas lenta.
+# JJK_SUKUNA_CONTACT_THRESHOLD (15px) sigue mas ajustado que PINCH_RIGHT_CLICK
+# (20px), asi que ensanchar la ventana no aumenta el riesgo de colision ya
+# documentado con RIGHT_CLICK (ese se resuelve por el umbral de contacto, no
+# por la ventana). Razonado, no medido en camara todavia.
+JJK_SUKUNA_MAX_WINDOW_SECONDS = 0.6
+JJK_GOJO_ANGLE_TOLERANCE_DEGREES = 35  # tolerancia sobre el angulo objetivo de 90 grados entre pulgar e indice
+JJK_GOJO_MAX_DISTANCE_FRACTION = 0.30  # manos "juntas" para el marco, mas laxo que el clasp de NARUTO (0.20) - no exige contacto
+JJK_GOJO_MAX_AVG_WRIST_Y = 0.55  # ambas munecas en la mitad superior del frame (aprox. altura de pecho/cara)
+
+# TASK-071/072 (Fase 7): gestos comunes. Umbrales RAZONADOS, no medidos en
+# camara real - misma salvedad que las Fases 5/6, pospuesta a la prueba
+# integral final.
+CLAP_CONTACT_MAX_DISTANCE_FRACTION = 0.12  # centros de palma bien juntos (mas ajustado que el "clasp" de 0.20 - un aplauso es contacto real)
+CLAP_RELEASE_MIN_DISTANCE_FRACTION = 0.30  # separacion clara despues del contacto
+CLAP_MAX_WINDOW_SECONDS = 0.4  # un aplauso es rapido; acercarse+alejarse sin apuro no cuenta
+
+KOREAN_HEART_CONTACT_THRESHOLD = 20  # pulgar cerca del PRIMER nudillo del indice (landmark 6) - no de la punta, eso es PINCH_CLICK
+KOREAN_HEART_HOLD_SECONDS = 1.0  # mismo mecanismo que LOCK_SESSION - sostenido, no edge-triggered como PINCH_DOWN
 
 MAX_HANDS = 2
 MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False = camara trasera/externa.
@@ -56,6 +169,37 @@ MIRROR_CAMERA_DEFAULT = True  # True = camara frontal/selfie (se espeja). False 
 MIN_HAND_AREA_FRACTION = 0.0015
 TWO_HAND_MAX_CENTER_DISTANCE_FRACTION = 0.55
 
+# TASK-060c (Fase 3B): filtro de propiedad anatomica mano-cuerpo via
+# MediaPipe Pose. Deshabilitado por default: medido en camara real
+# (2026-08-27) que PoseLandmarker cuesta ~10.4ms/frame promedio (p95 ~12.6ms),
+# practicamente el mismo costo que HandLandmarker (~10.0ms/frame promedio) -
+# activarlo DUPLICA el costo de inferencia por frame (~20ms combinado), un
+# costo real y no trivial contra el presupuesto de "menos de 1 frame" de
+# design.md #25 (~16-33ms a 30-60fps). No es un costo "claramente malo" (el
+# heuristico de TASK-056 sigue funcionando solo, sin esto), pero tampoco es
+# gratis - se deja togglable y apagado por default en vez de descartarlo,
+# per design.md §3B.3. Ver ARCHITECTURE.md para el detalle completo.
+POSE_HAND_OWNERSHIP_ENABLED = False
+# Distancia maxima (fraccion de la diagonal del frame) entre la muñeca que
+# reporta HandTracker y la muñeca correspondiente que reporta PoseTracker
+# para considerar que son el mismo punto fisico (2 modelos distintos
+# detectando el mismo punto del cuerpo, no 2 manos distintas - por eso el
+# margen es chico, muy por debajo de TWO_HAND_MAX_CENTER_DISTANCE_FRACTION
+# de arriba, que es entre 2 MANOS DISTINTAS de la misma persona). No pudo
+# verificarse con datos reales de cuerpo completo en esta sesion (la camara
+# disponible estaba encuadrada en la mano/escritorio, no en el torso) -
+# valor razonado, no medido; documentado como limitacion conocida.
+POSE_MAX_WRIST_DISTANCE_FRACTION = 0.08
+
+# Y-03 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): a diferencia de
+# POSE_HAND_OWNERSHIP_ENABLED (arriba), este va en True por default. Medido
+# en esta maquina (AUDIT.md): el modelo YOLOX-Nano de sellos cuesta 8.1ms/frame
+# promedio en CPU, MENOS que el HandLandmarker que ya corre siempre (10.0ms/frame) -
+# y encima solo se invoca cuando hay 2 manos en cuadro (unica situacion en la
+# que un sello es posible), asi que en el uso normal (1 mano, puntero/click)
+# ni siquiera paga eso.
+HAND_SIGN_MODEL_ENABLED = True
+
 CAPTURES_DIR = "captures"
 
 HUD_KEY_COLOR = (255, 0, 0)
@@ -64,3 +208,26 @@ HUD_TEXT_COLOR = (255, 255, 255)
 HUD_START_Y = 50
 HUD_ROW_HEIGHT = 35
 HUD_KEY_WIDTH = 52
+
+# TASK-057 (Fase 2): overlay toggleable de landmarks/cuadrante de mano.
+HAND_OVERLAY_PRIMARY_COLOR = (0, 255, 0)  # mano primaria (BGR, verde)
+HAND_OVERLAY_OTHER_COLOR = (120, 120, 120)  # cualquier otra mano detectada (BGR, gris)
+
+# C-01 (WORKPLAN.md §10, workflow 8): dwell-click - apuntar y sostener, sin
+# pinch. Apagado por defecto: DwellDetector no exige ninguna forma de mano
+# propia, asi que con esto siempre activo dejar la mano quieta (ej. apoyada
+# en el escritorio) clickearia sola - su unico gate real es la quietud.
+DWELL_CLICK_ENABLED = False
+# Mas largo que NARUTO_SEAL_HOLD_SECONDS*1000 (600ms) a proposito:
+# DwellDetector.DEFAULT_DURATION_MS (600) coincide EXACTAMENTE con ese hold -
+# sostener cualquier sello de 1 mano completaria tambien el dwell en el mismo
+# instante. Razonado, no medido en camara todavia (ver V-08): el numero final
+# tiene que ser comodo de completar a proposito e incomodo de completar sin
+# querer.
+DWELL_DURATION_MS = 900
+
+# Y-07 (`openspec/changes/hand-sign-fidelity/WORKPLAN.md`): secuencias de
+# sellos -> una accion. Mismo valor que `sign_interval` del proyecto original
+# (NARUTO-HandSignDetection) - copiado directo de una referencia que ya
+# funciona, no medido en esta camara.
+NARUTO_SEQUENCE_INTERVAL_SECONDS = 2.0

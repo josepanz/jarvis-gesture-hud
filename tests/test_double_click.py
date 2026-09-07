@@ -58,6 +58,25 @@ class DoubleClickDetectorTests(unittest.TestCase):
         clock.advance(0.1)
         self.assertEqual(d.register_click(), "single")
 
+    def test_last_interval_ms_records_the_real_gap_between_clicks(self):
+        # V-09: diagnostico en vivo para verificar en camara real con el
+        # numero real, incluso cuando el segundo click no cierra un doble.
+        clock = FakeClock()
+        d = DoubleClickDetector(clock=clock)
+        self.assertIsNone(d.last_interval_ms)  # el primer click no tiene par anterior
+        d.register_click()
+        clock.advance(0.3)
+        d.register_click()
+        self.assertAlmostEqual(d.last_interval_ms, 300.0, places=6)
+
+    def test_last_interval_ms_is_recorded_even_when_the_gap_is_too_long(self):
+        clock = FakeClock()
+        d = DoubleClickDetector(clock=clock)
+        d.register_click()
+        clock.advance(0.6)
+        self.assertEqual(d.register_click(), "single")  # no cierra el doble
+        self.assertAlmostEqual(d.last_interval_ms, 600.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

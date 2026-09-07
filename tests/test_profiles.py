@@ -145,5 +145,202 @@ class ProfileSensitivityTests(unittest.TestCase):
         self.assertEqual(pm.get_setting("made_up_setting", default="fallback"), "fallback")
 
 
+class ProfileSerializationTests(unittest.TestCase):
+    def test_custom_shortcuts_and_macros_default_to_empty_dicts(self):
+        p = Profile(name="x")
+        self.assertEqual(p.custom_shortcuts, {})
+        self.assertEqual(p.macros, {})
+
+    def test_custom_shortcuts_and_macros_must_be_dicts(self):
+        with self.assertRaises(ValueError):
+            Profile(name="x", custom_shortcuts=["not", "a", "dict"])
+        with self.assertRaises(ValueError):
+            Profile(name="x", macros=["not", "a", "dict"])
+
+
+class ProfileManagerToFromDictTests(unittest.TestCase):
+    def test_to_dict_round_trips_through_from_dict(self):
+        pm = ProfileManager()
+        pm.active.gesture_bindings["NARUTO_TORA"] = "SCREENSHOT"
+        pm.active.custom_shortcuts["MY_SHORTCUT"] = "ctrl+alt+t"
+        pm.active.macros["MACRO:greeting"] = [
+            {"kind": "type-text", "value": "hola"},
+            {"kind": "wait-ms", "value": 300},
+            {"kind": "press-key", "value": "enter"},
+        ]
+
+        pm.active.context_rules["notepad.exe"] = {"NARUTO_TORA": "VOLUME_UP"}
+
+        data = pm.to_dict()
+        # A-03b: 1 -> 2, se agrega context_rules a lo persistido.
+        self.assertEqual(data["schema_version"], 2)
+
+        restored = ProfileManager.from_dict(data)
+        self.assertEqual(restored.active.gesture_bindings, pm.active.gesture_bindings)
+        self.assertEqual(restored.active.custom_shortcuts, pm.active.custom_shortcuts)
+        self.assertEqual(restored.active.macros, pm.active.macros)
+        self.assertEqual(restored.active.context_rules, pm.active.context_rules)
+
+    def test_from_dict_preserves_the_default_profile_safe_settings(self):
+        # gesture_bindings/custom_shortcuts/macros no son lo unico que trae
+        # "default" - sensitivity/cooldowns/dwell nunca vienen del disco, y
+        # from_dict() no debe perderlos al aplicar lo persistido.
+        pm = ProfileManager.from_dict({"schema_version": 1, "profiles": {"default": {"gesture_bindings": {}}}})
+        self.assertEqual(pm.get_setting("cursor_sensitivity"), 1.0)
+
+    def test_from_dict_registers_non_default_profiles_too(self):
+        data = {"schema_version": 1, "profiles": {"default": {}, "gaming": {"gesture_bindings": {"CLAP": "MUTE"}}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertIn("gaming", pm.profile_names)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.gesture_bindings, {"CLAP": "MUTE"})
+
+    def test_from_dict_with_missing_or_malformed_data_falls_back_to_defaults(self):
+        for malformed in ({}, {"profiles": "not a dict"}, {"profiles": {"default": "not a dict"}}, None, []):
+            with self.subTest(malformed=malformed):
+                pm = ProfileManager.from_dict(malformed)
+                self.assertEqual(pm.active.name, "default")
+                self.assertEqual(pm.active.gesture_bindings, {})
+
+    def test_from_dict_discards_macro_with_unknown_step_kind(self):
+        # H-01: un bindings.json editado a mano/corrupto no debe impedir el
+        # arranque - la macro invalida se descarta, no rompe from_dict().
+        data = {
+            "schema_version": 1,
+            "profiles": {"default": {"macros": {"MACRO:rota": [{"kind": "no-existe"}]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.macros, {})
+
+    def test_from_dict_discards_macro_with_non_list_steps(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {"default": {"macros": {"MACRO:rota": "no-soy-una-lista"}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.macros, {})
+
+    def test_from_dict_keeps_valid_macro_and_discards_invalid_sibling(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {
+                "default": {
+                    "macros": {
+                        "MACRO:ok": [{"kind": "press-key", "value": "a"}],
+                        "MACRO:rota": [{"kind": "no-existe"}],
+                    }
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(list(pm.active.macros.keys()), ["MACRO:ok"])
+
+    def test_from_dict_discards_macro_for_a_non_default_profile_too(self):
+        data = {
+            "schema_version": 1,
+            "profiles": {"gaming": {"macros": {"MACRO:rota": [{"kind": "no-existe"}]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.macros, {})
+
+    def test_from_dict_does_not_raise_for_wrong_types_with_valid_json(self):
+        # H-02: JSON sintacticamente valido con tipos equivocados no debe
+        # explotar mas arriba del filtro de config_store (que solo atrapa
+        # JSON invalido/errores de I/O, no tipos incorrectos).
+        cases = (
+            {"schema_version": 1, "profiles": {"default": {"macros": "no-soy-un-dict"}}},
+            {"schema_version": 1, "profiles": {"default": {"macros": {"m": 42}}}},
+            {"schema_version": 1, "profiles": "tampoco-soy-un-dict"},
+            {"profiles": {"default": {"gesture_bindings": ["lista", "no", "dict"]}}},
+        )
+        for data in cases:
+            with self.subTest(data=data):
+                pm = ProfileManager.from_dict(data)
+                self.assertEqual(pm.active.name, "default")
+
+    def test_from_dict_with_wrong_type_gesture_bindings_falls_back_to_empty(self):
+        data = {"schema_version": 1, "profiles": {"default": {"gesture_bindings": ["lista", "no", "dict"]}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.gesture_bindings, {})
+
+    def test_from_dict_with_wrong_type_custom_shortcuts_falls_back_to_empty(self):
+        data = {"schema_version": 1, "profiles": {"default": {"custom_shortcuts": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.custom_shortcuts, {})
+
+    def test_from_dict_mixed_valid_and_invalid_types_keeps_the_valid_field(self):
+        # Una macro valida y una invalida en el mismo perfil: se conserva la
+        # valida y se descarta la invalida, sin perder ninguna otra.
+        data = {
+            "schema_version": 1,
+            "profiles": {
+                "default": {
+                    "gesture_bindings": {"NARUTO_TORA": "SCREENSHOT"},
+                    "custom_shortcuts": "tipo-incorrecto",
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.gesture_bindings, {"NARUTO_TORA": "SCREENSHOT"})
+        self.assertEqual(pm.active.custom_shortcuts, {})
+
+    def test_from_dict_with_wrong_types_preserves_default_profile_safe_settings(self):
+        # Regresion explicita: sensitivity/cooldowns/dwell del perfil default
+        # nunca vienen del disco y tienen que sobrevivir aunque otros campos
+        # persistidos tengan tipos incorrectos.
+        data = {"schema_version": 1, "profiles": {"default": {"macros": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.get_setting("cursor_sensitivity"), 1.0)
+
+    def test_from_dict_reads_a_v1_file_without_context_rules(self):
+        # A-03b: compatibilidad hacia atras - un archivo de antes de que
+        # existiera esta clave sigue cargando igual, con context_rules vacio.
+        data = {"schema_version": 1, "profiles": {"default": {"gesture_bindings": {"NARUTO_TORA": "SCREENSHOT"}}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+        self.assertEqual(pm.active.gesture_bindings, {"NARUTO_TORA": "SCREENSHOT"})
+
+    def test_from_dict_restores_context_rules_for_a_non_default_profile_too(self):
+        data = {
+            "schema_version": 2,
+            "profiles": {"gaming": {"context_rules": {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        pm.switch_to("gaming")
+        self.assertEqual(pm.active.context_rules, {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}})
+
+    def test_from_dict_discards_context_rules_with_non_dict_top_level(self):
+        data = {"schema_version": 2, "profiles": {"default": {"context_rules": "no-soy-un-dict"}}}
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+
+    def test_from_dict_discards_context_rules_entry_with_non_dict_app_bindings(self):
+        # H-02: JSON sintacticamente valido, pero el valor por app no es un
+        # dict - _validated_dict_field() no lo atrapa (el dict de arriba SI es
+        # un dict), asi que necesita su propio chequeo (_valid_context_rules).
+        data = {
+            "schema_version": 2,
+            "profiles": {"default": {"context_rules": {"notepad.exe": ["no", "es", "un", "dict"]}}},
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {})
+
+    def test_from_dict_keeps_valid_context_rules_entry_and_discards_invalid_sibling(self):
+        data = {
+            "schema_version": 2,
+            "profiles": {
+                "default": {
+                    "context_rules": {
+                        "notepad.exe": {"NARUTO_TORA": "VOLUME_UP"},
+                        "chrome.exe": "no-es-un-dict",
+                    }
+                }
+            },
+        }
+        pm = ProfileManager.from_dict(data)
+        self.assertEqual(pm.active.context_rules, {"notepad.exe": {"NARUTO_TORA": "VOLUME_UP"}})
+
+
 if __name__ == "__main__":
     unittest.main()
