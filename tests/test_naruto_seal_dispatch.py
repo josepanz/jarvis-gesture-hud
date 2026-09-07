@@ -82,6 +82,19 @@ class _AppTestCase(unittest.TestCase):
                 "jarvis.core.config_store.save_bindings",
                 side_effect=lambda data, path=temp_config_path: _real_save(data, temp_config_path),
             ),
+            # Ninguno de los tests de esta familia (_AppTestCase y quien la
+            # importa) verifica comportamiento real de Tk - solo dispatch de
+            # comandos. Sin esto, cada JarvisApp() crea un ScreenOverlay()
+            # (tk.Tk() real) + un SettingsWindow real sobre ese mismo root
+            # (main.py: "SettingsWindow vive sobre el MISMO root de Tk que
+            # ScreenOverlay"). Confirmado en CI (macOS): crear/destruir esa
+            # cantidad de roots de Tk reales, uno por test, en un solo
+            # proceso, sigue terminando en Segmentation fault (exit code 139)
+            # incluso despues de sacar la carga de onnxruntime de encima -
+            # era un problema aparte, acumulativo, no de esta sesion sino de
+            # cuantos JarvisApp() reales van pasando por el mismo proceso.
+            patch("jarvis.main.ScreenOverlay"),
+            patch("jarvis.main.SettingsWindow"),
         ]
         mocks = [p.start() for p in patchers]
         for p in patchers:
