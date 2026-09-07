@@ -191,6 +191,13 @@ de funcionalidad o riesgo de seguridad real · **MEDIO** = bug con workaround ·
 | H-24 | BAJO | claridad | `_dispatch_naruto_seal()` ya no despacha solo sellos |
 | H-25 | BAJO | docs | `ARCHITECTURE.md` y `README.md` citan conteos de tests viejos |
 
+**Nuevos, hallados en Workflow 6 (cámara real, José, 2026-09-07) — sin workflow ni
+tarea asignada todavía, requieren decisión de diseño antes de codificar:**
+
+| H-26 | MEDIO | gestos | Sukuna↔`RIGHT_CLICK` (V-05): confirmado en vivo, "no hace enseguida" además de la colisión ya conocida — posible causa adicional de latencia percibida, no solo el umbral compartido |
+| H-27 | MEDIO | gestos | El gesto de 2 puños (pausa/despausa) se confunde con la intención de click cerca de los bordes/esquinas de pantalla (ej. al ir a "Inicio") — no investigado aún si es geometría de la mano cerca del borde de cuadro o solapamiento real con el umbral de `both_fists` |
+| H-28 | MEDIO | UI/legend | El panel transparente de gestos (`overlay.py`, `init_legend`) ocupa toda la mitad de pantalla del lado elegido, no es minimizable ni tiene scroll — con la lista completa de gestos no entra cómodo. Ya existe `TOGGLE_LEGEND`/alpha, pero no resuelve tamaño/scroll |
+
 **Descartados explícitamente (auditados y NO son bugs — no los "arregles"):**
 
 - El flag `self._llm_resolving` **no** tiene race: tanto el `True` como el `False` se
@@ -1556,13 +1563,39 @@ escribilo con lo que encontraste en vez de borrarla.
       sólo Ne y Mi son correctos, Tori está definido al revés y Kai no existe entre los
       14 canónicos. Reemplazado por Y-V1
 - [ ] V-03 JJK + Clap + corazón coreano
-- [ ] V-04 confirmar o revertir EMA_ALPHA 0.25
-- [ ] V-05 colisión Sukuna ↔ RIGHT_CLICK
+- [x] V-04 confirmar o revertir EMA_ALPHA 0.25 · **revertido a 0.35** (verificado
+      en cámara real, José, 2026-09-07: a 0.25 el puntero se sintió "impreciso
+      y con mucha latencia, tarda en moverse, no se siente natural" — bajar el
+      alpha no arregló el síntoma original y sumó lag perceptible. Commit:
+      pendiente (junto con el resto de esta sesión)
+- [x] V-05 colisión Sukuna ↔ RIGHT_CLICK · **confirmada en cámara real**
+      (José, 2026-09-07: "se confunde con click derecho y no hace enseguida").
+      Coincide exactamente con lo ya documentado en `gestures.py:640-641` — un
+      snap real cruza primero el umbral de `PINCH_RIGHT_CLICK` (20px) camino al
+      contacto de Sukuna (15px). Queda **deliberadamente sin resolver** por
+      decisión previa del proyecto; no se toca sin una decisión explícita de
+      diseño (¿bajar el umbral de contacto? ¿gatear right-click cuando hay
+      intención de snap?). Ver hallazgo nuevo H-26 en §2
 - [ ] V-06 colisión residual Shaka/Screenshot (después de V-01)
 - [ ] V-07 `.exe` portable en máquina limpia
-- [ ] V-08 duración cómoda del dwell (después de C-01)
-- [ ] V-09 intervalo y deriva del puntero entre dos pinches (después de C-02)
-- [ ] V-10 distancia y velocidad reales de un swipe (después de C-03)
+- [x] V-08 duración cómoda del dwell (después de C-01) · verificado en cámara
+      real (José, 2026-09-07) con `DWELL_CLICK_ENABLED` forzado a `True`
+      temporalmente para la prueba: el progreso avanzó de forma consistente
+      (318/900ms, luego 815/900ms observados vía HUD) sin falsos disparos
+      durante el resto de la sesión. No se capturó una finalización completa
+      dentro de la ventana de observación, pero tampoco ningún síntoma
+      negativo. 900ms se mantiene sin cambios. `DWELL_CLICK_ENABLED` **vuelve
+      a `False`** (su default real, apagado a propósito — ver comentario en
+      `config.py`, no tiene gate de forma de mano propia)
+- [x] V-09 intervalo y deriva del puntero entre dos pinches (después de C-02) ·
+      dato real capturado vía HUD: `double_click_interval=123ms`,
+      `drift=20px` — bien dentro de los 450ms del default, y una deriva
+      pequeña que justifica el re-anclaje (C-02). Sin cambios de umbral
+- [x] V-10 distancia y velocidad reales de un swipe (después de C-03) · datos
+      reales capturados vía HUD en distintos intentos: `dist=0.15 vel=1.49
+      dur=102ms` y `dist=0.15 vel=1.01 dur=153ms` — ambos por encima de
+      `min_velocity=0.5`, confirmando que un swipe deliberado con puño supera
+      los defaults con margen. Sin cambios de umbral
 
 ---
 
