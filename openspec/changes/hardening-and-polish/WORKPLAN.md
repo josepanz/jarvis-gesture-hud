@@ -194,9 +194,9 @@ de funcionalidad o riesgo de seguridad real · **MEDIO** = bug con workaround ·
 **Nuevos, hallados en Workflow 6 (cámara real, José, 2026-09-07) — sin workflow ni
 tarea asignada todavía, requieren decisión de diseño antes de codificar:**
 
-| H-26 | MEDIO | gestos | ~~Sukuna↔`RIGHT_CLICK` (V-05)~~ **RESUELTO** (mitigado): `RIGHT_CLICK_CONFIRM_FRAMES` (6) separado para el pinch "middle" — un snap real ya no se queda quieto en la banda 15-20px lo suficiente para confirmar el click derecho antes de completarse |
-| H-27 | MEDIO | gestos | ~~El gesto de 2 puños se confunde con click cerca de bordes/esquinas~~ **RESUELTO** (mitigado): `both_fists` ahora exige `PAUSE_MAX_DISTANCE_FRACTION` (0.35) entre ambas manos, no solo el gate laxo de "misma persona" (0.55) |
-| H-28 | MEDIO | UI/legend | ~~El panel transparente de gestos ocupa toda la mitad de pantalla, no es minimizable ni tiene scroll~~ **RESUELTO**: paginado (`LEGEND_PAGE_SIZE=12`) + colapsable, con controles ◀/▶/▁ en una ventanita aparte no click-through (mismo patrón que el ícono de engranaje) |
+| H-26 | MEDIO | gestos | ~~Sukuna↔`RIGHT_CLICK` (V-05)~~ **RESUELTO Y VERIFICADO EN CÁMARA REAL** (José, 2026-09-07): `RIGHT_CLICK_CONFIRM_FRAMES` (6) separado para el pinch "middle" — un snap real ya no se queda quieto en la banda 15-20px lo suficiente para confirmar el click derecho antes de completarse. Confirmado en vivo: "snap de sukuna funciona" |
+| H-27 | MEDIO | gestos | ~~El gesto de 2 puños se confunde con click cerca de bordes/esquinas~~ **RESUELTO Y VERIFICADO EN CÁMARA REAL** (José, 2026-09-07): `both_fists` ahora exige `PAUSE_MAX_DISTANCE_FRACTION` (0.35) entre ambas manos, no solo el gate laxo de "misma persona" (0.55). Confirmado en vivo: "gesto de pausa tambien" (funciona) |
+| H-28 | MEDIO | UI/legend | ~~El panel transparente de gestos ocupa toda la mitad de pantalla, no es minimizable ni tiene scroll~~ **RESUELTO Y VERIFICADO EN CÁMARA REAL** (José, 2026-09-07): paginado (`LEGEND_PAGE_SIZE=12`) + colapsable, con controles ◀/▶/▁ en una ventanita aparte no click-through. Primer intento en vivo reveló que las flechas quedaban debajo del panel (2 ventanas `-topmost` sin orden garantizado entre si) - corregido con geometria que reserva una franja sin superposicion en vez de confiar en `lift()`/z-order (commit 57084b5). Reverificado en vivo: "funciono todos" |
 
 **Descartados explícitamente (auditados y NO son bugs — no los "arregles"):**
 
