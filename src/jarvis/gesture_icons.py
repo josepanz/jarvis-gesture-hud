@@ -103,7 +103,19 @@ ICON_SPECS = {
         "glyph": "camera",
     },
     "naruto_ushi": {"hands": 2, "extended": ({"index"}, {"index"}), "pinch": None, "glyph": "pause"},
-    "naruto_u": {"hands": 2, "extended": ({"index", "middle"}, {"index", "middle"}), "pinch": None, "glyph": None},
+    # naruto_u tenia el mismo set de dedos Y glyph=None que naruto_ne mas
+    # abajo - dos specs byte-por-byte identicas, confirmado por
+    # test_every_icon_is_structurally_distinct_from_every_other (CI, sin cache
+    # local de assets/gesture_icons/, lo detecto; el cache local viejo de este
+    # repo lo enmascaraba). NARUTO_U -> REDO (main.py): "arrow_right" como
+    # adelante/rehacer, mismo criterio que Saru/I (glyph = tema de su propia
+    # accion default).
+    "naruto_u": {
+        "hands": 2,
+        "extended": ({"index", "middle"}, {"index", "middle"}),
+        "pinch": None,
+        "glyph": "arrow_right",
+    },
     "naruto_uma": {
         "hands": 2,
         "extended": ({"thumb", "index", "pinky"}, {"thumb", "index", "pinky"}),
