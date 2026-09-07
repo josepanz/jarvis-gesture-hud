@@ -7,12 +7,27 @@ integracion); este archivo cubre especificamente lo nuevo de la Fase 8, no
 retroactivamente el resto del modulo."""
 
 import sys
+import tkinter as tk
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jarvis.overlay import ScreenOverlay  # noqa: E402
+
+
+def setUpModule():
+    # Confirmado en CI (macOS): la PRIMERA vez que un proceso crea un tk.Tk()
+    # real, Tk-Aqua a veces manda un mensaje a NSApplication ('macOSVersion')
+    # que esa build no reconoce - 'NSInvalidArgumentException' sin capturar,
+    # aborta el proceso entero (no es un fallo de assert atrapable desde
+    # Python). Esto es especificamente sobre la PRIMERA inicializacion de
+    # Tk-Aqua en el proceso - con _AppTestCase ya no creando ventanas reales
+    # (ver test_naruto_seal_dispatch.py), este archivo paso a ser el primero
+    # en tocar Tk de verdad en la corrida completa de la suite. Absorber esa
+    # primera inicializacion aca, en un root descartable, antes de que
+    # cualquier test real dependa de que salga bien.
+    tk.Tk().destroy()
 
 
 class GearIconTests(unittest.TestCase):
