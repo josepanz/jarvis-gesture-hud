@@ -23,6 +23,11 @@ class DoubleClickDetector:
         self.max_interval_ms = max_interval_ms
         self._clock = clock
         self._last_click_time = None
+        # V-09 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §10):
+        # diagnostico en vivo - el intervalo real del ultimo par de clicks
+        # (entre o no dentro de max_interval_ms), para leer el numero real en
+        # vez de estimarlo.
+        self.last_interval_ms = None
 
     def register_click(self):
         """Call once per completed single click (e.g. on PINCH_UP). Returns
@@ -30,10 +35,9 @@ class DoubleClickDetector:
         previous one, else "single". After a "double" fires, the streak resets -
         a third rapid click starts a fresh pair, it does not chain into a triple."""
         now = self._clock()
-        is_double = (
-            self._last_click_time is not None
-            and (now - self._last_click_time) * 1000 <= self.max_interval_ms
-        )
+        if self._last_click_time is not None:
+            self.last_interval_ms = (now - self._last_click_time) * 1000
+        is_double = self._last_click_time is not None and self.last_interval_ms <= self.max_interval_ms
         self._last_click_time = None if is_double else now
         return "double" if is_double else "single"
 

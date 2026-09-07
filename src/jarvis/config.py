@@ -3,15 +3,16 @@
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
-# Hallazgo de camara real (José, 2026-08-30): "el puntero es muy impreciso
-# con el movimiento de los dedos". Bajado de 0.35 a 0.25 (mas peso al valor
-# suavizado anterior, menos al crudo de este frame) para amortiguar mejor el
-# jitter tipico de la punta del indice en MediaPipe a distancia de escritorio
-# - razonado, NO medido en camara todavia (a diferencia de los umbrales de
-# pinch de abajo, que si tienen datos reales detras). Pendiente de verificar
-# si esto alcanza o si el "impreciso" viene de otro lado (ej. deteccion en
-# si, no el suavizado).
-EMA_ALPHA = 0.25
+# V-04 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §8), verificado en
+# camara real (José, 2026-09-07): a 0.25 el puntero se sintio "impreciso Y con
+# mucha latencia... no se siente natural", el sintoma que se queria arreglar
+# no mejoro y se sumo lag perceptible (a 0.25, ~10 frames para asentarse tras
+# un movimiento). Revertido a 0.35 (el valor previo a 2026-08-30) - bajar el
+# alpha no resolvio el "impreciso" reportado entonces, asi que ese sintoma
+# probablemente viene de otro lado (deteccion/mapeo, no el suavizado). Sigue
+# sin medicion fina; si "impreciso" reaparece a 0.35, no volver a bajar este
+# valor a ciegas, investigar la fuente antes (ver hallazgo nuevo en §2).
+EMA_ALPHA = 0.35
 POINTER_MARGIN = 0.1  # recorte de bordes al mapear cámara -> pantalla
 
 # Umbrales de pinch/distancia (px sobre el frame). Recalibrados 2026-08-27 con

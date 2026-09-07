@@ -31,6 +31,15 @@ class SwipeDetector:
         self.max_duration_ms = max_duration_ms
         self._start = None  # (x, y, timestamp)
 
+        # V-10 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §10):
+        # diagnostico en vivo para la verificacion en camara real - la
+        # distancia/velocidad/duracion del ultimo intento medido (candidato
+        # que llego a `min_distance`, dispare o no por velocidad), para poder
+        # leer numeros reales en vez de estimar.
+        self.last_distance = None
+        self.last_velocity = None
+        self.last_duration_ms = None
+
     def update(self, x, y, timestamp):
         """Feed one frame's tracked position + timestamp (seconds). Returns
         "SWIPE_LEFT"/"SWIPE_RIGHT"/"SWIPE_UP"/"SWIPE_DOWN" or None. Restarts its
@@ -54,6 +63,9 @@ class SwipeDetector:
 
         duration_s = max(dt_ms / 1000, 1e-6)
         velocity = distance / duration_s
+        self.last_distance = distance
+        self.last_velocity = velocity
+        self.last_duration_ms = dt_ms
         if velocity < self.min_velocity:
             self._start = (x, y, timestamp)  # moved far but too slowly - not a swipe
             return None

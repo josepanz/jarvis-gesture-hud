@@ -355,10 +355,9 @@ class PointerAndSmoothingTests(unittest.TestCase):
     def test_pointer_moves_with_smoothing(self):
         engine = GestureEngine()
         screen_xy, _, _ = process(engine, flat(0.5, 0.5))
-        # Regression pin (see test_gestures_smoothing.py too) - updated 2026-08-30
-        # for config.EMA_ALPHA's 0.35 -> 0.25 change (live-camera finding:
-        # pointer felt imprecise/jittery). Was (336, 189) at 0.35.
-        self.assertEqual(screen_xy, (240, 135))
+        # Regression pin (see test_gestures_smoothing.py too) - V-04 verificado
+        # en camara real 2026-09-07: revertido 0.25 -> 0.35, back to (336, 189).
+        self.assertEqual(screen_xy, (336, 189))
 
 
 class LeftClickDragTests(unittest.TestCase):

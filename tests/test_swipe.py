@@ -68,6 +68,30 @@ class SwipeDetectorTests(unittest.TestCase):
         result = d.update(0.4, 0.5, 0.05)  # no start point anymore - just re-anchors
         self.assertIsNone(result)
 
+    def test_a_successful_swipe_records_its_distance_velocity_and_duration(self):
+        # V-10: diagnostico en vivo para verificar en camara real con datos
+        # reales en vez de estimarlos.
+        d = SwipeDetector(min_distance=0.15, min_velocity=0.5, max_duration_ms=600)
+        d.update(0.1, 0.5, 0.0)
+        d.update(0.4, 0.5, 0.1)  # dx=0.3 en 100ms
+        self.assertAlmostEqual(d.last_distance, 0.3, places=6)
+        self.assertAlmostEqual(d.last_velocity, 3.0, places=6)
+        self.assertAlmostEqual(d.last_duration_ms, 100.0, places=6)
+
+    def test_a_too_slow_attempt_still_records_its_measured_distance_and_velocity(self):
+        # El candidato que llega a min_distance pero no dispara por velocidad
+        # tambien queda registrado - util para confirmar "el movimiento normal
+        # nunca los alcanza" con el numero real, no solo con el resultado None.
+        # dt_ms (500) se mantiene DEBAJO de max_duration_ms (600, default) a
+        # proposito - por encima de eso el intento ya se descarta por
+        # ventana vencida antes de llegar a calcular la velocidad siquiera.
+        d = SwipeDetector(min_distance=0.15, min_velocity=0.5)
+        d.update(0.1, 0.5, 0.0)
+        result = d.update(0.3, 0.5, 0.5)  # dx=0.2 en 500ms -> 0.4 unidades/s
+        self.assertIsNone(result)
+        self.assertAlmostEqual(d.last_distance, 0.2, places=6)
+        self.assertAlmostEqual(d.last_velocity, 0.4, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

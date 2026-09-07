@@ -83,6 +83,7 @@ Lo que NO se cablea, y por que (documentado aca en vez de forzarlo a medias):
 """
 
 import logging
+import math
 import queue
 import threading
 import time
@@ -415,6 +416,10 @@ class JarvisApp:
         self._last_click_screen_xy = None  # C-02: posicion del ultimo click real, para re-anclar el doble click
         self._last_command_name = None
         self._last_fps = 0.0
+        # V-09 (`openspec/changes/hardening-and-polish/WORKPLAN.md` §10):
+        # diagnostico en vivo - cuanto se corrio el puntero (px de pantalla)
+        # entre el primer y el segundo click de un doble click real.
+        self._last_double_click_drift_px = None
 
     # --- PHASE 2: acciones migradas (GestureEvent -> Command -> CommandBus) ------
 
@@ -497,6 +502,13 @@ class JarvisApp:
             # click nativo.
             if self._last_click_screen_xy is not None:
                 self.command_bus.dispatch(MouseMoveCommand(*self._last_click_screen_xy))
+                # V-09: cuanto se corrio el puntero entre el primer y el
+                # segundo click - self._last_screen_xy ya es la posicion
+                # ACTUAL (seteada este mismo cuadro, antes del dispatch).
+                if self._last_screen_xy is not None:
+                    dx = self._last_screen_xy[0] - self._last_click_screen_xy[0]
+                    dy = self._last_screen_xy[1] - self._last_click_screen_xy[1]
+                    self._last_double_click_drift_px = math.hypot(dx, dy)
             self.command_bus.dispatch(MouseButtonCommand(pressed=True))
             self.command_bus.dispatch(MouseButtonCommand(pressed=False))
             self.overlay.show_bubble("🖱🖱 Doble click", *self._feedback_position())
@@ -946,6 +958,25 @@ class JarvisApp:
                             f"{self.hand_sign_tracker.hold_seal} "
                             f"{self.hand_sign_tracker.hold_elapsed:.2f}/{self.hand_sign_tracker.hold_needed:.2f}s"
                         )
+                # V-08/V-09/V-10 (`openspec/changes/hardening-and-polish/WORKPLAN.md`
+                # §10): diagnostico en vivo para la verificacion en camara
+                # real de dwell/doble click/swipe.
+                if config.DWELL_CLICK_ENABLED:
+                    telemetry["dwell"] = (
+                        f"{self.gestures.dwell_progress * config.DWELL_DURATION_MS:.0f}"
+                        f"/{config.DWELL_DURATION_MS}ms"
+                    )
+                _dc_interval = self.gestures._double_click_detector.last_interval_ms
+                if _dc_interval is not None:
+                    telemetry["double_click_interval"] = f"{_dc_interval:.0f}ms"
+                if self._last_double_click_drift_px is not None:
+                    telemetry["double_click_drift"] = f"{self._last_double_click_drift_px:.0f}px"
+                _swipe = self.gestures._swipe_detector
+                if _swipe.last_distance is not None:
+                    telemetry["swipe"] = (
+                        f"dist={_swipe.last_distance:.2f} vel={_swipe.last_velocity:.2f} "
+                        f"dur={_swipe.last_duration_ms:.0f}ms"
+                    )
                 self.hud_renderer.render(frame, "TRACKING" if hands else "IDLE", telemetry=telemetry)
 
             self.overlay.pump()
