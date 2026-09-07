@@ -199,15 +199,28 @@ class ScreenOverlay:
 
         self._legend_window.update_idletasks()
         _make_click_through(self._legend_window)
-        self._position_legend(self._legend_corner)
+        # Los controles se posicionan PRIMERO - _position_legend() necesita
+        # conocer su altura real para dejarles franja sin superponerse.
         self._update_legend_controls()
+        self._position_legend(self._legend_corner)
 
     def _position_legend(self, corner):
+        # H-28, confirmado en camara real (José, 2026-09-07): superponer los
+        # controles al panel no sirve - 2 ventanas "-topmost" no tienen un
+        # orden entre si garantizado (`lift()` no alcanzo, los controles
+        # quedaban debajo del panel y eran inclickeables). En vez de eso, se
+        # reserva una franja SIN superposicion para los controles (mismo
+        # lado del panel) y el panel se corre para dejarle lugar - z-order
+        # deja de importar porque nunca se tocan.
         win = self._legend_window
         w, h = win.winfo_width(), win.winfo_height()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        controls_h = 0
+        if self._legend_controls_window is not None:
+            self._legend_controls_window.update_idletasks()
+            controls_h = self._legend_controls_window.winfo_height() + 4
         x = sw - w - LEGEND_MARGIN if "right" in corner else LEGEND_MARGIN
-        y = LEGEND_MARGIN if "top" in corner else sh - h - LEGEND_MARGIN
+        y = LEGEND_MARGIN + controls_h if "top" in corner else sh - h - LEGEND_MARGIN - controls_h
         win.geometry(f"+{x}+{y}")
 
     # --- H-28: controles de pagina/colapso (ventana aparte, no click-through,
@@ -249,20 +262,17 @@ class ScreenOverlay:
         win = self._legend_controls_window
         win.update_idletasks()
         legend_win = self._legend_window
-        # Superpuesta a la MISMA esquina que el panel (no arriba/abajo - no
-        # siempre hay margen de sobra en esa direccion) - sigue al panel si
-        # este cambia de ancho/alto al paginar o colapsar. lift() al final
-        # para quedar por encima del panel en ese rincon (ambas ventanas son
-        # topmost, el orden entre si no esta garantizado sin esto).
+        # En la franja reservada por _position_legend() (mismo lado que el
+        # panel, alineada al mismo borde horizontal) - NUNCA se superpone con
+        # el panel, asi que el z-order entre las 2 ventanas topmost deja de
+        # importar (ver comentario en _position_legend).
         cw, ch = win.winfo_width(), win.winfo_height()
-        lx, ly = legend_win.winfo_x(), legend_win.winfo_y()
-        lw, lh = legend_win.winfo_width(), legend_win.winfo_height()
-        x = lx + lw - cw if "right" in self._legend_corner else lx
-        y = ly if "top" in self._legend_corner else ly + lh - ch
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x = sw - cw - LEGEND_MARGIN if "right" in self._legend_corner else LEGEND_MARGIN
+        y = LEGEND_MARGIN if "top" in self._legend_corner else sh - ch - LEGEND_MARGIN
         win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
         if self._legend_visible:
             win.deiconify()
-            win.lift()
         else:
             win.withdraw()
 

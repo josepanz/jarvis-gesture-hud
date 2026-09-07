@@ -156,6 +156,23 @@ class LegendPaginationTests(unittest.TestCase):
         self.overlay.pump()
         self.assertEqual(self._row_count(), LEGEND_PAGE_SIZE)
 
+    def test_controls_never_overlap_the_panel(self):
+        # H-28, confirmado en camara real (José, 2026-09-07): las flechas
+        # quedaban inclickeables porque z-order entre 2 ventanas "-topmost"
+        # no esta garantizado - la ventanita de controles quedaba tapada por
+        # el panel. Se resuelve con geometria que nunca se toca (franja
+        # reservada), no con lift()/z-order - verificar eso directamente.
+        self.overlay.init_legend(_n_entries(20), title="Test")
+        self.overlay.pump()
+        legend = self.overlay._legend_window
+        controls = self.overlay._legend_controls_window
+        lx, ly, lw, lh = legend.winfo_x(), legend.winfo_y(), legend.winfo_width(), legend.winfo_height()
+        cx, cy, cw, ch = controls.winfo_x(), controls.winfo_y(), controls.winfo_width(), controls.winfo_height()
+        # Overlap en 2D: si los rangos en X e Y se solapan en ambos ejes.
+        x_overlap = lx < cx + cw and cx < lx + lw
+        y_overlap = ly < cy + ch and cy < ly + lh
+        self.assertFalse(x_overlap and y_overlap, "el panel y sus controles se superponen")
+
     def test_legend_panel_remains_click_through_with_controls(self):
         # H-28 no puede volver clickeable el panel en si (rompe el diseño
         # "no bloquea clicks al escritorio") - solo la ventanita de controles,
