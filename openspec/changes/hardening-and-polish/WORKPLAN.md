@@ -1608,6 +1608,63 @@ escribilo con lo que encontraste en vez de borrarla.
 
 ---
 
+## 12.1 Bloqueante abierto: CI de macOS crashea (branch `feature/pose-ownership-and-visualization`)
+
+**Estado: sin resolver, pendiente de acceso a un Mac real (2026-09-07).** Windows y
+Linux corren los 763 tests en verde de forma consistente. macOS falla de forma
+**determinística** (3 corridas seguidas, mismo punto exacto) con:
+
+```
+*** Terminating app due to uncaught exception 'NSInvalidArgumentException',
+reason: '-[NSApplication macOSVersion]: unrecognized selector sent to instance ...'
+libc++abi: terminating due to uncaught exception of type NSException
+Abort trap: 6 (exit code 134)
+```
+
+No es un fallo de test (`assert`) - es un abort nativo del proceso completo, así que
+no se puede atrapar ni testear alrededor desde Python.
+
+**Lo ya descartado** (cada uno confirmado real y arreglado por separado, pero
+ninguno resolvió ESTE crash):
+1. `onnxruntime` faltaba en `requirements.txt` (commit c79b321) - real, pero
+   causaba `ModuleNotFoundError`, no este crash.
+2. `naruto_u`/`naruto_ne` generaban el mismo ícono byte-por-byte (commit 2d61f9e) -
+   real, detectado solo en CI porque `assets/gesture_icons/` está gitignoreado y el
+   cache local viejo lo enmascaraba.
+3. Geometría del panel de leyenda con `winfo_width()/height()` no confiable en
+   macOS antes de mapearse (commit 0a8a829) - real, causaba un `assertFalse` fallido
+   en `test_controls_never_overlap_the_panel`, no este crash.
+4. `ctypes.windll` no existe fuera de Windows, rompía `test_os_native.py` en
+   Linux/macOS (commit d57bfe5) - real, pero era un `AttributeError` normal.
+5. `HandSignModel`/`ScreenOverlay`/`SettingsWindow` sin mockear en `_AppTestCase`
+   creaban sesiones ONNX y ventanas Tk reales por cada test (commits a372098,
+   6a815f6) - causaban un **Segmentation fault** distinto (exit 139), en un punto
+   distinto de la suite. Se arregló ese, pero el NSException de arriba (exit 134)
+   seguía apareciendo después, siempre en la primera vez que el proceso crea un
+   `tk.Tk()` real.
+6. "Precalentar" Tk-Aqua con un `tk.Tk().destroy()` descartable en
+   `setUpModule()` de `test_overlay.py` (commit 5cbdb51) - **no lo resolvió**: el
+   crash se movió a ESA primera llamada en vez de desaparecer, confirmando que
+   pasa siempre en la primera inicialización de Tk-Aqua del proceso, sin importar
+   en qué test ocurra.
+
+**Hipótesis con más peso, sin verificar**: conflicto conocido entre OpenCV
+(`cv2`, importado indirectamente por casi todo el proyecto vía
+`jarvis.hand_tracker`/`jarvis.main` mucho antes de que cualquier test toque Tk) y
+Tkinter compitiendo por el mismo `NSApplication` singleton de Cocoa dentro de UN
+solo proceso, en el runner `macos-latest` de GitHub Actions. Si es así, el arreglo
+real no es de código de la app sino de **cómo CI invoca los tests**: correr los
+archivos que crean ventanas Tk reales (`test_overlay.py`, `test_settings_ui.py`) en
+un proceso `python -m unittest` SEPARADO del resto, solo para el job de macOS, en
+`.github/workflows/ci.yml`. Sin un Mac no se pudo confirmar ni intentar.
+
+**Cómo reproducir en un Mac real**: `git checkout feature/pose-ownership-and-visualization`,
+`pip install -r requirements.txt`, `python -m unittest discover -s tests -v` -
+debería crashear cerca del final de `test_os_native.py`/inicio de `test_overlay.py`
+con el mismo mensaje de arriba.
+
+---
+
 ## 13. Estado final esperado
 
 Al cerrar los workflows 1–5:
